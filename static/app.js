@@ -1327,6 +1327,7 @@ document.addEventListener('change', (e) => {
   try { const w = await api('/whoami'); isHost = !!w.host; isCloud = !!w.cloud; } catch { isHost = false; }
   $('#pcBox').classList.toggle('hidden', !(isHost && isCloud));
   $('#hostKeyRow').classList.toggle('hidden', !isCloud || isHost);
+  $('#dlDesktop').classList.toggle('hidden', !isCloud || !!window.lbDesktop || isTouch);
   if (isHost && isCloud) { loadJobs(); setInterval(loadJobs, 10000); }
   if (window.lbDesktop && isHost && isCloud) {
     $('#btnImport').classList.remove('hidden');

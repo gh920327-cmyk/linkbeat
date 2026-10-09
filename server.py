@@ -214,15 +214,39 @@ def song_summary(song):
     }
 
 
+_SUM_CACHE = {}   # 곡 id → ((곡 파일 시각, 기록 파일 시각), 요약) — 바뀐 곡만 다시 읽음 (인터넷 서버 부담 줄이기)
+
+
+def _mtime(path):
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
 def list_songs():
     out = []
+    alive = set()
     for p in SONGS.glob("*.json"):
+        sid = p.stem
+        if not VID_RE.match(sid):
+            continue
+        alive.add(sid)
         try:
-            song = load_song(p.stem) if VID_RE.match(p.stem) else None
+            stamp = (_mtime(p), _mtime(scores_path(sid)))
+            hit = _SUM_CACHE.get(sid)
+            if hit and hit[0] == stamp:
+                out.append(dict(hit[1]))
+                continue
+            song = load_song(sid)
             if song:
-                out.append(song_summary(song))
+                summ = song_summary(song)
+                _SUM_CACHE[sid] = ((_mtime(p), stamp[1]), summ)
+                out.append(dict(summ))
         except Exception:
             traceback.print_exc()
+    for sid in [k for k in _SUM_CACHE if k not in alive]:
+        _SUM_CACHE.pop(sid, None)
     # 같은 가수의 한글/영어/괄호 표기를 하나로 (방장이 ✎로 고친 이름이 있으면 그 이름으로)
     try:
         manual = [x["artist"] for x in sorted(out, key=lambda x: x.get("artistAt", 0)) if x.get("artistSrc") == "manual"]

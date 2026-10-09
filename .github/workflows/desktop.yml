@@ -1,0 +1,43 @@
+# PC 실행기(exe) 빌드 · GitHub Releases에 올리기
+# desktop/ 이나 채보 엔진 파일이 바뀐 커밋이 main 에 올라오면 실행 — desktop/package.json 의 version 으로 v<버전> 릴리스를 만듦
+# (같은 버전 릴리스가 이미 있으면 건너뜀 → 실행기를 새로 내보낼 때는 version 을 올릴 것)
+name: desktop
+on:
+  push:
+    branches: [main]
+    paths: ['desktop/**', 'worker.py', 'pipeline.py', 'chartgen.py', 'requirements.txt', '.github/workflows/desktop.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-win:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 채보 엔진 파일 넣기
+        shell: bash
+        run: |
+          mkdir -p engine
+          cp ../worker.py ../pipeline.py ../chartgen.py ../requirements.txt engine/
+      - run: npm install --no-audit --no-fund
+      - name: build
+        shell: bash
+        run: |
+          set -o pipefail
+          npx electron-builder --win --publish always 2>&1 | tee build.log
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: report failure
+        if: failure()
+        shell: bash
+        run: |
+          tail -n 45 build.log | cut -c1-220 | sed 's/%/%25/g' | awk 'BEGIN{ORS="%0A"}{print}' > tail.txt
+          echo "::error title=build log::$(cat tail.txt)"

@@ -172,6 +172,9 @@ body.touch .game-info { padding-right: 62px; }
 #batchInfo { cursor: default; }
 #batchInfo.err { color: var(--gold); cursor: help; }
 .batch-bar { margin-top: 8px; }
+.dl-desktop { display: block; text-align: center; padding: 9px; margin: 6px 0; border: 1px solid var(--line2); color: var(--cyan); text-decoration: none; font-weight: 700; }
+.dl-desktop.hidden { display: none; }
+.dl-desktop:hover { background: #1b2646; }
 .pc-box { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
 .pc-box.hidden { display: none; }
 .pc-head { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }

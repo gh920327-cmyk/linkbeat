@@ -1,0 +1,75 @@
+{
+  "name": "linkbeat-launcher",
+  "productName": "LINKBEAT",
+  "version": "1.0.0",
+  "description": "링크비트 — PC 실행기 (호스트 PC에서는 채보 엔진도 함께)",
+  "author": "gh920327",
+  "license": "UNLICENSED",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  },
+  "devDependencies": {
+    "electron": "^36.4.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.gh920327.linkbeat",
+    "productName": "LINKBEAT",
+    "copyright": "LINKBEAT",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "engine.js",
+      "splash.html",
+      "icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "engine",
+        "to": "engine"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "executableName": "LINKBEAT",
+      "artifactName": "LINKBEAT-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "LINKBEAT",
+      "uninstallDisplayName": "LINKBEAT 링크비트",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "gh920327-cmyk",
+        "repo": "linkbeat",
+        "releaseType": "release"
+      }
+    ]
+  }
+}
