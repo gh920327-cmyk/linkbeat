@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#08080f">
+<title>링크비트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Orbitron:wght@600;800;900&family=Noto+Sans+KR:wght@400;500;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- ======================= 로비 (곡 선택) ======================= -->
+<section id="screen-lobby" class="screen active">
+  <header class="topbar">
+    <h1 class="logo"><span class="logo-mark"></span>LINK<b>BEAT</b></h1>
+    <div class="seg mode-seg" id="modeTabs">
+      <button data-mode="4">4<small>KEY</small></button>
+      <button data-mode="6">6<small>KEY</small></button>
+    </div>
+    <div class="top-right">
+      <input id="nick" maxlength="16" placeholder="닉네임" autocomplete="off" title="순위표에 표시되는 이름">
+      <span id="connDot" class="dot" title="서버 연결 상태"></span>
+      <button id="btnProfile" class="ghost pf-btn" type="button"></button>
+      <button id="btnAvatar" class="ghost av-btn"><canvas id="topAvatar" width="28" height="28"></canvas>내 캐릭터</button>
+      <button id="btnSkin" class="ghost">꾸미기</button>
+      <button id="btnSettings" class="ghost">설정</button>
+    </div>
+  </header>
+
+  <div id="profileBanner" class="profile-banner hidden">
+    <span class="pb-ico">☁</span>
+    <span class="pb-text"><b>예전에 하던 기록이 사라졌나요?</b> 친구 초대 주소가 바뀌면 이 브라우저는 처음 상태가 돼요. 프로필을 불러오면 이름·키·꾸미기·캐릭터·기록이 돌아와요.</span>
+    <button id="pbLoad" class="primary small-btn" type="button">프로필 불러오기</button>
+    <button id="pbCreate" class="small-btn" type="button">새로 만들기</button>
+    <button id="pbLater" class="ghost small-btn" type="button" title="다시 보지 않기">나중에</button>
+  </div>
+  <div class="select-grid">
+    <!-- 선택한 곡 -->
+    <div class="detail-col">
+      <div class="jacket-wrap">
+        <img id="dJacket" class="jacket" alt="">
+        <div class="yt-slot jacket-slot" id="slotPreview"></div>
+        <div class="jacket-tag" id="dTag">4KEY</div>
+      </div>
+      <div class="d-info">
+        <div class="d-title-row">
+          <div id="dTitle" class="d-title">곡을 추가해 주세요</div>
+          <button id="btnPreview" class="prev-btn" title="미리듣기 켜기/끄기">♪</button>
+        </div>
+        <div class="d-artist-row"><span id="dArtist" class="d-artist"></span><button id="btnSongInfo" class="edit-mini hidden" type="button" title="제목·가수 고치기">✎</button></div>
+        <div class="d-meta">
+          <div><span>BPM</span><b id="dBpm">-</b></div>
+          <div><span>TIME</span><b id="dTime">-</b></div>
+          <div><span>PLAY</span><b id="dPlays">-</b></div>
+        </div>
+      </div>
+      <div class="diff-boxes" id="diffBoxes">
+        <button class="dbox" data-diff="easy"><span class="dname">EASY<small>쉬움</small></span><b class="dstar"></b><span class="pips"></span><span class="dnotes"></span></button>
+        <button class="dbox" data-diff="normal"><span class="dname">NORMAL<small>보통</small></span><b class="dstar"></b><span class="pips"></span><span class="dnotes"></span></button>
+        <button class="dbox" data-diff="hard"><span class="dname">HARD<small>어려움</small></span><b class="dstar"></b><span class="pips"></span><span class="dnotes"></span></button>
+        <button class="dbox" data-diff="extreme"><span class="dname">EXTREME<small>극한</small></span><b class="dstar"></b><span class="pips"></span><span class="dnotes"></span></button>
+      </div>
+      <div class="mods">
+        <button id="modMirror" class="chip" title="좌우 반전">MIRROR<small>미러</small></button>
+        <button id="modRandom" class="chip" title="레인 섞기 (매판 달라짐)">RANDOM<small>랜덤</small></button>
+        <button id="modHl" class="chip hl-chip" title="곡에서 가장 잘 들리는 부분(후렴)만 짧게 플레이 · 기록은 따로">HIGHLIGHT<small>후렴만</small></button>
+        <span id="dHlRange" class="hl-range"></span>
+        <span class="speed-show">SPEED <b id="speedShow"></b><small id="speedKeys"></small></span>
+      </div>
+      <div class="d-records">
+        <div class="rec"><span>친구 1위</span><b id="dTop">-</b></div>
+        <div class="rec"><span>내 기록</span><b id="dMine">-</b></div>
+      </div>
+      <div class="d-actions">
+        <button id="btnPlay" class="play-btn">PLAY<small>Enter</small></button>
+        <button id="btnRank" class="skew">순위표</button>
+        <button id="btnPractice" class="skew">연습</button>
+        <button id="btnEdit" class="skew hidden">수정</button>
+        <button id="btnDel" class="skew danger hidden">삭제</button>
+      </div>
+    </div>
+
+    <!-- 곡 목록 -->
+    <main class="list-col">
+      <div id="addBox" class="add-box hidden">
+        <div class="add-row">
+          <input id="addUrl" placeholder="유튜브 링크를 붙여넣으세요 (예: https://youtu.be/...)" autocomplete="off">
+          <button id="btnAdd" class="primary skew">채보 만들기</button>
+        </div>
+        <div id="addStatus" class="add-status"></div>
+        <div id="pcBox" class="pc-box hidden">
+          <div class="pc-head"><span id="pcDot" class="pc-dot"></span><span id="pcText">채보 PC 확인 중...</span>
+            <button id="btnImport" class="ghost small-btn hidden" type="button" title="예전에 내 PC에서 쓰던 곡·기록·프로필을 이 서버로 옮겨요">PC 데이터 옮기기</button></div>
+          <ul id="pcList" class="pc-list"></ul>
+        </div>
+        <div class="batch-row">
+          <button id="btnBatch" class="ghost small-btn" type="button" title="모든 곡을 최신 분석 방식으로 다시 만들어요">↻ 전체 채보 다시 만들기</button>
+          <span id="batchInfo" class="muted small"></span>
+        </div>
+        <div id="batchBar" class="batch-bar hidden">
+          <div class="bb-track"><div id="bbFill" class="bb-fill"></div></div>
+          <div class="bb-line"><span id="bbText"></span><button id="btnBatchStop" class="ghost small-btn" type="button">멈추기</button></div>
+        </div>
+      </div>
+      <div id="reqBox" class="add-box hidden">
+        <div class="add-row">
+          <input id="reqUrl" placeholder="하고 싶은 곡의 유튜브 링크를 붙여넣으세요" autocomplete="off">
+          <button id="btnReq" class="primary skew">곡 신청</button>
+        </div>
+        <div id="reqStatus" class="add-status"></div>
+      </div>
+      <div class="list-head">
+        <h2>MUSIC <span id="songCount"></span></h2>
+        <select id="sortSel" title="정렬">
+          <option value="new">최근 추가</option>
+          <option value="title">제목순</option>
+          <option value="artist">가수순</option>
+          <option value="plays">많이 플레이</option>
+          <option value="stars">별점 낮은순</option>
+          <option value="starsDesc">별점 높은순</option>
+          <option value="bpm">BPM 빠른순</option>
+          <option value="duration">짧은 곡순</option>
+        </select>
+        <input id="search" placeholder="곡·가수 검색" autocomplete="off">
+      </div>
+      <div id="songList" class="song-list"></div>
+      <div class="list-keys muted small">↑↓ 곡 · ←→ 난이도 · Tab 4키/6키 · Enter 시작</div>
+    </main>
+
+    <!-- 멀티 / 도움말 -->
+    <aside class="side-col">
+      <div class="panel" id="multiPanel">
+        <div id="multiOut">
+          <h3>MULTI<small>친구와 함께</small></h3>
+          <p class="muted small">방을 만들고 코드를 친구에게 알려주세요.</p>
+          <button id="btnCreate" class="primary wide skew">방 만들기</button>
+          <div class="join-row">
+            <input id="joinCode" maxlength="4" placeholder="방 코드" autocomplete="off">
+            <button id="btnJoin" class="skew">참가</button>
+          </div>
+        </div>
+        <div id="multiIn" class="hidden">
+          <div class="room-head">
+            <div>
+              <div class="muted small">ROOM</div>
+              <div id="roomCode" class="room-code">----</div>
+            </div>
+            <button id="btnLeave" class="ghost small-btn">나가기</button>
+          </div>
+          <ul id="roomPlayers" class="room-players"></ul>
+          <div class="room-song">
+            <div class="muted small">선택된 곡</div>
+            <div id="roomSong" class="room-song-title">방장이 곡을 고르는 중...</div>
+            <div id="roomDiff" class="small"></div>
+          </div>
+          <button id="btnRoomStart" class="primary wide skew hidden">게임 시작</button>
+          <div id="roomWait" class="muted small center hidden">방장이 시작하길 기다리는 중...</div>
+          <div class="chat">
+            <div id="chatLog" class="chat-log"></div>
+            <input id="chatInput" maxlength="200" placeholder="채팅 (Enter)" autocomplete="off">
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" id="reqPanel">
+        <h3>REQUEST<small>곡 신청함</small><span id="reqCount" class="badge hidden"></span></h3>
+        <ul id="reqList" class="req-list"></ul>
+      </div>
+
+      <div class="panel help">
+        <h3>HOW TO<small>조작법</small></h3>
+        <div class="keys-row"><div class="keys-help" id="keysHelp" title="눌러서 키 바꾸기"></div><button id="btnKeyEdit" class="ghost small-btn">키 바꾸기</button></div>
+        <ul class="small muted">
+          <li>노트가 판정선에 닿을 때 누르세요. 폰은 레인을 탭!</li>
+          <li>긴 노트는 끝날 때까지 누르고 있으세요.</li>
+          <li id="helpFn"></li>
+        </ul>
+        <div class="star-legend small muted">
+          <span class="star s1">★1~2</span> 입문 <span class="star s2">★3~4</span> 보통
+          <span class="star s3">★5~6</span> 어려움 <span class="star s4">★7+</span> 고수
+        </div>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ======================= 플레이 ======================= -->
+<section id="screen-game" class="screen">
+  <div class="stage">
+    <div class="field-col"><canvas id="field"></canvas></div>
+    <div class="info-col">
+      <div class="yt-slot" id="slotGame"></div>
+      <div class="panel game-info">
+        <div id="gTitle" class="g-title"></div>
+        <div id="gMeta" class="muted small"></div>
+      </div>
+      <div class="panel spec hidden" id="specPanel">
+        <h4>친구 화면 <span id="specCount" class="muted"></span></h4>
+        <div id="specGrid" class="spec-grid"></div>
+      </div>
+      <div class="panel stage-panel"><canvas id="avatarStage"></canvas></div>
+      <div class="panel live hidden" id="livePanel">
+        <h4>실시간 순위</h4>
+        <ol id="liveBoard" class="live-board"></ol>
+      </div>
+      <div class="muted small hint"><span id="gameHint"></span> <span id="offsetShow"></span></div>
+    </div>
+  </div>
+  <button id="btnTouchPause" class="touch-pause">❚❚</button>
+  <div id="gameOverlay" class="overlay hidden">
+    <div class="overlay-box">
+      <div id="ovTitle" class="ov-title"></div>
+      <div id="ovText" class="muted"></div>
+      <div id="ovButtons" class="ov-buttons"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 결과 ======================= -->
+<section id="screen-result" class="screen">
+  <div class="result-wrap">
+    <div class="result-main panel">
+      <div id="rSong" class="r-song"></div>
+      <div class="r-top">
+        <div class="r-left"><div id="rRank" class="r-rank">S</div><canvas id="rAvatar" class="r-avatar"></canvas></div>
+        <div>
+          <div id="rScore" class="r-score">0</div>
+          <div id="rBadge" class="r-badge"></div>
+          <div class="r-stats">
+            <div><span>정확도</span><b id="rAcc"></b></div>
+            <div><span>최대 콤보</span><b id="rCombo"></b></div>
+          </div>
+        </div>
+      </div>
+      <div class="r-counts">
+        <div class="c-perfect"><span>PERFECT</span><b id="rPerfect"></b></div>
+        <div class="c-great"><span>GREAT</span><b id="rGreat"></b></div>
+        <div class="c-good"><span>GOOD</span><b id="rGood"></b></div>
+        <div class="c-miss"><span>MISS</span><b id="rMiss"></b></div>
+      </div>
+      <div class="r-timing">
+        <div class="rt-head"><span>TIMING</span><span id="rtStats" class="muted small"></span></div>
+        <div class="rt-wrap"><canvas id="rtCanvas"></canvas></div>
+        <div id="rtSuggest" class="rt-suggest small"></div>
+      </div>
+      <div id="rBest" class="r-best center"></div>
+      <div class="r-buttons">
+        <button id="btnRetry" class="primary">다시 하기</button>
+        <button id="btnResRank">순위표</button>
+        <button id="btnToLobby">로비로</button>
+      </div>
+    </div>
+    <div id="rMulti" class="panel r-multi hidden">
+      <h3>이번 판 순위</h3>
+      <ol id="rMultiList" class="r-multi-list"></ol>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 채보 수정 ======================= -->
+<section id="screen-editor" class="screen">
+  <div class="stage">
+    <div class="field-col"><canvas id="edCanvas"></canvas></div>
+    <div class="info-col editor-panel">
+      <div class="yt-slot" id="slotEditor"></div>
+      <div class="panel">
+        <div id="edTitle" class="g-title"></div>
+        <div class="ed-time"><span id="edTime">0:00.000</span><span id="edCount" class="muted small"></span></div>
+        <div class="ed-grid">
+          <label>키
+            <select id="edKeys"><option value="4">4키</option><option value="6">6키</option></select>
+          </label>
+          <label>난이도
+            <select id="edDiff"><option value="easy">쉬움</option><option value="normal">보통</option><option value="hard">어려움</option><option value="extreme">극한</option></select>
+          </label>
+          <label>스냅
+            <select id="edSnap">
+              <option value="1">1/1 박</option><option value="2">1/2 박</option><option value="3">1/3 박</option>
+              <option value="4" selected>1/4 박</option><option value="6">1/6 박</option><option value="8">1/8 박</option>
+              <option value="0">자유</option>
+            </select>
+          </label>
+          <label>재생 속도
+            <select id="edRate"><option value="0.5">0.5배</option><option value="0.75">0.75배</option><option value="1" selected>1배</option></select>
+          </label>
+          <label>BPM <input id="edBpm" type="number" step="0.01" min="30" max="400"></label>
+          <label>첫 박 위치(초) <input id="edOffset" type="number" step="0.001"></label>
+          <label>타격음
+            <select id="edTick"><option value="1" selected>켜기</option><option value="0">끄기</option></select>
+          </label>
+        </div>
+        <div class="ed-buttons">
+          <button id="edPlay" class="primary">▶ 재생 <kbd>Space</kbd></button>
+          <button id="edRec">● 녹화 <kbd>R</kbd></button>
+          <button id="edUndo">되돌리기 <kbd>Ctrl+Z</kbd></button>
+          <button id="edTest">이 채보로 플레이</button>
+          <button id="edSave" class="primary">저장 <kbd>Ctrl+S</kbd></button>
+          <button id="edExit" class="ghost">나가기</button>
+        </div>
+        <details class="ed-more">
+          <summary>더보기</summary>
+          <div class="ed-buttons">
+            <button id="edClear" class="danger">이 난이도 노트 전부 지우기</button>
+            <button id="edRegen" class="danger">자동 채보 다시 만들기 (전 난이도)</button>
+          </div>
+        </details>
+        <ul class="small muted ed-help">
+          <li>빈 곳 클릭: 노트 추가 · 위로 드래그: 긴 노트</li>
+          <li>노트 드래그: 이동 · 우클릭: 삭제</li>
+          <li>휠: 시간 이동 · Ctrl+휠: 확대/축소 · ←/→ 한 칸</li>
+          <li>녹화 모드: 재생하며 키를 누르면 노트가 찍혀요</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 싱크 자동 맞추기 ======================= -->
+<section id="screen-calib" class="screen">
+  <div class="stage">
+    <div class="field-col"><canvas id="calibCanvas"></canvas></div>
+    <div class="info-col">
+      <div class="yt-slot" id="slotCalib"></div>
+      <div class="panel calib-panel">
+        <h3>싱크 자동 맞추기</h3>
+        <ol class="small muted cal-steps">
+          <li>박자가 뚜렷한 곡을 고르세요.</li>
+          <li>시작을 누르고, 노래의 강한 박(쿵)에 맞춰 키를 32번 누르세요.</li>
+          <li>계산된 값을 적용하면 끝!</li>
+        </ol>
+        <label class="small muted">곡 <select id="calSong"></select></label>
+        <div class="muted small">지금 싱크: <b id="calNow"></b></div>
+        <div id="calResult" class="cal-result"></div>
+        <div class="ed-buttons">
+          <button id="calStart" class="primary">시작</button>
+          <button id="calApply" class="primary hidden">이 값으로 적용</button>
+          <button id="calExit" class="ghost">닫기</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 유튜브 플레이어 (화면마다 위치만 옮겨 씀) -->
+<div id="ytWrap" class="parked"><div id="ytPlayer"></div></div>
+
+<!-- 설정 -->
+<dialog id="settingsDlg">
+  <form method="dialog" class="settings">
+    <h3>설정</h3>
+    <div class="key-section">
+      <div class="key-head"><b>키 설정</b><span id="keyHint" class="muted small">바꿀 칸을 누른 뒤 원하는 키를 누르세요</span></div>
+      <div class="set-row">
+        <span>4키 레인</span>
+        <div class="key-set" data-m="4">
+          <button type="button" data-k="0"></button><button type="button" data-k="1"></button>
+          <button type="button" data-k="2"></button><button type="button" data-k="3"></button>
+        </div>
+      </div>
+      <div class="set-row">
+        <span>6키 레인</span>
+        <div class="key-set" data-m="6">
+          <button type="button" data-k="0"></button><button type="button" data-k="1"></button>
+          <button type="button" data-k="2"></button><button type="button" data-k="3"></button>
+          <button type="button" data-k="4"></button><button type="button" data-k="5"></button>
+        </div>
+      </div>
+      <div class="fn-grid" id="fnGrid"></div>
+      <div class="key-foot">
+        <span class="muted small">ESC는 항상 일시정지로도 동작해요.</span>
+        <button type="button" id="btnKeyReset" class="ghost small-btn">키 기본값으로</button>
+      </div>
+    </div>
+    <div class="set-row"><span>노트 속도 <b id="speedVal"></b></span><input id="setSpeed" type="range" min="1" max="10" step="0.5"></div>
+    <div class="set-row"><span>싱크 (ms) <b id="offsetVal"></b></span><input id="setOffset" type="range" min="-300" max="300" step="5"></div>
+    <p class="small muted">노트보다 소리가 늦게 들리면 + 쪽으로, 빨리 들리면 - 쪽으로 옮기세요.</p>
+    <button type="button" id="btnCalib" class="wide">🎯 싱크 자동 맞추기</button>
+    <div class="set-row"><span>음량 <b id="volVal"></b></span><input id="setVol" type="range" min="0" max="100" step="5"></div>
+    <div class="set-row"><span>타격음 <small class="muted">키를 누를 때 나는 소리</small></span>
+      <div class="hit-row"><select id="setHit"></select><button id="setHitTest" class="small-btn" type="button">▶ 들어보기</button></div></div>
+    <div class="set-row"><span>타격음 음량 <b id="setHitVolVal"></b></span><input id="setHitVol" type="range" min="0" max="100" step="5"></div>
+    <button type="button" id="btnSkin2" class="wide">🎨 꾸미기 (색·노트 모양·이펙트·타격음)</button>
+    <div class="set-row"><span>곡 선택 시 미리듣기</span>
+      <select id="setAuto"><option value="1">자동</option><option value="0">버튼 누를 때만</option></select></div>
+    <div class="set-row"><span>배경 밝기</span>
+      <select id="setLane"><option value="0.92">어둡게</option><option value="0.8">보통</option><option value="0.65">밝게</option></select></div>
+    <div id="hostKeyRow" class="set-row hidden"><span>호스트 키 <small class="muted">곡을 추가하는 사람만</small></span>
+      <div class="hit-row"><input id="hostKeyIn" type="password" autocomplete="off" placeholder="서버 설치 때 받은 키"><button id="hostKeyGo" class="small-btn" type="button">확인</button></div></div>
+    <div class="set-buttons"><button class="primary" value="ok">닫기</button></div>
+  </form>
+</dialog>
+
+<!-- 내 캐릭터 -->
+<dialog id="profileDlg" class="profile-dlg">
+  <h3>☁ 내 프로필</h3>
+  <div id="pfOut">
+    <p class="muted small">이름·키 설정·꾸미기·캐릭터·싱크·내 기록을 방장 PC 서버에 저장해요.
+      친구 초대 주소가 바뀌어도 아이디와 비밀번호만 넣으면 그대로 이어서 할 수 있어요.</p>
+    <div class="seg" id="pfTabs"><button type="button" data-m="load">불러오기</button><button type="button" data-m="create">새로 만들기</button></div>
+    <form id="pfForm" autocomplete="off">
+      <label class="pf-row"><span>아이디</span><input id="pfId" maxlength="16" placeholder="예: 영희"></label>
+      <label class="pf-row"><span>비밀번호</span><input id="pfPin" type="password" inputmode="numeric" maxlength="8" placeholder="숫자 4~8자리"></label>
+      <div id="pfPinHint" class="muted small"></div>
+      <div id="pfMsg" class="warn small"></div>
+      <div class="dlg-actions"><button id="pfGo" class="primary" type="submit">불러오기</button></div>
+    </form>
+  </div>
+  <div id="pfIn" class="hidden">
+    <div class="pf-who"><span class="cloud">☁</span><b id="pfWho"></b></div>
+    <p class="muted small" id="pfState"></p>
+    <p class="muted small">설정을 바꾸거나 기록을 세우면 자동으로 서버에 저장돼요. 다른 주소나 다른 컴퓨터에서도 같은 아이디로 불러오면 돼요.</p>
+    <div class="dlg-actions"><button id="pfSave" type="button">지금 저장</button><button id="pfLogout" class="ghost" type="button">이 브라우저에서 로그아웃</button></div>
+  </div>
+  <div class="dlg-actions"><button id="pfClose" class="ghost" type="button">닫기</button></div>
+</dialog>
+
+<dialog id="batchDlg" class="profile-dlg">
+  <h3>↻ 전체 채보 다시 만들기</h3>
+  <p class="muted small">곡 목록의 모든 곡을 최신 분석 방식(고음 감지·구간 분석·템포 변화·극한)으로 다시 만들어요.
+    한 곡씩 유튜브에서 오디오를 받아 분석해서 <b id="bdEta"></b> 정도 걸려요. 그동안에도 게임은 할 수 있어요.</p>
+  <label class="check-row"><input type="checkbox" id="bdKeep" checked> 채보 수정기로 직접 고친 난이도는 그대로 두기</label>
+  <label class="check-row"><input type="checkbox" checked disabled> 바꿔둔 곡 제목 유지</label>
+  <p class="muted small">순위표 기록은 그대로 남지만, 채보가 바뀌어서 새 기록과 비교하기는 어려울 수 있어요. 받을 수 없는 영상은 기존 채보를 두고 건너뛰어요.</p>
+  <div class="dlg-actions"><button id="bdCancel" class="ghost" type="button">취소</button><button id="bdGo" class="primary" type="button">시작</button></div>
+</dialog>
+
+<dialog id="songInfoDlg" class="profile-dlg">
+  <h3>✎ 곡 정보 고치기</h3>
+  <label class="pf-row"><span>제목</span><input id="siTitle" maxlength="200"></label>
+  <label class="pf-row"><span>가수</span><input id="siArtist" maxlength="80"></label>
+  <p id="siInfo" class="muted small"></p>
+  <div class="dlg-actions"><button id="siAuto" class="ghost" type="button">가수 자동으로 되돌리기</button><button id="siCancel" class="ghost" type="button">취소</button><button id="siSave" class="primary" type="button">저장</button></div>
+</dialog>
+
+<dialog id="avatarDlg">
+  <div class="skin-box">
+    <div class="skin-head">
+      <h3>MY CHARACTER<small>내 캐릭터 · 바꾸는 즉시 저장돼요</small></h3>
+      <button id="avClose" class="ghost small-btn">닫기</button>
+    </div>
+    <div class="av-body">
+      <div class="av-preview">
+        <canvas id="avCanvas"></canvas>
+        <div id="avName" class="av-name"></div>
+        <button id="avRandom" class="primary skew">🎲 랜덤</button>
+      </div>
+      <div class="skin-controls av-controls">
+        <section><h4>피부</h4><div class="av-sws" id="avSkin"></div></section>
+        <section><h4>머리 모양</h4><div class="opt-row" id="avHair"></div></section>
+        <section><h4>머리 색</h4><div class="av-sws" id="avHairColor"></div></section>
+        <section><h4>눈</h4><div class="opt-row" id="avEyes"></div></section>
+        <section><h4>옷</h4><div class="opt-row" id="avOutfit"></div><div class="av-sws" id="avOutfitColor"></div></section>
+        <section><h4>액세서리</h4><div class="opt-row" id="avAcc"></div></section>
+        <p class="small muted">플레이 중에는 오른쪽 칸에서 박자에 맞춰 까딱이고, 콤보 50마다 점프, 피버 때 춤춰요. 멀티에서는 친구들에게도 보여요.</p>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<!-- 꾸미기 -->
+<dialog id="skinDlg">
+  <div class="skin-box">
+    <div class="skin-head">
+      <h3>CUSTOMIZE<small>꾸미기 · 바꾸는 즉시 저장돼요</small></h3>
+      <button id="skinClose" class="ghost small-btn">닫기</button>
+    </div>
+    <div class="skin-body">
+      <div class="skin-preview">
+        <div class="skin-canvas-wrap"><canvas id="skinCanvas"></canvas></div>
+        <div class="seg skin-prev-mode" id="skinPrevMode"><button data-nl="4" class="on">4키</button><button data-nl="6">6키</button></div>
+      </div>
+      <div class="skin-controls">
+        <section>
+          <h4>레인 색</h4>
+          <div class="swatches" id="themeSw"></div>
+          <div class="custom-colors" id="customColors">
+            <label>바깥 레인 <input type="color" data-c="a"></label>
+            <label>안쪽 레인 <input type="color" data-c="b"></label>
+            <label>가운데 (6키) <input type="color" data-c="c"></label>
+          </div>
+        </section>
+        <section>
+          <h4>노트</h4>
+          <div class="opt-row" id="noteShape">
+            <button data-v="bar">막대</button><button data-v="round">둥근 캡슐</button><button data-v="circle">원형</button><button data-v="line">얇은 선</button>
+          </div>
+          <div class="set-row"><span>두께 <b id="noteHVal"></b></span><input id="noteH" type="range" min="8" max="26" step="1"></div>
+        </section>
+        <section>
+          <h4>기어</h4>
+          <div class="set-row"><span>레인 폭</span>
+            <select id="laneScale"><option value="0.8">좁게</option><option value="1">보통</option><option value="1.2">넓게</option></select></div>
+          <div class="set-row"><span>기어 위치</span>
+            <select id="gearPos"><option value="left">왼쪽</option><option value="center">가운데</option><option value="right">오른쪽</option></select></div>
+          <div class="set-row"><span>판정선 색</span><div class="swatches line-sw" id="lineSw"></div></div>
+          <div class="set-row"><span>판정선 높이 <b id="judgeYVal"></b></span><input id="judgeYIn" type="range" min="70" max="240" step="5"></div>
+        </section>
+        <section>
+          <h4>효과 · 소리</h4>
+          <div class="opt-row" id="effectOpt">
+            <button data-v="flash">플래시</button><button data-v="ring">링</button><button data-v="spark">불꽃</button><button data-v="off">끄기</button>
+          </div>
+          <div class="set-row"><span>타격감 <small class="muted">폭발·파편·반동 세기</small></span>
+            <div class="opt-row" id="punchOpt"><button data-v="low">약하게</button><button data-v="mid">보통</button><button data-v="high">강하게</button></div></div>
+          <div class="set-row"><span>타격음</span>
+            <div class="hit-row">
+              <select id="hitSound"></select>
+              <button id="hitTest" class="small-btn" type="button">▶ 들어보기</button>
+            </div>
+          </div>
+          <div class="set-row"><span>타격음 음량 <b id="hitVolVal"></b></span><input id="hitVol" type="range" min="0" max="100" step="5"></div>
+          <div class="set-row"><label><input type="checkbox" id="optApplause"> 풀콤보 박수 <small class="muted">ALL PERFECT면 더 크게</small></label>
+            <div class="hit-row"><button id="applauseTest" class="small-btn" type="button">▶ 풀콤보</button><button id="applauseTestAp" class="small-btn" type="button">▶ 올퍼펙트</button></div></div>
+        </section>
+        <section>
+          <h4>표시</h4>
+          <div class="set-row"><span>판정 글자</span>
+            <select id="judgeText"><option value="normal">보통</option><option value="small">작게</option><option value="off">숨김</option></select></div>
+          <div class="checks">
+            <label><input type="checkbox" id="optEarly"> 빠름·느림 표시</label>
+            <label><input type="checkbox" id="optCombo"> 콤보 숫자</label>
+            <label><input type="checkbox" id="optFever"> 피버 연출</label>
+            <label><input type="checkbox" id="optShake"> 화면 흔들림</label>
+            <label><input type="checkbox" id="optChorus"> 후렴 연출</label>
+          </div>
+        </section>
+        <div class="skin-foot"><button id="skinReset" class="ghost small-btn" type="button">꾸미기 기본값으로</button></div>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<!-- 연습 모드 -->
+<dialog id="practiceDlg">
+  <form method="dialog" class="settings">
+    <h3>PRACTICE<small>연습 모드</small></h3>
+    <div id="prSong" class="muted small"></div>
+    <div class="set-row"><span>시작 <b id="prStartV"></b></span><input id="prStart" type="range" min="0" step="1"></div>
+    <div class="set-row"><span>끝 <b id="prEndV"></b></span><input id="prEnd" type="range" min="1" step="1"></div>
+    <div class="set-row"><span>속도</span>
+      <select id="prRate"><option value="0.5">0.5배</option><option value="0.75" selected>0.75배</option><option value="1">1배</option></select></div>
+    <div class="set-row"><span>구간 반복</span>
+      <select id="prLoop"><option value="1" selected>반복</option><option value="0">한 번만</option></select></div>
+    <p class="small muted">연습 기록은 순위표에 남지 않아요. 반복 중에는 ESC → 나가기로 끝내세요.</p>
+    <div class="set-buttons">
+      <button value="cancel" class="ghost">취소</button>
+      <button id="prGo" type="button" class="primary">연습 시작</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 순위표 -->
+<dialog id="rankDlg">
+  <div class="rank-box">
+    <div class="rank-head">
+      <div>
+        <h3 id="rankTitle"></h3>
+        <div id="rankPlays" class="muted small"></div>
+      </div>
+      <button id="rankClose" class="ghost small-btn">닫기</button>
+    </div>
+    <div class="rank-tabs">
+      <div class="seg" id="rankMode"><button data-mode="4">4키</button><button data-mode="6">6키</button></div>
+      <div class="seg" id="rankHl"><button data-hl="0">전체곡</button><button data-hl="1">하이라이트</button></div>
+      <div class="seg" id="rankDiff"><button data-diff="easy">쉬움</button><button data-diff="normal">보통</button><button data-diff="hard">어려움</button><button data-diff="extreme">극한</button></div>
+    </div>
+    <ol id="rankList" class="rank-list"></ol>
+  </div>
+</dialog>
+
+<div id="toast" class="toast"></div>
+
+<script src="/static/core.js"></script>
+<script src="/static/game.js"></script>
+<script src="/static/editor.js"></script>
+<script src="/static/calib.js"></script>
+<script src="/static/skin.js"></script>
+<script src="/static/avatar.js"></script>
+<script src="/static/spectate.js"></script>
+<script src="/static/app.js"></script>
+<script src="/static/profile.js"></script>
+</body>
+</html>

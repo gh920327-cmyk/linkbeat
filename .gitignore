@@ -1,0 +1,9 @@
+# 데이터(곡·기록·프로필·호스트 키)는 절대 올리지 않음
+data/
+.venv/
+__pycache__/
+*.pyc
+*.zip
+desktop/node_modules/
+desktop/dist/
+desktop/engine/

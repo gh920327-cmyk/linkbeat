@@ -1,0 +1,5 @@
+numpy
+scipy
+yt-dlp[default]
+deno
+imageio-ffmpeg
