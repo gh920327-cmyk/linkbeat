@@ -1,7 +1,7 @@
 {
   "name": "linkbeat-launcher",
   "productName": "LINKBEAT",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "링크비트 — PC 실행기 (호스트 PC에서는 채보 엔진도 함께)",
   "author": "gh920327",
   "license": "UNLICENSED",

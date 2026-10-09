@@ -10,6 +10,7 @@
 import argparse
 import json
 import os
+import ssl
 import sys
 import time
 import traceback
@@ -25,6 +26,21 @@ try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 except Exception:
     pass
+
+
+def _ssl_context():
+    """HTTPS 인증서 확인: 윈도우 인증서 목록에 최신 루트 인증서(Let's Encrypt 등)가 없는 PC도 있어서
+    certifi(파이썬 패키지에 들어 있는 인증서 목록)도 함께 씀"""
+    ctx = ssl.create_default_context()
+    try:
+        import certifi
+        ctx.load_verify_locations(cafile=certifi.where())
+    except Exception:
+        pass
+    return ctx
+
+
+SSL_CTX = _ssl_context()
 
 
 def status(state, msg="", **extra):
@@ -46,7 +62,7 @@ class Api:
                                      headers={"Content-Type": "application/json", "X-Host-Key": self.key,
                                               "User-Agent": f"LinkbeatEngine/{VERSION}"})
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
+            with urllib.request.urlopen(req, timeout=timeout, context=SSL_CTX) as r:
                 return json.loads(r.read().decode("utf-8") or "{}")
         except urllib.error.HTTPError as e:
             try:

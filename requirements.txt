@@ -3,3 +3,4 @@ scipy
 yt-dlp[default]
 deno
 imageio-ffmpeg
+certifi
