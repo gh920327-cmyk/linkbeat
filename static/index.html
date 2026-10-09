@@ -12,6 +12,28 @@
 </head>
 <body>
 
+<!-- ======================= 시작 화면 → 로그인 ======================= -->
+<div id="gate" class="gate" data-stage="title">
+  <canvas id="gateBg" class="gate-bg"></canvas>
+  <div class="gate-vignette"></div>
+  <div class="gate-logo">
+    <div class="gl-sub">YOUTUBE LINK RHYTHM GAME</div>
+    <h1 class="gl-title">LINK<span>BEAT</span></h1>
+    <div class="gl-kr">링크비트</div>
+  </div>
+  <div class="gate-press">PRESS ANY KEY<small>아무 키나 누르거나 화면을 클릭하세요</small></div>
+  <div class="gate-welcome" id="gtWelcome"></div>
+  <form class="gate-card" id="gtForm" autocomplete="off">
+    <div class="seg gate-tabs" id="gtTabs"><button type="button" data-m="login">로그인</button><button type="button" data-m="create">새로 만들기</button></div>
+    <label class="gt-row"><span>아이디</span><input id="gtId" maxlength="16" placeholder="예: 영희" autocomplete="username"></label>
+    <label class="gt-row"><span>비밀번호</span><input id="gtPin" type="password" inputmode="numeric" maxlength="8" placeholder="숫자 4~8자리" autocomplete="current-password"></label>
+    <p class="gt-hint" id="gtHint"></p>
+    <p class="gt-msg" id="gtMsg"></p>
+    <button class="primary gt-go skew" id="gtGo" type="submit">로그인</button>
+  </form>
+  <div class="gate-ver" id="gtVer"></div>
+</div>
+
 <!-- ======================= 로비 (곡 선택) ======================= -->
 <section id="screen-lobby" class="screen active">
   <header class="topbar">
@@ -583,5 +605,6 @@
 <script src="/static/spectate.js"></script>
 <script src="/static/app.js"></script>
 <script src="/static/profile.js"></script>
+<script src="/static/gate.js"></script>
 </body>
 </html>

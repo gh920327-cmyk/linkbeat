@@ -102,7 +102,7 @@ const profile = {
     try {
       const r = await fetch('/api/profile', { method: 'PUT', headers: this.headers(), keepalive, body });
       const j = await r.json().catch(() => ({}));
-      if (r.status === 401) { this.forget(); toast('프로필 로그인이 풀렸어요. 다시 불러와 주세요.', 3500); return false; }
+      if (r.status === 401) { this.forget(); if (typeof gateRequireLogin === 'function') gateRequireLogin('로그인이 풀렸어요. 다시 로그인해 주세요.'); return false; }
       if (!r.ok) throw new Error(j.error || r.status);
       if (j.data && Object.keys(j.data).length) this.apply(j.data);   // 서버에 더 좋은 기록이 있으면 받아옴
       store.set('profileUpdated', j.updated || 0);
@@ -147,7 +147,7 @@ const profile = {
     if (!this.tok) return;
     try {
       const r = await fetch('/api/profile', { headers: this.headers() });
-      if (r.status === 401) { this.forget(); toast('프로필 로그인이 풀렸어요. ☁ 프로필에서 다시 불러와 주세요.', 4000); return; }
+      if (r.status === 401) { this.forget(); if (typeof gateRequireLogin === 'function') gateRequireLogin('로그인이 풀렸어요. 다시 로그인해 주세요.'); return; }
       const j = await r.json();
       if (!r.ok) return;
       const mine = store.get('profileUpdated', 0);
@@ -176,7 +176,7 @@ function renderProfileUi() {
   b.title = on ? (profile.failed ? `저장하지 못했어요: ${profile.failed}` : profile.dirty || profile.saving ? '저장 중...' : '서버에 저장됨') : '프로필을 만들면 주소가 바뀌어도 설정·기록이 유지돼요';
   b.classList.toggle('err', on && !!profile.failed);
   const host = (typeof isHost !== 'undefined' && isHost) || !!hostKey;
-  const showBanner = !on && !host && !store.get('profileLater', false);
+  const showBanner = false;   // 이제 시작할 때 로그인 화면에서 로그인하므로 안내 띠는 쓰지 않음
   $('#profileBanner').classList.toggle('hidden', !showBanner);
   if ($('#profileDlg').open) renderProfileDlg();
 }
@@ -245,7 +245,8 @@ $('#pfLogout').addEventListener('click', async () => {
   if (profile.dirty) await profile.push();
   try { await fetch('/api/profile/logout', { method: 'POST', headers: profile.headers() }); } catch { /* 무시 */ }
   profile.forget();
-  toast('이 브라우저에서 로그아웃했어요. 설정은 그대로 남아 있어요.');
+  $('#profileDlg').close();
+  if (typeof gateRequireLogin === 'function') gateRequireLogin('로그아웃했어요. 다시 들어오려면 로그인해 주세요.');
 });
 $('#pbLoad').addEventListener('click', () => openProfile('load'));
 $('#pbCreate').addEventListener('click', () => openProfile('create'));

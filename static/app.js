@@ -1194,6 +1194,7 @@ function isTyping(e) {
 }
 
 window.addEventListener('keydown', (e) => {
+  if (window.gateOpen) return;          // 시작·로그인 화면에서는 게임 단축키를 쓰지 않음
   if (keyCapture) {
     e.preventDefault();
     e.stopPropagation();

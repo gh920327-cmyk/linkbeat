@@ -28,6 +28,14 @@ jobs:
           mkdir -p engine
           cp ../worker.py ../pipeline.py ../chartgen.py ../requirements.txt engine/
       - run: npm install --no-audit --no-fund
+      # 릴리스를 먼저 만들어 둠 (여러 파일을 동시에 올리다가 릴리스를 두 번 만들려다 실패하는 문제 방지)
+      - name: 릴리스 준비
+        shell: bash
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          gh release view "v$VER" >/dev/null 2>&1 || gh release create "v$VER" --title "$VER" --notes "LINKBEAT 실행기 $VER"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: build
         shell: bash
         run: |

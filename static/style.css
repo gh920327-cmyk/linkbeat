@@ -585,3 +585,44 @@ dialog::backdrop { background: rgba(0, 0, 0, .65); backdrop-filter: blur(3px); }
 }
 .pf-btn.err { border-color: rgba(255, 200, 61, .6); }
 .pf-btn.err .cloud { color: var(--gold); text-shadow: none; }
+
+/* ================= 시작 화면 · 로그인 ================= */
+.gate { position: fixed; inset: 0; z-index: 100; background: radial-gradient(ellipse at 50% 85%, #0d1a40 0%, #05070f 60%, #020309 100%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; user-select: none; transition: opacity .45s ease; --pulse: 0; }
+.gate.hidden { display: none; }
+.gate.out { opacity: 0; pointer-events: none; }
+.gate-bg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.gate-vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 45%, transparent 35%, rgba(2,3,9,.85) 100%); }
+.gate.hit::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 50% 40%, rgba(255,240,200,.55), transparent 60%); animation: gateFlash .5s ease-out forwards; pointer-events: none; }
+@keyframes gateFlash { from { opacity: 1; } to { opacity: 0; } }
+.gate-logo { position: relative; text-align: center; transition: transform .5s cubic-bezier(.2,.8,.2,1), margin .5s; margin-top: -6vh; }
+.gl-sub { font-family: var(--head); font-size: 12px; letter-spacing: 6px; color: var(--cyan); opacity: .8; }
+.gl-title { margin: 6px 0 2px; font-family: var(--head); font-weight: 900; font-style: italic; font-size: clamp(56px, 11vw, 132px); letter-spacing: 4px; line-height: 1;
+  color: #fff; transform: skewX(-8deg) scale(calc(1 + var(--pulse) * .025));
+  text-shadow: 0 0 calc(18px + var(--pulse) * 22px) rgba(77,225,255,.55), 0 0 2px #fff; }
+.gl-title span { background: linear-gradient(90deg, #fff, var(--gold)); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none;
+  filter: drop-shadow(0 0 calc(10px + var(--pulse) * 16px) rgba(255,200,61,.6)); }
+.gl-kr { font-family: 'Black Han Sans', 'Noto Sans KR', sans-serif; font-size: 20px; letter-spacing: 10px; color: rgba(233,238,252,.75); }
+.gate-press { position: relative; margin-top: 9vh; font-family: var(--head); font-weight: 800; letter-spacing: 6px; font-size: 18px; color: #fff; text-align: center;
+  animation: gatePress 1.4s ease-in-out infinite; }
+.gate-press small { display: block; margin-top: 8px; text-shadow: 0 0 6px #000, 0 0 12px #000; font-family: 'Noto Sans KR', sans-serif; letter-spacing: 1px; font-size: 12px; font-weight: 500; color: var(--muted); }
+@keyframes gatePress { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+.gate-welcome { position: relative; display: none; margin-top: 6vh; font-size: 22px; font-weight: 900; color: var(--gold); text-shadow: 0 0 16px rgba(255,200,61,.5); animation: gateIn .4s ease both; }
+.gate-card { position: relative; display: none; width: min(380px, 92vw); margin-top: 4vh; padding: 20px 22px 18px; background: rgba(10,16,34,.88);
+  border: 1px solid var(--line2); box-shadow: 0 0 40px rgba(63,140,255,.18); clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  animation: gateIn .35s ease both; }
+@keyframes gateIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.gate-tabs { display: flex; margin-bottom: 14px; }
+.gate-tabs button { flex: 1; }
+.gt-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.gt-row span { width: 64px; font-size: 13px; color: var(--muted); flex: none; }
+.gt-row input { flex: 1; min-width: 0; padding: 10px 12px; font-size: 15px; }
+.gt-hint { font-size: 12px; color: var(--muted); margin: 10px 0 0; line-height: 1.5; }
+.gt-msg { font-size: 13px; color: var(--red); min-height: 18px; margin: 6px 0; }
+.gt-go { width: 100%; padding: 12px; font-size: 16px; }
+.gate[data-stage="login"] .gate-logo, .gate[data-stage="welcome"] .gate-logo { transform: scale(.62); margin-top: -2vh; }
+.gate[data-stage="login"] .gate-press, .gate[data-stage="welcome"] .gate-press, .gate[data-stage="busy"] .gate-press { display: none; }
+.gate[data-stage="login"] .gate-card { display: block; }
+.gate[data-stage="welcome"] .gate-welcome { display: block; }
+.gate-ver { position: absolute; right: 14px; bottom: 10px; font-size: 11px; color: #3a4266; font-family: var(--mono); }
+@media (max-height: 600px) { .gate-press { margin-top: 4vh; } .gate[data-stage="login"] .gate-logo { transform: scale(.5); margin-top: -8vh; } }
