@@ -188,6 +188,7 @@ $('#gtForm').addEventListener('submit', async (e) => {
   msg.textContent = '';
   try {
     const r = await profile.login(id, pin, gateMode === 'create');
+    store.set('autoLogin', $('#gtAuto').checked);
     try { sessionStorage.setItem('lb_entered', '1'); } catch { /* 무시 */ }
     if (r.reload) {          // 서버에 저장된 내 설정·기록을 불러와서 새로고침 (바로 게임 화면으로)
       sessionStorage.setItem('lb_profileReloaded', '1');
@@ -202,7 +203,17 @@ $('#gtForm').addEventListener('submit', async (e) => {
     $('#gtGo').disabled = false;
   }
 });
-gateEl.addEventListener('pointerdown', (e) => { if (gateStage === 'title' && !e.target.closest('.gate-card')) gatePress(); });
+gateEl.addEventListener('pointerdown', (e) => { if (gateStage === 'title' && !e.target.closest('.gate-card, .gate-auto')) gatePress(); });
+/* 시작 화면의 '다른 아이디로': 지금 로그인을 풀고 로그인 화면으로 */
+$('#gtOther').addEventListener('click', async () => {
+  if (profile.dirty) await profile.push();
+  try { await fetch('/api/profile/logout', { method: 'POST', headers: profile.headers() }); } catch { /* 무시 */ }
+  profile.forget();
+  $('#gtAutoBox').classList.add('hidden');
+  $('#gtId').value = '';
+  gateMode = 'login';
+  gateShow('login');
+});
 window.addEventListener('keydown', (e) => {
   if (!window.gateOpen) return;
   if (gateStage === 'title' && !e.repeat && !['Tab', 'Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) { e.preventDefault(); gatePress(); }
@@ -218,8 +229,21 @@ window.addEventListener('keydown', (e) => {
     gateEl.classList.add('hidden');
     return;
   }
-  if (profile.id) $('#gtId').value = profile.id;
-  else if (settings.nick) $('#gtId').value = settings.nick;
+  // 자동 로그인을 끈 경우: 게임을 새로 켤 때마다 로그인을 풀어서 다시 로그인하게
+  if (profile.tok && store.get('autoLogin', true) === false) {
+    const h = profile.headers();
+    fetch('/api/profile/logout', { method: 'POST', headers: h }).catch(() => {});
+    const keepId = profile.id;
+    profile.forget();
+    profile.id = null;
+    $('#gtId').value = keepId || '';
+  }
+  if (profile.tok) {             // 자동 로그인: 시작 화면에서 키 하나면 바로 입장
+    $('#gtAutoWho').textContent = `▶ ${profile.id} 님으로 자동 로그인`;
+    $('#gtAutoBox').classList.remove('hidden');
+  }
+  if (!$('#gtId').value) $('#gtId').value = profile.id || settings.nick || '';
+  $('#gtAuto').checked = store.get('autoLogin', true) !== false;
   gateMode = profile.id || settings.nick ? 'login' : 'create';
   gateBg();
   gateShow('title');

@@ -624,5 +624,12 @@ dialog::backdrop { background: rgba(0, 0, 0, .65); backdrop-filter: blur(3px); }
 .gate[data-stage="login"] .gate-press, .gate[data-stage="welcome"] .gate-press, .gate[data-stage="busy"] .gate-press { display: none; }
 .gate[data-stage="login"] .gate-card { display: block; }
 .gate[data-stage="welcome"] .gate-welcome { display: block; }
+.gate-auto { position: relative; margin-top: 18px; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--cyan);
+  text-shadow: 0 0 6px #000; animation: gateIn .4s ease both; }
+.gate-auto.hidden, .gate[data-stage="login"] .gate-auto, .gate[data-stage="welcome"] .gate-auto { display: none; }
+.gate-auto .small-btn { font-size: 11px; padding: 3px 9px; }
+.gt-autochk { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; cursor: pointer; }
+.gt-autochk small { color: var(--muted); font-size: 11px; }
+.pf-auto { display: flex; align-items: center; gap: 6px; font-size: 13px; margin: 6px 0; cursor: pointer; }
 .gate-ver { position: absolute; right: 14px; bottom: 10px; font-size: 11px; color: #3a4266; font-family: var(--mono); }
 @media (max-height: 600px) { .gate-press { margin-top: 4vh; } .gate[data-stage="login"] .gate-logo { transform: scale(.5); margin-top: -8vh; } }

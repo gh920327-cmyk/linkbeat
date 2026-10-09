@@ -22,12 +22,14 @@
     <div class="gl-kr">링크비트</div>
   </div>
   <div class="gate-press">PRESS ANY KEY<small>아무 키나 누르거나 화면을 클릭하세요</small></div>
+  <div class="gate-auto hidden" id="gtAutoBox"><span id="gtAutoWho"></span><button type="button" id="gtOther" class="ghost small-btn">다른 아이디로</button></div>
   <div class="gate-welcome" id="gtWelcome"></div>
   <form class="gate-card" id="gtForm" autocomplete="off">
     <div class="seg gate-tabs" id="gtTabs"><button type="button" data-m="login">로그인</button><button type="button" data-m="create">새로 만들기</button></div>
     <label class="gt-row"><span>아이디</span><input id="gtId" maxlength="16" placeholder="예: 영희" autocomplete="username"></label>
     <label class="gt-row"><span>비밀번호</span><input id="gtPin" type="password" inputmode="numeric" maxlength="8" placeholder="숫자 4~8자리" autocomplete="current-password"></label>
     <p class="gt-hint" id="gtHint"></p>
+    <label class="gt-autochk"><input type="checkbox" id="gtAuto" checked> 자동 로그인 <small>다음부터는 시작 화면에서 바로 입장</small></label>
     <p class="gt-msg" id="gtMsg"></p>
     <button class="primary gt-go skew" id="gtGo" type="submit">로그인</button>
   </form>
@@ -434,6 +436,7 @@
   <div id="pfIn" class="hidden">
     <div class="pf-who"><span class="cloud">☁</span><b id="pfWho"></b></div>
     <p class="muted small" id="pfState"></p>
+    <label class="pf-auto"><input type="checkbox" id="pfAuto"> 자동 로그인 <small class="muted">끄면 게임을 켤 때마다 로그인해요</small></label>
     <p class="muted small">설정을 바꾸거나 기록을 세우면 자동으로 서버에 저장돼요. 다른 주소나 다른 컴퓨터에서도 같은 아이디로 불러오면 돼요.</p>
     <div class="dlg-actions"><button id="pfSave" type="button">지금 저장</button><button id="pfLogout" class="ghost" type="button">이 브라우저에서 로그아웃</button></div>
   </div>

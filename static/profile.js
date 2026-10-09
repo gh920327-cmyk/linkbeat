@@ -4,7 +4,7 @@
 'use strict';
 
 // 기기마다 다른 값(유튜브 시작 지연 등)과 로그인 정보는 프로필에 올리지 않음
-const PROFILE_SKIP = new Set(['hostKey', 'profileTok', 'profileId', 'profileUpdated', 'profileLater', 'profileOwner', 'profileDirty', 'ytLag']);
+const PROFILE_SKIP = new Set(['hostKey', 'profileTok', 'profileId', 'profileUpdated', 'profileLater', 'profileOwner', 'profileDirty', 'ytLag', 'autoLogin']);
 
 const profile = {
   tok: store.get('profileTok', null),
@@ -188,6 +188,7 @@ function renderProfileDlg() {
   $('#pfIn').classList.toggle('hidden', !on);
   if (on) {
     $('#pfWho').textContent = profile.id;
+    $('#pfAuto').checked = store.get('autoLogin', true) !== false;
     $('#pfState').textContent = profile.saving || profile.dirty ? '저장 중...' : profile.lastSaved
       ? `마지막 저장 ${new Date(profile.lastSaved).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}` : '서버에 저장되어 있어요';
     return;
@@ -247,6 +248,10 @@ $('#pfLogout').addEventListener('click', async () => {
   profile.forget();
   $('#profileDlg').close();
   if (typeof gateRequireLogin === 'function') gateRequireLogin('로그아웃했어요. 다시 들어오려면 로그인해 주세요.');
+});
+$('#pfAuto').addEventListener('change', (e) => {
+  store.set('autoLogin', e.target.checked);
+  toast(e.target.checked ? '자동 로그인을 켰어요. 다음부터 시작 화면에서 바로 들어가요.' : '자동 로그인을 껐어요. 게임을 켤 때마다 로그인해요.', 3000);
 });
 $('#pbLoad').addEventListener('click', () => openProfile('load'));
 $('#pbCreate').addEventListener('click', () => openProfile('create'));
