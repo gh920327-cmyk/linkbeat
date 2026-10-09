@@ -124,6 +124,7 @@ function createWindows() {
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
   splash.loadFile(path.join(__dirname, 'splash.html'), { query: { v: app.getVersion() } });
+  splash.on('closed', () => { splash = null; if (!shown) app.quit(); });   // 연결을 기다리다 시작 창을 닫으면 끝냄
 
   win = new BrowserWindow({
     width: st.width || 1440, height: st.height || 860, x: st.x, y: st.y,
@@ -141,8 +142,12 @@ function createWindows() {
     if (hostKey) u.searchParams.set('host', hostKey);
     win.loadURL(u.toString()).catch(() => {});
   };
+  // 서버에 못 붙으면 크롬 오류 화면이 '불러오기 끝'으로 잡혀 빈 창이 뜨던 문제 → 실패한 시도는 무시하고 다시 시도
+  let failed = false;
+  win.webContents.on('did-start-navigation', (e, url, inPlace, isMain) => { if (isMain && !inPlace) failed = false; });
   win.webContents.on('did-finish-load', () => {
-    if (shown) return;
+    if (shown || failed) return;
+    try { if (new URL(win.webContents.getURL()).origin !== GAME_ORIGIN) return; } catch (er) { return; }
     shown = true;
     if (splash && !splash.isDestroyed()) { splash.destroy(); splash = null; }
     if (st.max) win.maximize();
@@ -151,10 +156,13 @@ function createWindows() {
     win.focus();
   });
   win.webContents.on('did-fail-load', (e, code, desc, url, isMain) => {
-    if (!isMain || shown) return;
+    if (!isMain || shown || code === -3) return;      // -3: 다음 시도로 넘어가면서 취소된 것
+    failed = true;
     tries++;
-    splashMsg(tries < 3 ? '서버에 연결하는 중…' : `서버에 연결하는 중… (${tries}번째 시도) · 인터넷 연결을 확인해 주세요`);
-    setTimeout(go, 3000);
+    splashMsg(tries < 3 ? '서버에 연결하는 중…'
+      : tries < 6 ? `서버에 연결하는 중… (${tries}번째 시도) · 인터넷 연결을 확인해 주세요`
+        : `서버에 연결할 수 없어요 (${desc || code}). 서버가 켜져 있는지 확인해 주세요. 계속 다시 시도할게요…`);
+    setTimeout(go, tries < 6 ? 3000 : 8000);
   });
   win.webContents.on('before-input-event', (e, i) => {
     if (i.type !== 'keyDown') return;

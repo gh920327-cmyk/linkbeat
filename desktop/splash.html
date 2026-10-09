@@ -14,6 +14,9 @@
   #m { font-size:13px; color:var(--dim); min-height:18px; }
   .bar { width:180px; height:3px; background:#141a33; overflow:hidden; border-radius:2px; }
   .bar i { display:block; width:40%; height:100%; background:linear-gradient(90deg,transparent,var(--cyan),transparent); animation:run 1.2s linear infinite; }
+  .x { position:absolute; top:6px; right:8px; -webkit-app-region:no-drag; background:none; border:0; color:#4a5378; font-size:14px; cursor:pointer; padding:4px 6px; }
+  .x:hover { color:#eef3ff; }
+  #m { max-width:440px; text-align:center; line-height:1.5; }
   .ver { position:absolute; right:10px; bottom:8px; font-size:11px; color:#3a4266; }
   @keyframes run { from { transform:translateX(-100%);} to { transform:translateX(260%);} }
   @keyframes pulse { 0%,100% { transform:scale(1);} 50% { transform:scale(1.05);} }
@@ -27,6 +30,7 @@
   <div id="m">서버에 연결하는 중…</div>
 </div>
 <div class="ver" id="v"></div>
+<button class="x" onclick="window.close()" title="닫기">✕</button>
 <script>
   function setMsg(t){ document.getElementById('m').textContent = t; }
   const v = new URLSearchParams(location.search).get('v'); if (v) document.getElementById('v').textContent = 'v' + v;
