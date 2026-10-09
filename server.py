@@ -363,6 +363,10 @@ def _submit_score(sid, diff, keys, name, data):
         "rank": str(data.get("rank", ""))[:3], "fc": bool(data.get("fc")),
         "maxCombo": max(0, int(data.get("maxCombo", 0))), "at": time.time(),
     }
+    # 고스트 대결용: 노트 5%마다의 점수 (21칸)
+    g = data.get("g")
+    if isinstance(g, list) and 2 <= len(g) <= 21 and all(isinstance(x, (int, float)) and math.isfinite(x) for x in g):
+        entry["g"] = [max(0, min(1_000_000, int(x))) for x in g]
     hl = bool(data.get("hl"))
     if hl:
         entry["hl"] = True                      # 하이라이트 모드 기록은 순위표를 따로
@@ -1573,6 +1577,7 @@ class Client:
         self.result = None
         self.live = {"score": 0, "combo": 0, "acc": 100.0}
         self.avatar = None
+        self.title = ""         # 업적 칭호 (이름 옆에 표시)
         self.diff = "normal"    # 멀티에서 각자 고르는 난이도/키
         self.keys = 4
         self.pending = None     # 게임 중에 바꾼 난이도/키 (판이 끝나면 적용)
@@ -1685,12 +1690,12 @@ class Room:
         return {
             "type": "room", "code": self.code, "leader": self.leader, "phase": self.phase,
             "songId": self.song_id, "songTitle": self.song_title, "diff": self.diff, "keys": self.keys, "hl": self.hl,
-            "players": [{"id": c.id, "name": c.name, "state": c.state, "avatar": c.avatar,
+            "players": [{"id": c.id, "name": c.name, "state": c.state, "avatar": c.avatar, "title": c.title,
                          "diff": c.diff, "keys": c.keys} for c in self.players.values()],
         }
 
     def roster(self):
-        return [{"id": c.id, "name": c.name, "avatar": c.avatar, "diff": c.diff, "keys": c.keys}
+        return [{"id": c.id, "name": c.name, "avatar": c.avatar, "title": c.title, "diff": c.diff, "keys": c.keys}
                 for c in self.players.values()]
 
     def broadcast(self, obj, exclude=None):
@@ -1774,7 +1779,7 @@ def finish_game(room):
         r = c.result or {"score": c.live.get("score", 0),
                          "acc": 0 if c.state == "error" else c.live.get("acc", 0),
                          "maxCombo": 0, "incomplete": True}
-        results.append(dict(r, id=c.id, name=c.name, avatar=c.avatar, diff=c.diff, keys=c.keys))
+        results.append(dict(r, id=c.id, name=c.name, avatar=c.avatar, title=c.title, diff=c.diff, keys=c.keys))
         c.state = "idle"
         c.result = None
     for c in room.players.values():   # 게임 중에 바꿔 둔 난이도/키 적용 (결과는 플레이한 난이도로 표시)
@@ -1822,6 +1827,8 @@ def handle_msg(c, m):
         if isinstance(av, dict):   # 캐릭터: 짧은 값만 받아서 저장 (화면에서 다시 검사함)
             c.avatar = {str(k)[:12]: (v if isinstance(v, int) and 0 <= v < 100 else str(v)[:12])
                         for k, v in list(av.items())[:10] if isinstance(v, (int, str))}
+        if "title" in m:
+            c.title = str(m.get("title") or "").strip()[:16]
         set_my_diff(c, m)
         if room:
             room.push()

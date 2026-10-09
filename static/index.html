@@ -48,6 +48,8 @@
       <input id="nick" maxlength="16" placeholder="닉네임" autocomplete="off" title="순위표에 표시되는 이름">
       <span id="connDot" class="dot" title="서버 연결 상태"></span>
       <button id="btnProfile" class="ghost pf-btn" type="button"></button>
+      <span id="myTitle" class="ptitle my-title hidden" title="내 칭호"></span>
+      <button id="btnAch" class="ghost ach-btn" type="button" title="업적 · 칭호">🏆<span>업적</span></button>
       <button id="btnAvatar" class="ghost av-btn"><canvas id="topAvatar" width="28" height="28"></canvas>내 캐릭터</button>
       <button id="btnSkin" class="ghost">꾸미기</button>
       <button id="btnSettings" class="ghost">설정</button>
@@ -92,6 +94,7 @@
         <button id="modRandom" class="chip" title="레인 섞기 (매판 달라짐)">RANDOM<small>랜덤</small></button>
         <button id="modHl" class="chip hl-chip" title="곡에서 가장 잘 들리는 부분(후렴)만 짧게 플레이 · 기록은 따로">HIGHLIGHT<small>후렴만</small></button>
         <span id="dHlRange" class="hl-range"></span>
+        <button id="modGhost" class="chip ghost-chip" title="혼자 할 때 친구 1위(또는 내 최고 기록)와 실시간 점수 대결">GHOST<small>고스트</small></button>
         <span class="speed-show">SPEED <b id="speedShow"></b><small id="speedKeys"></small></span>
       </div>
       <div class="d-records">
@@ -271,6 +274,7 @@
         <div id="rtSuggest" class="rt-suggest small"></div>
       </div>
       <div id="rBest" class="r-best center"></div>
+      <div id="rGhost" class="r-ghost center hidden"></div>
       <div class="r-buttons">
         <button id="btnRetry" class="primary">다시 하기</button>
         <button id="btnResRank">순위표</button>
@@ -443,6 +447,16 @@
   <div class="dlg-actions"><button id="pfClose" class="ghost" type="button">닫기</button></div>
 </dialog>
 
+<dialog id="achDlg" class="ach-dlg">
+  <div class="ach-top">
+    <h3>🏆 업적 <small id="achCount"></small></h3>
+    <button id="achClose" class="ghost small-btn" type="button">닫기</button>
+  </div>
+  <div class="ach-bar"><i id="achFill"></i></div>
+  <p class="muted small" id="achTitleNow"></p>
+  <div id="achGrid" class="ach-grid"></div>
+</dialog>
+
 <dialog id="batchDlg" class="profile-dlg">
   <h3>↻ 전체 채보 다시 만들기</h3>
   <p class="muted small">곡 목록의 모든 곡을 최신 분석 방식(고음 감지·구간 분석·템포 변화·극한)으로 다시 만들어요.
@@ -607,6 +621,7 @@
 <script src="/static/avatar.js"></script>
 <script src="/static/spectate.js"></script>
 <script src="/static/app.js"></script>
+<script src="/static/achieve.js"></script>
 <script src="/static/profile.js"></script>
 <script src="/static/gate.js"></script>
 </body>

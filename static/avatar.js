@@ -272,7 +272,7 @@ function avatarChanged() {
   settings.avatar = avatarValid(settings.avatar);
   saveSettings();
   renderAvatarEditor();
-  net.send({ type: 'hello', name: settings.nick || '', avatar: settings.avatar, diff: settings.diff, keys: settings.mode });
+  net.send({ type: 'hello', name: settings.nick || '', avatar: settings.avatar, title: typeof achTitle === 'function' ? achTitle() : '', diff: settings.diff, keys: settings.mode });
 }
 function openAvatar() {
   renderAvatarEditor();

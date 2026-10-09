@@ -161,11 +161,13 @@ function renderDetail() {
 function renderMods() {
   $('#modMirror').classList.toggle('on', !!settings.mirror);
   $('#modRandom').classList.toggle('on', !!settings.random);
+  $('#modGhost').classList.toggle('on', settings.ghost !== false);
   $('#speedShow').textContent = (+settings.speed).toFixed(1);
   $('#speedKeys').textContent = `플레이 중 ${fnLabel('speedUp')} ${fnLabel('speedDown')}`;
 }
 $('#modMirror').addEventListener('click', () => { settings.mirror = !settings.mirror; saveSettings(); renderMods(); });
 $('#modRandom').addEventListener('click', () => { settings.random = !settings.random; saveSettings(); renderMods(); });
+$('#modGhost').addEventListener('click', () => { settings.ghost = settings.ghost === false; saveSettings(); renderMods(); });
 $('#modHl').addEventListener('click', () => {
   if (net.room) {
     if (net.isLeader()) net.send({ type: 'hlmode', on: !net.room.hl });
@@ -520,6 +522,19 @@ net.on('songs', () => { if (currentScreen === 'lobby' && !addBusy) refreshSongs(
 /* ============================================================ 플레이 */
 async function fetchSong(id) { return api('/songs/' + id); }
 
+/* 고스트 대결 상대: 친구 1위 기록 (1위가 나면 내 최고 기록). 점수 흐름이 없는 예전 기록은 고르게 올랐다고 가정 */
+function ghostFor(id, diff, nl, hl) {
+  const s = songById(id);
+  if (!s) return null;
+  const nick = (settings.nick || '').trim();
+  const top = boardOf(s, nl, diff, hl)[0];
+  const linear = (score) => Array.from({ length: 21 }, (_, i) => Math.round((score * i) / 20));
+  const mk = (e, label) => ({ label, score: e.score, g: Array.isArray(e.g) && e.g.length >= 2 ? e.g : linear(e.score) });
+  if (top && top.name !== nick) return mk(top, `${top.name} · 1위`);
+  const mine = myRecord(s, nl, diff, hl);
+  return mine && mine.score > 0 ? mk(mine, '내 최고 기록') : null;
+}
+
 let soloSeq = 0;
 async function startSolo(id, diff, nl = 4, customNotes = null, practice = null) {
   const token = ++soloSeq;
@@ -536,6 +551,7 @@ async function startSolo(id, diff, nl = 4, customNotes = null, practice = null) 
   pendingResults = null;
   const g = new Game({ song, diff, keys: nl, notes, onExit: backFromGame, practice });
   game = g;
+  if (!customNotes && (!practice || practice.hl)) g.ghost = ghostFor(id, diff, nl, !!(practice && practice.hl));
   g.customNotes = customNotes;
   setupGameScreen(g, false);
   if (practice && !g.notes.length) { g.destroy(); toast('그 구간에는 노트가 없어요.'); backFromGame(); return; }
@@ -597,6 +613,14 @@ function showResult(g, r) {
   $('#rMiss').textContent = r.counts.miss;
   $('#rBadge').textContent = r.incomplete ? '중도 포기' : r.counts.miss === 0 && r.counts.good === 0 && r.counts.great === 0 ? 'ALL PERFECT' : r.fc ? 'FULL COMBO' : '';
   $('#rBest').textContent = g.practice && !g.hl ? '연습 모드라 기록은 남지 않아요.' : isTest ? '테스트 플레이라 기록은 남지 않아요.' : newLocal ? (g.hl ? '하이라이트 최고 기록 갱신!' : '내 최고 기록 갱신!') : '';
+  const rg = $('#rGhost');
+  rg.classList.add('hidden');
+  if (g.ghost && !r.incomplete && settings.ghost !== false) {
+    const d = r.score - g.ghost.score;
+    g.ghostWin = d > 0;
+    rg.innerHTML = `👻 VS ${esc(g.ghost.label)} · ${d > 0 ? `<b class="win">승리!</b> (+${d.toLocaleString()})` : d === 0 ? '<b>무승부</b>' : `<b class="lose">아쉽게 패배</b> (−${Math.abs(d).toLocaleString()})`}`;
+    rg.classList.remove('hidden');
+  }
   $('#btnRetry').classList.toggle('hidden', g.multi);
   $('#btnResRank').classList.toggle('hidden', isTest);
   $('#btnToLobby').textContent = editor && editor.testing ? '수정 화면으로' : g.multi ? '방으로' : '곡 선택으로';
@@ -609,6 +633,7 @@ function showResult(g, r) {
   requestAnimationFrame(() => drawTiming(g.offsets));
   startResultAvatar(r);
   if (g.fcKind && !r.incomplete) startConfetti(g.fcKind === 'ap');
+  if (!isTest && typeof achieveOnResult === 'function') { try { achieveOnResult(g, r); } catch (e) { console.warn('업적 확인 오류', e); } }
   if (!isTest) {
     api('/scores', {
       method: 'POST',
@@ -738,7 +763,7 @@ const r_avatars = {};
 function renderMultiResults(m) {
   const avOf = (id) => ((net.room && net.room.players.find((p) => p.id === id)) || {}).avatar || r_avatars[id];
   $('#rMultiList').innerHTML = m.results.map((r, i) =>
-    `<li class="${r.id === net.id ? 'me' : ''}"><span class="pos">${i + 1}</span><span class="n">${miniHtml(avOf(r.id) || r.avatar, 24)} ${esc(r.name)}${r.diff ? ` <small class="ld"><span class="tag">${r.keys || 4}K</span> ${DIFF_EN[r.diff] || ''}</small>` : ''}</span>
+    `<li class="${r.id === net.id ? 'me' : ''}"><span class="pos">${i + 1}</span><span class="n">${miniHtml(avOf(r.id) || r.avatar, 24)} ${r.title ? `<span class="ptitle">${esc(r.title)}</span>` : ''}${esc(r.name)}${r.diff ? ` <small class="ld"><span class="tag">${r.keys || 4}K</span> ${DIFF_EN[r.diff] || ''}</small>` : ''}</span>
       <span class="s">${(r.score || 0).toLocaleString()}</span><span class="a">${(r.acc || 0).toFixed(2)}%</span>
       <span class="rk rank-${esc(r.rank || '')}">${r.incomplete ? '포기' : esc(r.rank || '')}</span></li>`).join('');
   paintMinis($('#rMultiList'));
@@ -807,7 +832,7 @@ function renderRoom() {
     $('#roomPlayers').innerHTML = r.players.map((p) => {
       const pk = p.keys === 6 ? 6 : 4, pd = p.diff || 'normal';
       const st = s ? ' ' + starHtml(starOf(s, pk, pd)) : '';
-      return `<li class="${p.id === net.id ? 'me' : ''}">${miniHtml(p.avatar)}${p.id === r.leader ? '<span class="crown">👑</span>' : ''}<span class="pn">${esc(p.name)}</span>
+      return `<li class="${p.id === net.id ? 'me' : ''}">${miniHtml(p.avatar)}${p.id === r.leader ? '<span class="crown">👑</span>' : ''}<span class="pn">${p.title ? `<span class="ptitle">${esc(p.title)}</span>` : ''}${esc(p.name)}</span>
         <span class="pdiff"><span class="tag">${pk}K</span> ${DIFF_EN[pd] || ''}${st}</span>
         <span class="muted small">${stateName[p.state] || ''}</span></li>`;
     }).join('');
@@ -937,6 +962,7 @@ net.on('progress', (m) => {
   if (game.spec) game.spec.onProgress(m);
 });
 net.on('results', (m) => {
+  if (typeof achieveOnMulti === 'function') { try { achieveOnMulti(m); } catch { /* 무시 */ } }
   pendingResults = m;
   if (currentScreen === 'result' && lastResult && lastResult.g.multi) renderMultiResults(m);
 });
@@ -1183,7 +1209,7 @@ $('#nick').value = settings.nick || '';
 $('#nick').addEventListener('change', (e) => {
   settings.nick = e.target.value.trim().slice(0, 16);
   saveSettings();
-  net.send({ type: 'hello', name: settings.nick, avatar: settings.avatar, diff: settings.diff, keys: settings.mode });
+  net.send({ type: 'hello', name: settings.nick, avatar: settings.avatar, title: typeof achTitle === 'function' ? achTitle() : '', diff: settings.diff, keys: settings.mode });
   renderSongs();
 });
 

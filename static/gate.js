@@ -156,6 +156,8 @@ function gateEnter() {
     saveSettings();
     if ($('#nick')) $('#nick').value = profile.id;
   }
+  // 서버(멀티)에도 이름·칭호를 알려줌 (접속은 로그인 전에 이미 돼 있어서)
+  try { net.send({ type: 'hello', name: settings.nick || '', avatar: settings.avatar, title: typeof achTitle === 'function' ? achTitle() : '', diff: settings.diff, keys: settings.mode }); } catch { /* 무시 */ }
   gateEl.classList.add('out');
   window.gateOpen = false;
   setTimeout(() => { gateEl.classList.add('hidden'); gateEl.classList.remove('out'); cancelAnimationFrame(gateRaf); }, 450);

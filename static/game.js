@@ -674,6 +674,16 @@ class Game {
     this.feverSum = 0;
     this.feverPop = 0;
     this.offsets = [];          // 판정 오차(초, 실제 시간 기준) — 결과 화면 그래프용
+    this.curve = [0];           // 노트 5%마다의 점수 (고스트 대결용으로 기록에 함께 저장)
+    this.maxFever = 1;
+  }
+  /* 고스트: 지금까지 친 노트 비율에서 고스트가 갖고 있던 점수 */
+  ghostScore() {
+    const g = this.ghost && this.ghost.g;
+    if (!g || g.length < 2) return 0;
+    const f = clamp(this.judged / (this.totalUnits || 1), 0, 1) * (g.length - 1);
+    const i = Math.min(g.length - 2, Math.floor(f));
+    return g[i] + (g[i + 1] - g[i]) * (f - i);
   }
   acc() { return this.judged ? (this.sum / this.judged) * 100 : 100; }
 
@@ -847,6 +857,11 @@ class Game {
     const before = this.fever.mult;
     this.feverSum += WEIGHT[kind] * feverStep(this.fever, t, kind);
     if (this.fever.mult > before) this.feverPop = performance.now();
+    this.maxFever = Math.max(this.maxFever, this.fever.mult);
+    if (this.totalUnits) {
+      const k = Math.min(20, Math.floor(this.judged * 20 / this.totalUnits));
+      while (this.curve.length <= k) this.curve.push(this.score());
+    }
     const now = performance.now();
     if (kind === 'miss') {
       if (this.combo >= 20) fxShake(this.fx, 1.5, now);   // 긴 콤보가 끊기면 살짝 흔들림
@@ -979,6 +994,33 @@ class Game {
       this.raf = requestAnimationFrame(step);
     };
     this.raf = requestAnimationFrame(step);
+  }
+
+  /* 고스트 대결: 친구 1위(또는 내 최고) 기록과 같은 지점의 점수 비교 */
+  drawGhost(ctx, sx, y, outside, alignLeft) {
+    const me = this.score(), gs = Math.round(this.ghostScore()), d = me - gs;
+    const bw = outside ? 120 : 84;
+    const bx = alignLeft ? sx : sx - bw;
+    ctx.save();
+    ctx.textAlign = alignLeft ? 'left' : 'right';
+    ctx.textBaseline = 'top';
+    ctx.font = `800 ${outside ? 11 : 10}px ${UI_FONT}`;
+    ctx.fillStyle = 'rgba(185,140,255,0.85)';
+    ctx.fillText(`VS ${this.ghost.label}`, sx, y);
+    ctx.font = `800 ${outside ? 16 : 13}px "JetBrains Mono", monospace`;
+    ctx.fillStyle = this.judged === 0 ? 'rgba(255,255,255,0.5)' : d >= 0 ? '#4dffa6' : '#ff5a72';
+    ctx.fillText(`${d >= 0 ? '+' : '−'}${Math.abs(d).toLocaleString()}`, sx, y + 15);
+    // 막대 두 개: 나(파랑) · 고스트(보라) — 지금까지의 점수
+    const top = y + (outside ? 36 : 32);
+    const full = Math.max(1, me, gs);
+    for (const [v, col, yy] of [[me, '#4de1ff', top], [gs, '#b98cff', top + 6]]) {
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.fillRect(bx, yy, bw, 4);
+      ctx.fillStyle = col;
+      const w = bw * clamp(v / full, 0, 1);
+      ctx.fillRect(alignLeft ? bx : bx + bw - w, yy, w, 4);
+    }
+    ctx.restore();
   }
 
   /* 후렴(하이라이트): 들어가는 순간 빛이 터지고 글자, 후렴 동안 기어 양옆이 박자에 맞춰 은은하게 빛남 */
@@ -1215,6 +1257,7 @@ class Game {
     ctx.font = '500 14px "JetBrains Mono", monospace';
     ctx.fillStyle = 'rgba(255,255,255,0.65)';
     ctx.fillText(this.acc().toFixed(2) + '%', sx, outside ? 46 : 40);
+    if (this.ghost && settings.ghost !== false && this.phase !== 'loading' && this.phase !== 'ready') this.drawGhost(ctx, sx, outside ? 74 : 62, outside, roomR || !outside);
 
     const cx = x0 + fieldW / 2;
     if (this.stage) this.stage.draw({ beat: Math.max(0, Math.floor((gt - off) / bl)), fever: inFever && settings.skin.fever, label: settings.nick || '' });
@@ -1337,6 +1380,12 @@ class Game {
       score: this.score(), acc: +acc.toFixed(2), maxCombo: this.maxCombo, counts: { ...this.counts },
       rank: rankOf(acc), fc: this.counts.miss === 0 && this.totalUnits > 0, incomplete,
     };
+    if (!incomplete) {               // 고스트용 점수 흐름 (끝까지 채움)
+      const g = this.curve.slice(0, 21);
+      while (g.length < 21) g.push(result.score);
+      g[20] = result.score;
+      result.g = g;
+    }
     if (this.multi) net.send(this.gotStart ? { type: 'finish', result } : { type: 'loaded', error: true });
     showResult(this, result);
   }

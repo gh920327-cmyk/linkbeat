@@ -479,7 +479,7 @@ const net = {
     ws.onopen = () => {
       this.open = true;
       this.samples = [];
-      this.send({ type: 'hello', name: settings.nick || '', avatar: settings.avatar, diff: settings.diff, keys: settings.mode });
+      this.send({ type: 'hello', name: settings.nick || '', avatar: settings.avatar, title: typeof achTitle === 'function' ? achTitle() : '', diff: settings.diff, keys: settings.mode });
       let n = 0;
       clearInterval(this.pingTimer);
       this.ping();
@@ -542,7 +542,7 @@ function getBest(id, diff, nl = 4, hl = false) { return store.get(bestKey(id, di
 function setBest(id, diff, nl, r, hl = false) {
   const b = getBest(id, diff, nl, hl);
   if (!b || r.score > b.score) {
-    store.set(bestKey(id, diff, nl, hl), { score: r.score, acc: r.acc, rank: r.rank, fc: r.fc });
+    store.set(bestKey(id, diff, nl, hl), { score: r.score, acc: r.acc, rank: r.rank, fc: r.fc, ...(Array.isArray(r.g) ? { g: r.g } : {}) });
     if (typeof profileSync === 'function') profileSync();
     return true;
   }
