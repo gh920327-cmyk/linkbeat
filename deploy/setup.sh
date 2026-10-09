@@ -13,6 +13,13 @@ export DEBIAN_FRONTEND=noninteractive
 say(){ echo -e "\n\033[1;36m▶ $*\033[0m"; }
 
 APT="apt-get -o DPkg::Lock::Timeout=1200 -y"
+# Caddy 공식 설치 저장소(cloudsmith)가 지금 막혀 있어서(402) apt 업데이트 전체가 실패함.
+# Caddy는 이미 깔려 있으니 그 저장소만 꺼 둠 (Caddy 자체는 그대로 동작)
+if command -v caddy >/dev/null; then
+  for f in /etc/apt/sources.list.d/caddy-stable.list /etc/apt/sources.list.d/caddy-stable.sources; do
+    [ -f "$f" ] && mv "$f" "$f.disabled" && echo "  disabled broken Caddy repo: $f"
+  done
+fi
 say "1/7 Installing python, numpy, scipy (2~5 min) · 기본 도구 설치"
 if python3 -c "import numpy, scipy" 2>/dev/null && command -v git >/dev/null && command -v curl >/dev/null; then
   echo "  already installed / 이미 설치됨"
@@ -20,7 +27,7 @@ else
   if pgrep -x unattended-upgr >/dev/null || pgrep -f apt.systemd.daily >/dev/null; then
     echo "  The server is running its own automatic update. Waiting for it to finish... / 서버 자동 업데이트가 끝나길 기다리는 중"
   fi
-  $APT update
+  $APT update || echo "  (some package lists failed to update - continuing)"
   $APT install --no-install-recommends curl git ca-certificates gnupg python3 python3-numpy python3-scipy debian-keyring debian-archive-keyring apt-transport-https
 fi
 python3 --version
