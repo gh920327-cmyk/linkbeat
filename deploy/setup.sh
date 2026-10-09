@@ -12,20 +12,28 @@ ENVF=/etc/linkbeat.env
 export DEBIAN_FRONTEND=noninteractive
 say(){ echo -e "\n\033[1;36m▶ $*\033[0m"; }
 
-say "1/7 기본 도구 설치 (파이썬 · numpy · scipy)"
-apt-get update -y -qq
-apt-get install -y -qq curl git ca-certificates gnupg python3 python3-numpy python3-scipy debian-keyring debian-archive-keyring apt-transport-https >/dev/null
+APT="apt-get -o DPkg::Lock::Timeout=1200 -y"
+say "1/7 Installing python, numpy, scipy (2~5 min) · 기본 도구 설치"
+if python3 -c "import numpy, scipy" 2>/dev/null && command -v git >/dev/null && command -v curl >/dev/null; then
+  echo "  already installed / 이미 설치됨"
+else
+  if pgrep -x unattended-upgr >/dev/null || pgrep -f apt.systemd.daily >/dev/null; then
+    echo "  The server is running its own automatic update. Waiting for it to finish... / 서버 자동 업데이트가 끝나길 기다리는 중"
+  fi
+  $APT update
+  $APT install --no-install-recommends curl git ca-certificates gnupg python3 python3-numpy python3-scipy debian-keyring debian-archive-keyring apt-transport-https
+fi
 python3 --version
 
-say "2/7 HTTPS 서버(Caddy) 확인"
+say "2/7 Checking HTTPS server (Caddy) · HTTPS 서버 확인"
 if ! command -v caddy >/dev/null; then
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
-  apt-get update -y -qq && apt-get install -y -qq caddy >/dev/null
+  $APT update && $APT install caddy
 fi
 [ -f /swapfile ] || { fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab; }
 
-say "3/7 게임 내려받기"
+say "3/7 Downloading the game · 게임 내려받기"
 id linkbeat >/dev/null 2>&1 || useradd -r -m -d /home/linkbeat -s /usr/sbin/nologin linkbeat
 mkdir -p "$DATA"
 if [ ! -d "$APP/.git" ]; then git clone -q "$REPO" "$APP"; fi
@@ -33,7 +41,7 @@ git config --global --add safe.directory "$APP" 2>/dev/null || true
 git -C "$APP" fetch -q origin main && git -C "$APP" reset -q --hard origin/main
 chown -R linkbeat:linkbeat "$DATA"
 
-say "4/7 호스트 키 준비 (처음 한 번만 새로 만듦)"
+say "4/7 Host key · 호스트 키 준비"
 if [ ! -f "$ENVF" ] || ! grep -q '^LB_HOST_KEY=.\+' "$ENVF"; then
   KEY=$(python3 -c 'import secrets;print(secrets.token_urlsafe(24))')
   cat > "$ENVF" <<EOF
@@ -43,7 +51,7 @@ fi
 chmod 600 "$ENVF"
 KEY=$(grep '^LB_HOST_KEY=' "$ENVF" | cut -d= -f2-)
 
-say "5/7 자동 실행 등록"
+say "5/7 Auto start / auto update · 자동 실행 등록"
 cat > /etc/systemd/system/linkbeat.service <<EOF
 [Unit]
 Description=LINKBEAT rhythm game server
@@ -110,7 +118,7 @@ OnUnitActiveSec=1min
 WantedBy=timers.target
 EOF
 
-say "6/7 매일 백업 (곡·기록·프로필, 최근 14일치)"
+say "6/7 Daily backup · 매일 백업"
 cat > /usr/local/bin/linkbeat-backup <<'EOF'
 #!/bin/bash
 mkdir -p /var/backups/linkbeat
@@ -138,7 +146,7 @@ systemctl daemon-reload
 systemctl enable -q --now linkbeat.service linkbeat-update.timer linkbeat-backup.timer
 systemctl restart linkbeat
 
-say "7/7 HTTPS 주소 연결 (달 없는 밤 주소는 그대로)"
+say "7/7 HTTPS address (Moonless Night stays as is) · 주소 연결"
 cat > /etc/caddy/linkbeat.caddy <<EOF
 $HOST {
   encode gzip
@@ -152,13 +160,13 @@ systemctl enable -q caddy
 systemctl reload caddy 2>/dev/null || systemctl restart caddy
 
 sleep 3
-if curl -fsS --max-time 5 http://127.0.0.1:$PORT/api/health >/dev/null; then OK="링크비트 서버 정상"; else OK="서버 응답 없음 (journalctl -u linkbeat -n 50 확인)"; fi
+if curl -fsS --max-time 5 http://127.0.0.1:$PORT/api/health >/dev/null; then OK="SERVER OK"; else OK="SERVER NOT RESPONDING (journalctl -u linkbeat -n 50)"; fi
 echo
 echo "=================================================================="
-echo " 설치 끝 · $OK"
-echo " 게임 주소:  https://$HOST/"
-echo " 호스트 키:  $KEY"
-echo "   → 이 키는 곡을 추가하는 사람(본인)만 쓰세요. 친구에게 알려주지 마세요."
-echo "   → 잊어버리면 이 명령으로 다시 볼 수 있어요:  sudo grep KEY /etc/linkbeat.env"
-echo " (인증서 발급에 1분 정도 걸릴 수 있어요)"
+echo " DONE · $OK"
+echo " Game address :  https://$HOST/"
+echo " Host key     :  $KEY"
+echo "   - Keep this key to yourself (only for adding songs)."
+echo "   - Forgot it?  sudo grep KEY /etc/linkbeat.env"
+echo " (HTTPS certificate may take about 1 minute)"
 echo "=================================================================="
