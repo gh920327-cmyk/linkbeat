@@ -596,10 +596,51 @@ function updateOffsetShow() {
 $('#btnTouchPause').addEventListener('click', () => { if (game && currentScreen === 'game') game.pause(); });
 
 /* ============================================================ 결과 */
+const RANK_ORDER = ['D', 'C', 'B', 'A', 'S', 'SS'];
+const rankIdx = (k) => RANK_ORDER.indexOf(k);
+/* 이번 판 전까지의 내 최고 기록 (서버 순위표의 내 기록과 이 컴퓨터의 기록 중 더 좋은 것) */
+function prevBestOf(g) {
+  const s = songById(g.song.id);
+  const nick = (settings.nick || '').trim();
+  const cands = [];
+  if (s && nick) { const e = boardOf(s, g.nl, g.diff, !!g.hl).find((x) => x.name === nick); if (e) cands.push(e); }
+  const lb = getBest(g.song.id, g.diff, g.nl, !!g.hl);
+  if (lb) cands.push(lb);
+  if (!cands.length) return null;
+  const best = cands.reduce((a, b) => (b.score > a.score ? b : a));
+  const bestRank = cands.map((c) => c.rank).filter((k) => rankIdx(k) >= 0).sort((a, b) => rankIdx(b) - rankIdx(a))[0] || best.rank;
+  return { score: best.score || 0, rank: bestRank };
+}
+/* 점수가 얼마나 올랐는지 · 등급이 몇에서 몇으로 올랐는지 */
+function renderBestDelta(prev, r, show) {
+  const dl = $('#rDelta'), ru = $('#rRankUp');
+  dl.className = 'r-delta hidden'; ru.className = 'r-rankup hidden';
+  if (!show || r.incomplete) return;
+  if (!prev) {
+    dl.className = 'r-delta up';
+    dl.innerHTML = '★ 첫 기록!';
+    return;
+  }
+  const d = r.score - prev.score;
+  dl.className = 'r-delta ' + (d > 0 ? 'up' : d === 0 ? 'same' : 'down');
+  dl.innerHTML = d > 0 ? `▲ +${d.toLocaleString()} <small>· 최고 기록 갱신! (이전 ${prev.score.toLocaleString()})</small>`
+    : d === 0 ? '최고 기록과 같은 점수예요'
+      : `최고 기록 ${prev.score.toLocaleString()}까지 <b>−${Math.abs(d).toLocaleString()}</b>`;
+  if (rankIdx(r.rank) > rankIdx(prev.rank) && rankIdx(prev.rank) >= 0) {
+    ru.className = 'r-rankup up';
+    ru.innerHTML = `<span class="rank-${esc(prev.rank)}">${esc(prev.rank)}</span><i>→</i><span class="rank-${esc(r.rank)}">${esc(r.rank)}</span><em>RANK UP</em>`;
+  } else if (rankIdx(prev.rank) >= 0) {
+    ru.className = 'r-rankup';
+    ru.innerHTML = `최고 등급 <span class="rank-${esc(prev.rank)}">${esc(prev.rank)}</span>`;
+  }
+}
+
 function showResult(g, r) {
   lastResult = { g, r };
   const isTest = !!(editor && editor.testing) || !!g.customNotes || (!!g.practice && !g.hl);
+  const prevBest = isTest ? null : prevBestOf(g);      // 기록을 저장하기 전에 읽어 둠
   const newLocal = !isTest && setBest(g.song.id, g.diff, g.nl, r, g.hl);
+  renderBestDelta(prevBest, r, !isTest);
   const mods = (g.hl ? ' <span class="tag hl-tag">HIGHLIGHT</span>' : '') + (g.modNames.length ? ` <span class="warn">${g.modNames.join(' · ')}</span>` : '');
   $('#rSong').innerHTML = `${esc(g.song.title)} <span class="tag">${g.nl}KEY</span> ${DIFF_EN[g.diff]} ${starHtml(g.stars)}${mods}`;
   $('#rRank').textContent = r.rank;

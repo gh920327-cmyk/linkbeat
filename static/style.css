@@ -695,3 +695,23 @@ dialog::backdrop { background: rgba(0, 0, 0, .65); backdrop-filter: blur(3px); }
 .ap-head { font-size: 11px; font-weight: 800; letter-spacing: 2px; color: var(--gold); }
 .ap-name { font-size: 18px; font-weight: 900; color: #fff; }
 .ap-desc { font-size: 12px; color: var(--muted); }
+
+/* 결과: 최고 기록 대비 점수·등급 변화 */
+.r-delta { font-family: var(--head); font-weight: 800; font-size: 16px; margin: 2px 0 4px; letter-spacing: .5px; }
+.r-delta.hidden, .r-rankup.hidden { display: none; }
+.r-delta small { font-family: 'Noto Sans KR', sans-serif; font-weight: 600; font-size: 12px; color: var(--muted); letter-spacing: 0; }
+.r-delta.up { color: var(--green); text-shadow: 0 0 12px rgba(77,255,166,.45); animation: deltaIn .5s cubic-bezier(.2,1.4,.4,1) both .35s; }
+.r-delta.same { color: var(--text); }
+.r-delta.down { color: var(--muted); font-family: 'Noto Sans KR', sans-serif; font-weight: 600; font-size: 13px; }
+.r-delta.down b { color: #ff7a8a; }
+@keyframes deltaIn { from { opacity: 0; transform: translateY(8px) scale(.9); } to { opacity: 1; transform: none; } }
+.r-rankup { text-align: center; font-size: 12px; color: var(--muted); margin-top: -2px; font-weight: 700; }
+.r-rankup span { font-family: var(--head); font-weight: 900; font-style: italic; font-size: 15px; margin: 0 2px; }
+.r-rankup.up { display: grid; grid-template-columns: auto auto auto; align-items: center; justify-content: center; column-gap: 6px; color: var(--gold);
+  padding: 4px 12px; margin: 2px auto 0; width: max-content; align-self: center; background: rgba(255,200,61,.1); border: 1px solid rgba(255,200,61,.55);
+  box-shadow: 0 0 16px rgba(255,200,61,.3); animation: rankUp .6s cubic-bezier(.2,1.6,.4,1) both .5s, rankGlow 1.6s ease-in-out infinite 1.2s; }
+.r-rankup.up span { font-size: 22px; }
+.r-rankup.up i { font-style: normal; color: var(--text); }
+.r-rankup.up em { font-style: normal; font-family: var(--head); font-size: 10px; letter-spacing: 2px; grid-column: 1 / -1; text-align: center; }
+@keyframes rankUp { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: none; } }
+@keyframes rankGlow { 50% { box-shadow: 0 0 26px rgba(255,200,61,.6); } }
