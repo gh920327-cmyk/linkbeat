@@ -1202,6 +1202,30 @@ def migrate_ai_accents():
         notify_all({"type": "songs"})
 
 
+BAND_VER = 1   # 기존 채보 별 범위 맞춤 버전 (올리면 저장된 곡도 서버 켤 때 한 번 맞춤)
+
+
+def migrate_basic_bands():
+    """예전에 만든 기존(자동) 채보도 난이도별 별 범위에 맞춤 (서버 켤 때 한 번, 고친 난이도는 그대로)"""
+    n = 0
+    for p in SONGS.glob("*.json"):
+        if not VID_RE.match(p.stem):
+            continue
+        try:
+            with FILE_LOCK:
+                song = load_song(p.stem)
+                if not song or song.get("bandFix", 0) >= BAND_VER:
+                    continue
+                fit_basic(song)
+                save_song(song)
+            n += 1
+        except Exception:
+            traceback.print_exc()
+    if n:
+        log(f"기존 채보 {n}곡을 난이도별 별 범위에 맞췄어요.")
+        notify_all({"type": "songs"})
+
+
 def fit_basic(song):
     """기존(자동) 채보도 난이도별 별점 범위에 맞춤 — 채보 수정기로 고친 난이도는 그대로"""
     order = ("easy", "normal", "hard", "extreme")
@@ -1222,6 +1246,7 @@ def fit_basic(song):
                 ch[d] = validate_notes(cur, nl)
             except Exception:
                 traceback.print_exc()
+    song["bandFix"] = BAND_VER
 
 
 def save_ai(vid, data):
@@ -2570,7 +2595,10 @@ async def main():
     MAIN_LOOP = asyncio.get_running_loop()
     server = await asyncio.start_server(handle_conn, BIND, PORT)
     asyncio.create_task(reaper())
-    threading.Thread(target=migrate_ai_accents, daemon=True).start()
+    def _migrate():
+        migrate_basic_bands()      # 기존 채보 먼저 (AI 채보 다듬기가 기존 채보를 기준으로 씀)
+        migrate_ai_accents()
+    threading.Thread(target=_migrate, daemon=True).start()
     if CLOUD:
         load_queue()
         print(f"링크비트 클라우드 서버 실행 중 · {BIND}:{PORT} · 데이터 {DATA}", flush=True)
