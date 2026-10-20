@@ -1,0 +1,29 @@
+# 확인용 (임시): 서버의 곡 데이터를 읽기만 해서 받아 둠 — 확인 끝나면 브랜치째 지움
+name: diag
+on:
+  push:
+    branches: [diag-data]
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 곡 데이터 받기
+        run: |
+          mkdir -p out/songs
+          B=https://linkbeat.43-202-116-151.sslip.io/api
+          curl -sS --fail "$B/songs" -o out/list.json
+          python3 - <<'PY'
+          import json, urllib.request
+          B = "https://linkbeat.43-202-116-151.sslip.io/api"
+          for s in json.load(open("out/list.json"))["songs"]:
+              d = json.loads(urllib.request.urlopen(f"{B}/songs/{s['id']}", timeout=30).read())
+              d.pop("board", None)
+              json.dump(d, open(f"out/songs/{s['id']}.json", "w"), ensure_ascii=False)
+          print("ok")
+          PY
+          python3 -c "import json;d=json.load(open('out/list.json'));[e.pop('board',None) for e in d['songs']];json.dump(d,open('out/list.json','w'),ensure_ascii=False)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: songs
+          path: out
+          retention-days: 1
