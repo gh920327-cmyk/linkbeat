@@ -860,9 +860,21 @@ def band_mid(diff):
     return (lo + min(hi, lo + 1.0)) / 2 if diff == "extreme" else (lo + hi) / 2
 
 
+def song_beats(song):
+    """박 위치: 분석한 박이 있으면 그것, 없으면(예전 곡) BPM·첫 박으로 계산"""
+    b = song.get("beats") or []
+    if len(b) >= 8:
+        return sorted(float(x) for x in b)
+    bpm = max(40.0, min(300.0, float(song.get("bpm") or 120)))
+    step, off = 60.0 / bpm, float(song.get("offset") or 0)
+    dur = float(song.get("duration") or 300)
+    k0 = -int(off / step) - 1
+    return [round(off + k * step, 3) for k in range(k0, int((dur - off) / step) + 2) if 0 <= off + k * step <= dur + 1]
+
+
 def _beat_tools(song):
     import bisect
-    grid = sorted(set(round(float(b), 3) for b in (song.get("beats") or [])))
+    grid = sorted(set(round(float(b), 3) for b in song_beats(song)))
     half = sorted(set(grid + [round((x + y) / 2, 3) for x, y in zip(grid, grid[1:])]))
 
     def near(arr, t, w):
@@ -940,7 +952,7 @@ def fit_band(song, diff, notes, nl=4, pool=()):
     it = 0
     pool = sorted(({k: v for k, v in n.items() if k in ("t", "l", "d", "a")} for n in pool), key=lambda n: n["t"])
     used_pool = set()
-    beats = sorted(float(b) for b in (song.get("beats") or []))
+    beats = song_beats(song)
     grid_pts = []
     sub = 4 if diff in ("hard", "extreme") else 2
     if notes:
@@ -1074,7 +1086,7 @@ def ai_balance(song, diff, notes):
     bcount = [int(round(c * scale)) for c in bcount]
     busy = sorted(c for c in bcount if c)
     p90 = busy[int(len(busy) * 0.9)] if busy else 4
-    grid = sorted(set(round(float(b), 3) for b in (song.get("beats") or [])))
+    grid = sorted(set(round(float(b), 3) for b in song_beats(song)))
 
     def near(arr, t, w):
         i = bisect.bisect_left(arr, t)
