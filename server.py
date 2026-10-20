@@ -806,7 +806,7 @@ def finish_pc_job(job, meta, res):
 
 
 ACC_WIN = 0.05   # 기존 채보의 드럼 강타 시각과 이만큼(초) 가까운 AI 노트를 강타로
-AI_FIX = 6       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
+AI_FIX = 7       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
 HOLD_GAP = 0.1   # 롱노트 끝과 같은 줄 다음 노트 사이 최소 간격
 MAX_HOLDS = 1    # 동시에 누르고 있는 롱노트 최대 개수 (롱노트는 최소한으로)
 HOLD_MIN = 0.6   # 이보다 짧은 롱노트는 일반 노트로
@@ -884,6 +884,41 @@ def _beat_tools(song):
     def on_beat(t):
         return 1.5 if near(grid, t, 0.04) else 0.8 if near(half, t, 0.04) else 0.0
     return near, on_beat
+
+
+BEAT_GAP = {"easy": 1 / 2, "normal": 1 / 3, "hard": 1 / 4, "extreme": 1 / 4}   # 노트 사이 최소 간격(박 단위): 이보다 촘촘한 연타는 막음
+
+
+def beat_len_at(beats, t):
+    """t 근처 한 박 길이 (박 목록에서)"""
+    import bisect
+    i = bisect.bisect_right(beats, t)
+    lo, hi = max(1, i - 2), min(len(beats) - 1, i + 2)
+    gaps = [beats[j] - beats[j - 1] for j in range(lo, hi + 1) if 0 < beats[j] - beats[j - 1] < 2.0]
+    return sorted(gaps)[len(gaps) // 2] if gaps else 0.5
+
+
+def snap_to_grid(song, notes, tol=0.03):
+    """AI 노트를 박자 칸(1/4박 · 셋잇단 1/3박)에 맞춤 — 살짝 어긋난 노트끼리 붙어서 생기는 뭉침 방지"""
+    import bisect
+    beats = song_beats(song)
+    if len(beats) < 4:
+        return notes
+    pts = []
+    for x, y in zip(beats, beats[1:]):
+        L = y - x
+        pts += [x + L * k / 4 for k in range(4)] + [x + L / 3, x + 2 * L / 3]
+    pts.sort()
+    out = []
+    for n in notes:
+        t = float(n["t"])
+        i = bisect.bisect_left(pts, t)
+        best = min((pts[j] for j in (i - 1, i) if 0 <= j < len(pts)), key=lambda p: abs(p - t), default=t)
+        n = dict(n)
+        if abs(best - t) <= tol:
+            n["t"] = round(best, 3)
+        out.append(n)
+    return out
 
 
 def limit_chords(notes, diff, nl=4):
@@ -973,7 +1008,8 @@ def fit_band(song, diff, notes, nl=4, pool=()):
 
         def free(t, l):
             i = bisect.bisect_left(times, t)
-            if any(0 <= j < len(times) and 0.003 < abs(times[j] - t) < min_gap for j in (i - 1, i)):
+            need = max(min_gap, beat_len_at(beats, t) * BEAT_GAP.get(diff, 0.25) * 0.92)
+            if any(0 <= j < len(times) and 0.003 < abs(times[j] - t) < need for j in (i - 1, i)):
                 return False
             lt = lane_times.get(l, [])
             i = bisect.bisect_left(lt, t)
@@ -992,9 +1028,24 @@ def fit_band(song, diff, notes, nl=4, pool=()):
             cands.append((-(on_beat(n["t"]) + (0.8 if n.get("a") else 0)) + 0.15 * sec.get(int(n["t"]), 0), i))
         cands.sort()
         added = 0
-        for _, i in cands[:k]:
-            notes.append(dict(pool[i]))
+        for _, i in cands:
+            if added >= k:
+                break
+            n = dict(pool[i])
             used_pool.add(i)
+            if not free(n["t"], n["l"]):          # 같은 묶음에서 먼저 넣은 노트와 너무 붙으면 건너뜀
+                continue
+            j = bisect.bisect_left(times, n["t"])
+            for jj in (j - 1, j):                  # 거의 같은 시각이면 그 박에 정확히 맞춰 동시치기로
+                if 0 <= jj < len(times) and abs(times[jj] - n["t"]) <= 0.003:
+                    n["t"] = times[jj]
+            if any(abs(x["t"] - n["t"]) < 0.001 and x["l"] == n["l"] for x in notes):
+                continue
+            notes.append(n)
+            if n["t"] not in times:
+                times.insert(bisect.bisect_left(times, n["t"]), n["t"])
+            lane_times.setdefault(n["l"], []).append(n["t"])
+            lane_times[n["l"]].sort()
             added += 1
         if not added and grid_pts:             # 가져올 노트가 없으면: 박·반박(어려움 이상은 1/4박) 빈자리에 노트
             gc = []
@@ -1009,8 +1060,10 @@ def fit_band(song, diff, notes, nl=4, pool=()):
                 lanes = [l for l in lanes if free(t, l)]      # 같은 묶음에서 먼저 넣은 노트와 겹치지 않게
                 if not lanes:
                     continue
-                prev = [n for n in notes if abs(n["t"] - t) < 0.6]
-                l2 = max(lanes, key=lambda l: (min((abs(l - n["l"]) for n in prev), default=2), random.random()))
+                before = [n for n in notes if n["t"] < t - 0.003]
+                pl = max(before, key=lambda n: n["t"])["l"] if before else None
+                # 이웃한 줄로 자연스럽게 이어지게 (같은 줄은 피함)
+                l2 = min(lanes, key=lambda l: (abs(abs(l - pl) - 1) if pl is not None else 0, random.random()))
                 notes.append({"t": t, "l": l2, "d": 0.0})
                 lane_times.setdefault(l2, []).append(t)
                 lane_times[l2].sort()
@@ -1054,7 +1107,7 @@ def ai_balance(song, diff, notes):
     base = sorted(((song.get("charts") or {}).get(diff) or []), key=lambda n: n["t"])
     if not base or not notes:
         return notes
-    notes = sorted((dict(n) for n in notes), key=lambda n: (n["t"], n["l"]))
+    notes = sorted(snap_to_grid(song, notes), key=lambda n: (n["t"], n["l"]))
     bpm = float(song.get("bpm") or 120)
     beat = 60.0 / max(40.0, min(300.0, bpm))
     gap_min = max(GAP_FILL, 3 * beat)
@@ -1123,9 +1176,12 @@ def ai_balance(song, diff, notes):
     def score2(t):
         return (2 if near(btimes, t, 0.05) else 0) + (1.5 if near(grid, t, 0.04) else 0.8 if near(half, t, 0.04) else 0) \
                + (0.5 if any(n.get("a") for n in groups[t]) else 0)
+    beats_all = song_beats(song)
+    frac = BEAT_GAP.get(diff, 0.25)
     spaced = []
     for t in sorted(keep):
-        if spaced and t - spaced[-1] < min_gap - 0.002:
+        gap_need = max(min_gap, beat_len_at(beats_all, t) * frac * 0.92)   # 그 곡 박자 기준 (살짝 여유)
+        if spaced and t - spaced[-1] < gap_need - 0.002:
             if score2(t) > score2(spaced[-1]):
                 spaced[-1] = t
             continue
