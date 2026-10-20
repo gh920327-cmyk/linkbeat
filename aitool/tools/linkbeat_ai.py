@@ -498,6 +498,29 @@ def cmd_resend(vid):
     say(f"서버에 다시 보냈어요: {r.get('counts')}")
 
 
+def cmd_export():
+    """확인용: 서버의 곡 데이터(기존·AI 채보) + out 폴더의 AI 원본 후보를 zip 하나로 (기록·프로필은 안 넣음)"""
+    import zipfile
+    srv = get_server(need_key=False)
+    lst = srv.call("GET", "songs").get("songs", [])
+    dst = ROOT / f"확인용_{time.strftime('%m%d_%H%M')}.zip"
+    with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:
+        for i, s0 in enumerate(lst):
+            say(f"  곡 데이터 {i + 1}/{len(lst)}: {s0.get('title', s0['id'])[:40]}")
+            try:
+                d = srv.call("GET", f"songs/{s0['id']}")
+            except Exception as e:
+                say(f"    건너뜀: {e}")
+                continue
+            d.pop("board", None)
+            z.writestr(f"songs/{s0['id']}.json", json.dumps(d, ensure_ascii=False))
+        if OUT.exists():
+            for f in OUT.rglob("*"):
+                if f.is_file() and f.suffix in (".osu", ".json"):
+                    z.write(f, "out/" + str(f.relative_to(OUT)).replace("\\", "/"))
+    say(f"\n만들었어요: {dst}\n이 파일을 채팅에 올려 주세요. ({dst.stat().st_size // 1024} KB)")
+
+
 def cmd_undo(vid=None):
     srv = get_server(need_key=True)
     if vid:
@@ -519,6 +542,7 @@ def main():
     ap.add_argument("link", nargs="?", default="")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--undo", action="store_true")
+    ap.add_argument("--export", action="store_true", help="확인용 zip 만들기")
     ap.add_argument("--upload", default="", help="만들어 둔 AI 채보를 서버에 다시 보내기 (곡 ID)")
     # 링크비트 실행기(채보 엔진)용
     ap.add_argument("--gen", default="", help="곡 ID (엔진용: --audio --targets --out 와 함께)")
@@ -541,6 +565,9 @@ def main():
             return
         if a.check:
             sys.exit(0 if cmd_check() else 1)
+        if a.export:
+            cmd_export()
+            return
         if a.upload:
             cmd_resend(parse_vid(a.upload) or a.upload)
             return
