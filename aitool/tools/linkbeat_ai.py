@@ -408,16 +408,8 @@ def cmd_make(link):
 
     say("\n[4/4] 서버에 'AI 채보'로 따로 저장 (기본 채보는 그대로)")
     body = {"charts": {d: c[1] for d, c in chosen.items()}, "by": f"MuG Diffusion v{mug.version}"}
-    while True:
-        try:
-            r = srv.call("PUT", f"songs/{vid}/ai", body, timeout=120)
-            break
-        except PermissionError:
-            say("호스트 키가 맞지 않아요. 다시 넣어 주세요.")
-            st = load_settings()
-            st.pop("hostKey", None)
-            save_settings(st)
-            srv = get_server(need_key=True)
+    (odir / "upload.json").write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+    r = upload(srv, vid, body)
     summary = {"vid": vid, "title": title, "at": time.time(), "seed": seed, "model": body["by"],
                "chosen": {d: {"file": c[2], "stars": c[0], "notes": len(c[1])} for d, c in chosen.items()},
                "candidates": [{"file": c[2], "stars": c[0], "notes": len(c[1])} for c in sorted(cands, key=lambda c: c[0])]}
@@ -430,6 +422,29 @@ def cmd_make(link):
             say(f"  {DIFF_KO[d]:<6}  ★{targets[d]:4.1f} {len(basic[d]):5d}노트   ★{chosen[d][0]:4.1f} {len(chosen[d][1]):5d}노트")
     say("\n게임에서 이 곡을 고르고 'AI 채보' 칩을 켜면 플레이할 수 있어요. (혼자 · 4키 · 기록은 안 남음)")
     return r
+
+
+def upload(srv, vid, body):
+    while True:
+        try:
+            return srv.call("PUT", f"songs/{vid}/ai", body, timeout=120)
+        except PermissionError:
+            say("호스트 키가 맞지 않아요. 다시 넣어 주세요.")
+            st = load_settings()
+            st.pop("hostKey", None)
+            save_settings(st)
+            srv = get_server(need_key=True)
+        except LookupError:
+            raise SystemExit("\n서버에 아직 'AI 채보' 기능이 안 올라가 있어요. 만든 채보는 저장해 뒀어요.\n"
+                             f"기능을 올린 다음 2_AI채보만들기.bat --upload {vid} 로 다시 보내면 돼요.")
+
+
+def cmd_resend(vid):
+    p = OUT / vid / "upload.json"
+    if not p.exists():
+        raise SystemExit("이 곡으로 만들어 둔 AI 채보가 없어요.")
+    r = upload(get_server(need_key=True), vid, json.loads(p.read_text(encoding="utf-8")))
+    say(f"서버에 다시 보냈어요: {r.get('counts')}")
 
 
 def cmd_undo(vid=None):
@@ -453,10 +468,14 @@ def main():
     ap.add_argument("link", nargs="?", default="")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--undo", action="store_true")
+    ap.add_argument("--upload", default="", help="만들어 둔 AI 채보를 서버에 다시 보내기 (곡 ID)")
     a = ap.parse_args()
     try:
         if a.check:
             sys.exit(0 if cmd_check() else 1)
+        if a.upload:
+            cmd_resend(parse_vid(a.upload) or a.upload)
+            return
         if a.undo:
             cmd_undo(parse_vid(a.link) if a.link else None)
             return
