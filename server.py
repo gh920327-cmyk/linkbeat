@@ -805,7 +805,7 @@ def finish_pc_job(job, meta, res):
 
 
 ACC_WIN = 0.05   # 기존 채보의 드럼 강타 시각과 이만큼(초) 가까운 AI 노트를 강타로
-AI_FIX = 3       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
+AI_FIX = 4       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
 HOLD_GAP = 0.1   # 롱노트 끝과 같은 줄 다음 노트 사이 최소 간격
 MAX_HOLDS = 1    # 동시에 누르고 있는 롱노트 최대 개수 (롱노트는 최소한으로)
 HOLD_MIN = 0.6   # 이보다 짧은 롱노트는 일반 노트로
@@ -848,6 +848,82 @@ def ai_tidy(notes):
     return [{"t": round(n["t"], 3), "l": n["l"], "d": round(n["d"], 3)} for n in out]
 
 
+GAP_FILL = 1.6     # AI 채보가 이보다 오래(초) 비어 있고 기존 채보엔 노트가 있으면 기존 채보로 채움
+DENSE_X = 1.5      # 1초 구간 AI 노트 수가 기존 채보의 이 배수(+2개)를 넘으면 덜어냄
+
+
+def ai_balance(song, diff, notes):
+    """AI가 보컬(랩 등)에만 쏠리는 것 보정 — 기존 채보(악기·박자를 따라감)를 기준으로
+    1) 전주·간주처럼 AI 채보가 비어 있는 구간 → 기존 채보 노트로 채움
+    2) 노트가 미친 듯이 몰리는 구간 → 박자(기존 채보 노트·박 위치)에 맞는 노트만 남김"""
+    import bisect
+    import math
+    base = sorted(((song.get("charts") or {}).get(diff) or []), key=lambda n: n["t"])
+    if not base or not notes:
+        return notes
+    notes = sorted((dict(n) for n in notes), key=lambda n: (n["t"], n["l"]))
+    bpm = float(song.get("bpm") or 120)
+    beat = 60.0 / max(40.0, min(300.0, bpm))
+    gap_min = max(GAP_FILL, 3 * beat)
+    btimes = [float(n["t"]) for n in base]
+    # 1) 빈 구간 채우기 (곡 처음 ~ 첫 노트, 노트 사이, 마지막 노트 ~ 끝)
+    times = [-1.0] + [n["t"] for n in notes] + [float(song.get("duration") or btimes[-1] + 1) + 1.0]
+    fill = []
+    for a, b in zip(times, times[1:]):
+        if b - a < gap_min:
+            continue
+        lo, hi = a + 0.25, b - 0.25
+        i = bisect.bisect_left(btimes, lo)
+        while i < len(base) and base[i]["t"] < hi:
+            n = base[i]
+            if n["t"] + float(n.get("d", 0) or 0) < b - 0.15:
+                fill.append({k: v for k, v in n.items() if k in ("t", "l", "d", "a")})
+            i += 1
+    notes = sorted(notes + fill, key=lambda n: (n["t"], n["l"]))
+    # 2) 몰림 덜어내기: 1초 구간마다 허용 개수 = max(기존 × 1.5 + 2, 기존 상위 10% 밀도 × 1.2)
+    dur = max(n["t"] for n in notes) + 1
+    nsec = int(math.ceil(dur))
+    bcount = [0] * (nsec + 1)
+    for t in btimes:
+        if 0 <= t <= nsec:
+            bcount[int(t)] += 1
+    busy = sorted(c for c in bcount if c)
+    p90 = busy[int(len(busy) * 0.9)] if busy else 4
+    grid = sorted(set(round(float(b), 3) for b in (song.get("beats") or [])))
+
+    def near(arr, t, w):
+        i = bisect.bisect_left(arr, t)
+        return any(0 <= j < len(arr) and abs(arr[j] - t) <= w for j in (i - 1, i))
+
+    half = sorted(set(grid + [round((x + y) / 2, 3) for x, y in zip(grid, grid[1:])]))
+    groups = {}
+    for n in notes:                       # 동시치기는 한 덩어리로
+        groups.setdefault(round(n["t"], 3), []).append(n)
+    keep = []
+    for sec in range(nsec + 1):
+        gs = [t for t in groups if sec <= t < sec + 1]
+        cnt = sum(len(groups[t]) for t in gs)
+        # 앞뒤 1초까지 같이 봐서 기존 채보가 부드럽게 비교되게
+        nb = max(bcount[max(0, sec - 1):sec + 2]) if bcount else 0
+        allow = max(int(nb * DENSE_X) + 2, int(p90 * 1.2))
+        if cnt <= allow:
+            keep += gs
+            continue
+        def score(t):
+            return (2 if near(btimes, t, 0.05) else 0) + (1.5 if near(grid, t, 0.04) else 0.8 if near(half, t, 0.04) else 0) \
+                   + (0.5 if any(n.get("a") for n in groups[t]) else 0)
+        ranked = sorted(gs, key=lambda t: (-score(t), t))
+        total, chosen = 0, []
+        for t in ranked:
+            if total + len(groups[t]) > allow:
+                continue
+            chosen.append(t)
+            total += len(groups[t])
+        keep += chosen
+    out = [n for t in sorted(keep) for n in groups[t]]
+    return out
+
+
 def ai_accents(song, charts):
     """타격감(드럼 강타 연출)을 AI 채보에도: 기존 채보가 음원에서 찾은 강타 시각을 모아서,
     그 시각에 있는 AI 노트에 강타 표시(a)를 붙임. 노트를 더하거나 빼지는 않음."""
@@ -856,7 +932,7 @@ def ai_accents(song, charts):
     out = {}
     for d, notes in charts.items():
         res = []
-        for n in ai_tidy(notes):
+        for n in ai_tidy(ai_balance(song, d, notes)):
             n = {k: v for k, v in n.items() if k != "a"}
             if acc:
                 i = bisect.bisect_left(acc, n["t"])
@@ -890,7 +966,7 @@ def migrate_ai_accents():
         except Exception:
             traceback.print_exc()
     if n:
-        log(f"AI 채보 {n}곡을 다듬었어요 (롱노트 정리 · 강타 표시).")
+        log(f"AI 채보 {n}곡을 다듬었어요 (빈 구간 채우기 · 몰림 덜기 · 롱노트 정리 · 강타 표시).")
         notify_all({"type": "songs"})
 
 
