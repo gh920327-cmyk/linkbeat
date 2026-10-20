@@ -804,6 +804,53 @@ def finish_pc_job(job, meta, res):
     jobs_changed()
 
 
+ACC_WIN = 0.05   # 기존 채보의 드럼 강타 시각과 이만큼(초) 가까운 AI 노트를 강타로
+
+
+def ai_accents(song, charts):
+    """타격감(드럼 강타 연출)을 AI 채보에도: 기존 채보가 음원에서 찾은 강타 시각을 모아서,
+    그 시각에 있는 AI 노트에 강타 표시(a)를 붙임. 노트를 더하거나 빼지는 않음."""
+    import bisect
+    acc = sorted({round(float(n["t"]), 3) for notes in (song.get("charts") or {}).values() for n in notes if n.get("a")})
+    out = {}
+    for d, notes in charts.items():
+        res = []
+        for n in notes:
+            n = {k: v for k, v in n.items() if k != "a"}
+            if acc:
+                i = bisect.bisect_left(acc, n["t"])
+                near = min((abs(acc[j] - n["t"]) for j in (i - 1, i) if 0 <= j < len(acc)), default=9)
+                if near <= ACC_WIN:
+                    n["a"] = 1
+                    n["d"] = 0.0 if n.get("d", 0) < 0.3 else n["d"]
+            res.append(n)
+        out[d] = res
+    return out
+
+
+def migrate_ai_accents():
+    """예전에 저장된 AI 채보에도 강타 표시를 한 번 붙임 (서버 켤 때)"""
+    n = 0
+    for p in SONGS.glob("*.json"):
+        if not VID_RE.match(p.stem):
+            continue
+        try:
+            with FILE_LOCK:
+                song = load_song(p.stem)
+                ai = song and song.get("ai")
+                if not isinstance(ai, dict) or ai.get("acc") or not isinstance(ai.get("charts"), dict):
+                    continue
+                ai["charts"] = ai_accents(song, ai["charts"])
+                ai["acc"] = 1
+                save_song(song)
+            n += 1
+        except Exception:
+            traceback.print_exc()
+    if n:
+        log(f"AI 채보 {n}곡에 강타 표시를 붙였어요.")
+        notify_all({"type": "songs"})
+
+
 def save_ai(vid, data):
     """AI 채보 저장 (기존 채보와 따로). data = {"charts": {난이도: 노트}, "by": "..."}"""
     with FILE_LOCK:
@@ -823,7 +870,7 @@ def save_ai(vid, data):
         charts = {d: n for d, n in charts.items() if n}
         if not charts:
             raise HttpError(400, "AI 채보가 비어 있어요.")
-        song["ai"] = {"charts": charts, "by": str(data.get("by") or "AI")[:60], "at": time.time()}
+        song["ai"] = {"charts": ai_accents(song, charts), "by": str(data.get("by") or "AI")[:60], "at": time.time(), "acc": 1}
         save_song(song)
     notify_all({"type": "songs"})
     log("AI 채보 저장:", song.get("title"), {d: len(n) for d, n in charts.items()})
@@ -2124,6 +2171,7 @@ async def main():
     MAIN_LOOP = asyncio.get_running_loop()
     server = await asyncio.start_server(handle_conn, BIND, PORT)
     asyncio.create_task(reaper())
+    threading.Thread(target=migrate_ai_accents, daemon=True).start()
     if CLOUD:
         load_queue()
         print(f"링크비트 클라우드 서버 실행 중 · {BIND}:{PORT} · 데이터 {DATA}", flush=True)
