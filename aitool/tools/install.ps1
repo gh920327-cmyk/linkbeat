@@ -69,6 +69,10 @@ Step 3 'AI 실행 부품(PyTorch, 약 2.5GB) 받는 중 — 인터넷 속도에 
 if ($LASTEXITCODE -ne 0) { Fail 'PyTorch 설치에 실패했어요. 인터넷 연결을 확인하고 다시 실행해 주세요.' }
 & $Uv pip install --python $Py 'numpy<2' 'scipy' 'librosa==0.10.2.post1' 'audioread' 'soundfile' 'einops' 'omegaconf' 'pyyaml' 'tqdm' 'scikit-learn' 'packaging' 'opt-einsum' 'pytorch_lightning==1.9.5' 'setuptools<70' 'yt-dlp[default]' 'imageio-ffmpeg' 'certifi' 'deno'
 if ($LASTEXITCODE -ne 0) { Fail '부품 설치에 실패했어요. 다시 실행해 주세요.' }
+# 소리 분리 AI (Demucs) — 노래를 보컬·드럼·베이스·나머지로 나눠서 채보를 더 정확하게 (없어도 AI 채보는 만들어짐)
+& $Uv pip install --python $Py 'torchaudio==2.3.1' --index-url 'https://download.pytorch.org/whl/cu121'
+if ($LASTEXITCODE -eq 0) { & $Uv pip install --python $Py 'demucs==4.0.1' }
+if ($LASTEXITCODE -ne 0) { Write-Host '⚠ 소리 분리(Demucs) 설치에 실패했어요. AI 채보는 원곡으로만 만들어져요.' -ForegroundColor Yellow }
 
 # ffmpeg (오디오 변환) — imageio-ffmpeg 에 들어 있는 걸 bin\ffmpeg.exe 로 복사
 $bin = Join-Path $Root 'bin'

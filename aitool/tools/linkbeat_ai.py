@@ -302,8 +302,9 @@ class Mug:
         f = self.torch.tensor(np.asarray(ids), dtype=self.torch.float32, device=self.model.device)
         return self.model.model.cond_stage_model(f)
 
-    def generate(self, wav, out_dir, sr_list, count, step=100, scale=5.0, seed=1234, title="", artist=""):
-        """sr_list의 별점마다 count개씩 생성 → [(osu 경로, sr)]"""
+    def generate(self, variants, out_dir, sr_list, step=100, scale=5.0, seed=1234, title="", artist=""):
+        """sr_list의 별점마다 variants(후보 종류)마다 하나씩 생성 → [(osu 경로, sr)]
+        variants: [(오디오 wav, 추가 조건, 이름)] — 예: 원곡 / 원곡+스트림 많이 / 반주만(소리 분리)"""
         import numpy as np
         import random
         from tqdm import tqdm
@@ -324,17 +325,23 @@ class Mug:
             dataset = config.data.params.common_params
             hop = dataset.n_fft // 4
             frame_dur = hop / dataset.sr
-            audio = load_audio_without_cache(str(wav), dataset.n_mels, hop, dataset.n_fft, dataset.sr, None)
-            t = audio.shape[1]
+            count = len(variants)
+            cache = {}
+            for wav, _, _ in variants:
+                if str(wav) not in cache:
+                    cache[str(wav)] = load_audio_without_cache(str(wav), dataset.n_mels, hop, dataset.n_fft, dataset.sr, None)
+            t = max(a.shape[1] for a in cache.values())
             ratio = dataset.max_audio_frame // model.z_length
             map_len = (int((t / ratio) / 32) + 1) * 32
             dataset.max_audio_frame = map_len * ratio
             model.z_length = map_len
-            if t < dataset.max_audio_frame:
-                audio = np.concatenate([audio, np.zeros((dataset.n_mels, dataset.max_audio_frame - t), dtype=np.float32)], axis=1)
-            elif t > dataset.max_audio_frame:
-                audio = audio[:, :dataset.max_audio_frame]
-            w = torch.tensor(np.stack([audio for _ in range(count)]), dtype=torch.float32).to(model.device)
+
+            def fit(audio):
+                n = audio.shape[1]
+                if n < dataset.max_audio_frame:
+                    return np.concatenate([audio, np.zeros((dataset.n_mels, dataset.max_audio_frame - n), dtype=np.float32)], axis=1)
+                return audio[:, :dataset.max_audio_frame]
+            w = torch.tensor(np.stack([fit(cache[str(v[0])]) for v in variants]), dtype=torch.float32).to(model.device)
             if self.cuda:
                 model.model.wave_model.to("cuda")
             w = model.model.wave_model(w)
@@ -356,14 +363,13 @@ class Mug:
                 say(f"  AI가 채보 쓰는 중... {k + 1}/{len(sr_list)} (osu 별점 {sr:.1f} 기준 {count}개)")
                 # rc=1 · ln_ratio=0: 롱노트가 적은(10% 미만) 일반 노트 위주 채보로 (링크비트 취향)
                 base = {"rank_status": "ranked", "sr": sr, "rc": 1, "ln_ratio": 0.0}
-                # 후보 절반은 '스트림 많이' 조건 (단일 노트 연타가 어울리는 곡에서 고를 수 있게)
-                c = self._features(count, [base, dict(base, stream=True)])
+                c = self._features(count, [dict(base, **v[1]) for v in variants])
                 samples, _ = self.sampler.sample(S=step, c=c, w=w, batch_size=count, shape=None, verbose=False,
                                                  unconditional_guidance_scale=scale, unconditional_conditioning=uc,
                                                  eta=0.0, tqdm_class=tqdm)
                 xs = model.model.decode(samples).cpu().numpy()
                 for i, x in enumerate(xs):
-                    name = f"sr{sr:.1f}_{i + 1}"
+                    name = f"sr{sr:.1f}_{variants[i][2]}"
                     path = out_dir / f"{name}.osu"
                     creator = f"MuG Diffusion v{self.version}"
                     save_osu_file(meta, x, path=str(path), override={
@@ -398,6 +404,7 @@ def cmd_check():
         import mug.diffusion.ddim, mug.data.convertor, mug.data.utils, mug.util  # noqa: F401
         import yt_dlp, chartgen  # noqa: F401
         say(f"  OK   MuG 코드 · yt-dlp {yt_dlp.version.__version__} · 링크비트 별점 계산")
+        say("  " + ("OK   소리 분리(Demucs)" if demucs_ok() else "없음 소리 분리(Demucs) — 1_설치.bat 을 다시 실행하면 설치돼요 (없어도 AI 채보는 만들어져요)"))
     except Exception as e:
         ok = False
         say(f"  오류 {e}")
@@ -433,7 +440,8 @@ def cmd_make(link):
 
     say("\n[4/4] 서버에 'AI 채보'로 따로 저장 (기본 채보는 그대로)")
     r = upload(srv, vid, body)
-    shutil.rmtree(wdir, ignore_errors=True)   # 오디오는 지움 (채보만 남김)
+    shutil.rmtree(wdir, ignore_errors=True)
+    shutil.rmtree(WORK / ("sep_" + vid), ignore_errors=True)   # 오디오는 지움 (채보만 남김)
     say("\n완료! 난이도별 비교 (★ = 링크비트 별점)")
     say("  난이도      기본 채보          AI 채보")
     for d in DIFF_ORDER:
@@ -441,6 +449,72 @@ def cmd_make(link):
             say(f"  {DIFF_KO[d]:<6}  ★{targets[d]:4.1f} {len(basic[d]):5d}노트   ★{chosen[d][0]:4.1f} {len(chosen[d][1]):5d}노트")
     say("\n게임에서 이 곡을 고르면 4키는 AI 채보로 플레이돼요. ('AI 채보' 칩을 끄면 기존 채보)")
     return r
+
+
+def demucs_ok():
+    try:
+        import demucs.pretrained  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def separate(wav, folder):
+    """소리 분리(Demucs): 노래 → 보컬·드럼·베이스·나머지. 반주만 wav + 모든 소리의 시작 위치(초)를 돌려줌.
+    설치가 안 돼 있거나 실패하면 None (그냥 원곡으로만 만듦)"""
+    if not demucs_ok():
+        return None
+    try:
+        import numpy as np
+        import soundfile
+        import librosa
+        import torch
+        from demucs.pretrained import get_model
+        from demucs.apply import apply_model
+        os.environ.setdefault("TORCH_HOME", str(ROOT / "cache" / "torch"))   # 분리 모델도 이 폴더 안에
+        folder.mkdir(parents=True, exist_ok=True)
+        say("  소리 분리 중... (보컬·드럼·베이스·나머지)")
+        src44 = folder / "mix44.wav"
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        subprocess.run([ffmpeg_exe(), "-v", "error", "-y", "-i", str(wav), "-ac", "2", "-ar", "44100", str(src44)],
+                       capture_output=True, creationflags=flags, check=True)
+        x, sr = soundfile.read(str(src44), always_2d=True, dtype="float32")
+        dev = "cuda" if torch.cuda.is_available() else "cpu"
+        model = get_model("htdemucs")
+        model.eval()
+        model.to(dev)
+        mix = torch.tensor(x.T, dtype=torch.float32)[None]
+        ref = mix.mean(1)
+        mu, sd = ref.mean(), ref.std() + 1e-8
+        with torch.no_grad():
+            out = apply_model(model, ((mix - mu) / sd).to(dev), shifts=1, split=True, overlap=0.25, progress=False)[0]
+        out = (out * sd + mu).cpu().numpy()          # (소리 4개, 2, 길이)
+        names = list(model.sources)                  # drums, bass, other, vocals
+        del model
+        if dev == "cuda":
+            torch.cuda.empty_cache()
+        inst = sum(out[i] for i, n in enumerate(names) if n != "vocals")
+        inst_mono = librosa.resample(inst.mean(0), orig_sr=sr, target_sr=22050)
+        inst_path = folder / "inst.wav"
+        soundfile.write(str(inst_path), inst_mono.astype(np.float32), 22050)
+        onsets = []
+        for i, n in enumerate(names):                # 소리마다 시작 위치 (보컬 포함 — '소리 없는 곳' 판단용)
+            y = librosa.resample(out[i].mean(0), orig_sr=sr, target_sr=22050)
+            if float(np.sqrt(np.mean(y ** 2))) < 1e-4:
+                continue
+            ts = librosa.onset.onset_detect(y=y, sr=22050, units="time", backtrack=False, delta=0.07)
+            onsets += [float(t) for t in ts]
+        onsets.sort()
+        merged = []
+        for t in onsets:                              # 20ms 안에 겹치면 하나로
+            if not merged or t - merged[-1] > 0.02:
+                merged.append(round(t, 3))
+        say(f"  소리 분리 끝: 소리 위치 {len(merged)}개")
+        return {"inst": inst_path, "onsets": merged[:20000]}
+    except Exception as e:
+        traceback.print_exc()
+        say(f"  ⚠ 소리 분리를 건너뛰어요: {e}")
+        return None
 
 
 def make_charts(vid, wav, targets, title, artist, duration):
@@ -453,7 +527,14 @@ def make_charts(vid, wav, targets, title, artist, duration):
     if odir.exists():
         shutil.rmtree(odir, ignore_errors=True)
     seed = int(time.time()) % 100000000
-    made = mug.generate(wav, odir, SR_PROMPTS, PER_PROMPT, seed=seed, title=title, artist=artist)
+    # 후보 종류: 원곡 / 원곡+스트림 많이 / (소리 분리가 되면) 반주만 — 반주만 넣으면 보컬만 따라가는 채보가 줄어듦
+    variants = [(wav, {}, "a"), (wav, {"stream": True}, "s")]
+    sep = separate(wav, WORK / ("sep_" + vid))
+    onsets = None
+    if sep:
+        variants.append((sep["inst"], {}, "i"))
+        onsets = sep["onsets"]
+    made = mug.generate(variants, odir, SR_PROMPTS, seed=seed, title=title, artist=artist)
     cands = []
     for path, sr in made:
         notes = [n for n in osu_to_notes(path) if n["t"] <= duration + 1]
@@ -465,6 +546,8 @@ def make_charts(vid, wav, targets, title, artist, duration):
     chosen = pick_for_diffs(cands, relative_targets(targets))
     say(f"  {len(cands)}개 만들었어요 ({time.time() - t0:.0f}초)")
     body = {"charts": {d: c[1] for d, c in chosen.items()}, "by": f"MuG Diffusion v{mug.version}", "style": "rc"}
+    if onsets:
+        body["onsets"] = onsets      # 소리 분리로 찾은 진짜 소리 위치 → 서버가 박자 맞추기·'소리 없는 곳' 판단에 씀
     (odir / "upload.json").write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
     summary = {"vid": vid, "title": title, "at": time.time(), "seed": seed, "model": body["by"],
                "chosen": {d: {"file": c[2], "stars": c[0], "notes": len(c[1])} for d, c in chosen.items()},
@@ -488,6 +571,7 @@ def cmd_gen(vid, audio, targets_file, out_file, title="", artist="", duration=90
         say("AI: 완료")
     finally:
         shutil.rmtree(wdir, ignore_errors=True)
+        shutil.rmtree(WORK / ("sep_" + vid), ignore_errors=True)
 
 
 def upload(srv, vid, body):

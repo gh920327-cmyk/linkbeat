@@ -625,6 +625,8 @@ def finish_song(vid, meta, res, keep_edited=False, keep_title=False):
             song["artistAt"] = old["artistAt"]
     if old and isinstance(old.get("ai"), dict):   # AI 채보는 따로 만든 거라 기본 채보를 다시 만들어도 그대로 둠
         song["ai"] = old["ai"]
+    if old and isinstance(old.get("onsets"), list):
+        song["onsets"] = old["onsets"]
     if old and keep_edited and old.get("edited"):
         for key, at in old["edited"].items():
             six = key.startswith("6-")
@@ -1234,7 +1236,10 @@ SAFE_GAP = {"easy": 0.3, "normal": 0.15, "hard": 0.075, "extreme": 0.06}   # 이
 
 
 def basic_onsets(song):
-    """기존 채보(음원에서 찾은 소리 위치)의 시각들 — AI 채보 박자를 맞추는 기준"""
+    """음원의 소리 위치 — AI 채보 박자를 맞추는 기준. 소리 분리로 찾은 위치가 있으면 그것(더 정확), 없으면 기존 채보 노트 시각"""
+    on = song.get("onsets")
+    if isinstance(on, list) and len(on) >= 30:
+        return sorted(float(t) for t in on)
     return sorted({round(float(n["t"]), 3) for v in (song.get("charts") or {}).values() for n in v})
 
 
@@ -1504,6 +1509,12 @@ def save_ai(vid, data):
         charts = {d: n for d, n in charts.items() if n}
         if not charts:
             raise HttpError(400, "AI 채보가 비어 있어요.")
+        on = data.get("onsets")
+        if isinstance(on, list) and 30 <= len(on) <= 40000:     # 소리 분리로 찾은 소리 위치 (호스트 PC가 보냄)
+            try:
+                song["onsets"] = sorted(round(float(t), 3) for t in on if 0 <= float(t) <= pipeline.MAX_SONG_SEC)
+            except (TypeError, ValueError):
+                pass
         polished = ai_accents(song, charts)
         fit = polished.pop("_fit")
         song["ai"] = {"charts": polished, "raw": charts, "fit": fit, "by": str(data.get("by") or "AI")[:60], "at": time.time(), "fix": AI_FIX,
@@ -2179,6 +2190,7 @@ async def api(method, path, headers, body):
                 song["_hl"] = song_hl(song)   # 하이라이트 모드 구간 (파일에는 저장 안 함)
                 if isinstance(song.get("ai"), dict) and "raw" in song["ai"]:
                     song["ai"] = {k: v for k, v in song["ai"].items() if k != "raw"}   # AI 원본은 서버에만 (다시 다듬을 때 씀)
+                song.pop("onsets", None)      # 소리 위치도 서버에서만 씀
                 return song
             if method == "DELETE":
                 require_host(headers)
