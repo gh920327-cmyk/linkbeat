@@ -805,6 +805,39 @@ def finish_pc_job(job, meta, res):
 
 
 ACC_WIN = 0.05   # 기존 채보의 드럼 강타 시각과 이만큼(초) 가까운 AI 노트를 강타로
+AI_FIX = 2       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
+HOLD_GAP = 0.1   # 롱노트 끝과 같은 줄 다음 노트 사이 최소 간격
+MAX_HOLDS = 2    # 4키에서 동시에 누르고 있는 롱노트 최대 개수
+
+
+def ai_tidy(notes):
+    """AI 채보 롱노트 정리: 같은 줄 겹침 → 롱노트를 줄임(짧으면 일반 노트), 동시에 3개 이상 → 일반 노트, 같은 줄 거의 같은 시각 → 하나로"""
+    notes = sorted(({"t": float(n["t"]), "l": int(n["l"]), "d": float(n.get("d", 0) or 0)} for n in notes),
+                   key=lambda n: (n["t"], n["l"]))
+    out, last_t = [], {}
+    for n in notes:                      # 같은 줄 0.03초 안 중복 제거
+        if n["t"] - last_t.get(n["l"], -9) < 0.03:
+            continue
+        last_t[n["l"]] = n["t"]
+        out.append(n)
+    by_lane = {}
+    for n in out:
+        by_lane.setdefault(n["l"], []).append(n)
+    for lane_notes in by_lane.values():  # 같은 줄: 다음 노트 전에 롱노트가 끝나게
+        for a, b in zip(lane_notes, lane_notes[1:]):
+            if a["d"] > 0 and a["t"] + a["d"] > b["t"] - HOLD_GAP:
+                a["d"] = b["t"] - HOLD_GAP - a["t"]
+                if a["d"] < 0.2:
+                    a["d"] = 0.0
+    held = []                             # 동시에 누르는 롱노트 수 제한
+    for n in out:
+        held = [e for e in held if e > n["t"] + 0.001]
+        if n["d"] > 0:
+            if len(held) >= MAX_HOLDS:
+                n["d"] = 0.0
+            else:
+                held.append(n["t"] + n["d"])
+    return [{"t": round(n["t"], 3), "l": n["l"], "d": round(n["d"], 3)} for n in out]
 
 
 def ai_accents(song, charts):
@@ -815,7 +848,7 @@ def ai_accents(song, charts):
     out = {}
     for d, notes in charts.items():
         res = []
-        for n in notes:
+        for n in ai_tidy(notes):
             n = {k: v for k, v in n.items() if k != "a"}
             if acc:
                 i = bisect.bisect_left(acc, n["t"])
@@ -838,16 +871,17 @@ def migrate_ai_accents():
             with FILE_LOCK:
                 song = load_song(p.stem)
                 ai = song and song.get("ai")
-                if not isinstance(ai, dict) or ai.get("acc") or not isinstance(ai.get("charts"), dict):
+                if not isinstance(ai, dict) or ai.get("fix", 0) >= AI_FIX or not isinstance(ai.get("charts"), dict):
                     continue
                 ai["charts"] = ai_accents(song, ai["charts"])
-                ai["acc"] = 1
+                ai["fix"] = AI_FIX
+                ai.pop("acc", None)
                 save_song(song)
             n += 1
         except Exception:
             traceback.print_exc()
     if n:
-        log(f"AI 채보 {n}곡에 강타 표시를 붙였어요.")
+        log(f"AI 채보 {n}곡을 다듬었어요 (롱노트 정리 · 강타 표시).")
         notify_all({"type": "songs"})
 
 
@@ -870,7 +904,7 @@ def save_ai(vid, data):
         charts = {d: n for d, n in charts.items() if n}
         if not charts:
             raise HttpError(400, "AI 채보가 비어 있어요.")
-        song["ai"] = {"charts": ai_accents(song, charts), "by": str(data.get("by") or "AI")[:60], "at": time.time(), "acc": 1}
+        song["ai"] = {"charts": ai_accents(song, charts), "by": str(data.get("by") or "AI")[:60], "at": time.time(), "fix": AI_FIX}
         save_song(song)
     notify_all({"type": "songs"})
     log("AI 채보 저장:", song.get("title"), {d: len(n) for d, n in charts.items()})
