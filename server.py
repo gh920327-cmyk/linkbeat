@@ -806,7 +806,7 @@ def finish_pc_job(job, meta, res):
 
 
 ACC_WIN = 0.05   # 기존 채보의 드럼 강타 시각과 이만큼(초) 가까운 AI 노트를 강타로
-AI_FIX = 8       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
+AI_FIX = 9       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
 HOLD_GAP = 0.1   # 롱노트 끝과 같은 줄 다음 노트 사이 최소 간격
 MAX_HOLDS = 1    # 동시에 누르고 있는 롱노트 최대 개수 (롱노트는 최소한으로)
 HOLD_MIN = 0.6   # 이보다 짧은 롱노트는 일반 노트로
@@ -901,7 +901,7 @@ def stream_bonus(times, i):
     if 0 < i < len(times) - 1:
         a, b = times[i] - times[i - 1], times[i + 1] - times[i]
         if 0.06 < a < 0.35 and 0.06 < b < 0.35 and abs(a - b) <= 0.15 * max(a, b):
-            return 1.2
+            return 1.8
     return 0.0
 
 
@@ -1072,7 +1072,12 @@ def fit_band(song, diff, notes, nl=4, pool=()):
                     continue
                 lanes = [l for l in range(nl) if free(t, l)]
                 if lanes:
-                    gc.append((-on_beat(t) + 0.2 * sec.get(int(t), 0), t, lanes))
+                    j = bisect.bisect_left(times, t)
+                    a_ = times[j - 1] if j > 0 else None
+                    b_ = times[j] if j < len(times) else None
+                    # 두 노트 사이 한가운데(8분 → 16분처럼)면 흐름이 스트림으로 이어짐 → 먼저 채움
+                    mid = a_ is not None and b_ is not None and b_ - a_ < 0.5 and abs((t - a_) - (b_ - t)) < 0.02
+                    gc.append((-on_beat(t) - (1.6 if mid and diff in ("hard", "extreme") else 0) + 0.2 * sec.get(int(t), 0), t, lanes))
             gc.sort()
             for _, t, lanes in gc[:k]:
                 lanes = [l for l in lanes if free(t, l)]      # 같은 묶음에서 먼저 넣은 노트와 겹치지 않게

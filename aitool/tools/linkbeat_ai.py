@@ -216,6 +216,17 @@ def osu_to_notes(path, keys=4):
     return out
 
 
+def stream_ratio(notes):
+    """앞뒤 간격이 일정하게 이어지는 단일 노트(스트림) 비율"""
+    ts = sorted({round(n["t"], 3) for n in notes})
+    k = 0
+    for i in range(1, len(ts) - 1):
+        a, b = ts[i] - ts[i - 1], ts[i + 1] - ts[i]
+        if 0.06 < a < 0.35 and 0.06 < b < 0.35 and abs(a - b) <= 0.15 * max(a, b):
+            k += 1
+    return k / max(1, len(ts))
+
+
 def pick_for_diffs(cands, targets):
     """cands: [(★, notes, 이름)], targets: {diff: 기본 채보 ★}. 난이도 순서가 뒤집히지 않게 가장 가까운 것 고르기."""
     cands = sorted(cands, key=lambda c: c[0])
@@ -228,7 +239,9 @@ def pick_for_diffs(cands, targets):
         tgt = targets[d]
         pool = [i for i, c in enumerate(cands) if c[0] >= lo and i not in used] or \
                [i for i, c in enumerate(cands) if i not in used] or list(range(len(cands)))   # 같은 후보는 되도록 다시 안 씀
-        i = min(pool, key=lambda j: abs(cands[j][0] - tgt))
+        best = min(abs(cands[j][0] - tgt) for j in pool)
+        near_ = [j for j in pool if abs(cands[j][0] - tgt) <= best + 0.5]     # 별이 비슷하면 스트림이 많은 쪽
+        i = max(near_, key=lambda j: (stream_ratio(cands[j][1]), -abs(cands[j][0] - tgt)))
         chosen[d] = cands[i]
         used.add(i)
         lo = cands[i][0]
@@ -264,11 +277,13 @@ class Mug:
         self.version = str(self.config.get("version", "?"))
 
     def _features(self, count, feature_dict):
+        """feature_dict 하나면 모두 같은 조건, 리스트면 후보마다 다른 조건"""
         import numpy as np
         import yaml
         from mug.util import feature_dict_to_embedding_ids
         fy = yaml.safe_load(open(MUG / "configs" / "mug" / "mania_beatmap_features.yaml", encoding="utf-8"))
-        ids = [feature_dict_to_embedding_ids(feature_dict, fy) for _ in range(count)]
+        dicts = feature_dict if isinstance(feature_dict, list) else [feature_dict] * count
+        ids = [feature_dict_to_embedding_ids(dicts[i % len(dicts)], fy) for i in range(count)]
         f = self.torch.tensor(np.asarray(ids), dtype=self.torch.float32, device=self.model.device)
         return self.model.model.cond_stage_model(f)
 
@@ -325,7 +340,9 @@ class Mug:
             for k, sr in enumerate(sr_list):
                 say(f"  AI가 채보 쓰는 중... {k + 1}/{len(sr_list)} (osu 별점 {sr:.1f} 기준 {count}개)")
                 # rc=1 · ln_ratio=0: 롱노트가 적은(10% 미만) 일반 노트 위주 채보로 (링크비트 취향)
-                c = self._features(count, {"rank_status": "ranked", "sr": sr, "rc": 1, "ln_ratio": 0.0})
+                base = {"rank_status": "ranked", "sr": sr, "rc": 1, "ln_ratio": 0.0}
+                # 후보 절반은 '스트림 많이' 조건 (단일 노트 연타가 어울리는 곡에서 고를 수 있게)
+                c = self._features(count, [base, dict(base, stream=True)])
                 samples, _ = self.sampler.sample(S=step, c=c, w=w, batch_size=count, shape=None, verbose=False,
                                                  unconditional_guidance_scale=scale, unconditional_conditioning=uc,
                                                  eta=0.0, tqdm_class=tqdm)
