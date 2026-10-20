@@ -88,7 +88,7 @@ function renderSongs() {
       const roomSel = net.room && net.room.songId === s.id ? ' roomsel' : '';
       return `<div class="row${s.id === selId ? ' sel' : ''}${roomSel}" data-id="${s.id}">
         <img class="row-thumb" src="https://i.ytimg.com/vi/${s.id}/default.jpg" alt="" loading="lazy">
-        <div class="row-info"><div class="row-title">${esc(s.title)}</div><div class="row-artist">${esc(artistOf(s))}</div></div>
+        <div class="row-info"><div class="row-title">${s.ai ? (s.ai.gen >= 2 ? '<span class="ai-badge" title="AI 채보 (새 방식 · 일반 노트 위주)">AI</span>' : '<span class="ai-badge old" title="AI 채보 (예전 방식 · 롱노트 많음) — 호스트가 다시 만들 수 있어요">AI 구</span>') : ''}${esc(s.title)}</div><div class="row-artist">${esc(artistOf(s))}</div></div>
         <div class="row-stars">${pips}</div>
         <div class="row-rank">${rec ? `<b class="rank-${esc(rec.rank)}">${esc(rec.rank)}</b>` : ''}</div>
       </div>`;
@@ -106,6 +106,7 @@ function renderDetail() {
   const leader = net.isLeader();
   $('#btnEdit').classList.toggle('hidden', !isHost || inRoom || !s);
   $('#btnDel').classList.toggle('hidden', !isHost || inRoom || !s);
+  $('#btnAiOne').classList.toggle('hidden', !isHost || !isCloud || inRoom || !s || !(pcJobs.worker && pcJobs.worker.ai));
   if (!s) {
     $('#dJacket').removeAttribute('src');
     $('#dTitle').textContent = songs.length ? '곡을 선택하세요' : '곡을 추가해 주세요';
@@ -168,7 +169,8 @@ function renderDetail() {
   ac.classList.toggle('hidden', !songAi || nl !== 4);
   ac.classList.toggle('on', songAi && aiWanted());
   ac.disabled = inRoom && !leader;
-  ac.title = songAi ? `다른 리듬게임 채보로 학습한 AI가 만든 채보 (${s.ai.by || 'AI'}) · 끄면 기존 채보 · 기록은 따로` : '';
+  ac.title = songAi ? `다른 리듬게임 채보로 학습한 AI가 만든 채보 · ${s.ai.gen >= 2 ? '새 방식 (일반 노트 위주)' : '예전 방식 (롱노트 많음 · ✦ AI로 다시 만들 수 있어요)'}${s.ai.at ? ` · ${new Date(s.ai.at * 1000).toLocaleDateString()} 생성` : ''} · 끄면 기존 채보 · 기록은 따로` : '';
+  ac.classList.toggle('old', songAi && !(s.ai.gen >= 2));
 }
 function renderMods() {
   $('#modMirror').classList.toggle('on', !!settings.mirror);
@@ -313,6 +315,16 @@ $('#prGo').addEventListener('click', () => {
 });
 $('#btnRank').addEventListener('click', () => selId && openRank(selId, settings.mode, settings.diff));
 $('#btnEdit').addEventListener('click', () => selId && openEditor(selId, settings.diff, settings.mode));
+$('#btnAiOne').addEventListener('click', async () => {
+  const s = songById(selId);
+  if (!s) return;
+  if (s.ai && !confirm(`'${s.title}'의 AI 채보를 새로 다시 만들까요? (곡당 2~5분 · 기록은 그대로)`)) return;
+  try {
+    await api('/ai/batch', { method: 'POST', body: { ids: [s.id] } });
+    toast(`'${s.title}' AI 채보를 대기열에 넣었어요.`, 2600);
+    loadJobs();
+  } catch (err) { toast(err.message); }
+});
 $('#btnDel').addEventListener('click', async () => {
   const s = songById(selId);
   if (!s || !confirm(`'${s.title}' 곡을 삭제할까요? (채보와 순위도 함께 지워져요)`)) return;
@@ -417,8 +429,8 @@ async function loadJobs() {
   try { pcJobs = await api('/jobs'); } catch { return; }
   for (const j of pcJobs.jobs) {
     if (jobSeen[j.id] && jobSeen[j.id] !== j.stage) {
-      if (j.stage === 'done') toast(`'${j.title}' 곡이 추가됐어요!`, 3000);
-      else if (j.stage === 'error') toast(`'${j.title}' 만들기 실패: ${j.msg}`, 5000);
+      if (j.stage === 'done') toast(j.aiOnly ? `'${j.title}' AI 채보 완성!` : `'${j.title}' 곡이 추가됐어요!`, 3000);
+      else if (j.stage === 'error') toast(`'${j.title}' ${j.aiOnly ? 'AI 채보' : ''} 만들기 실패: ${j.msg}`, 5000);
     }
     jobSeen[j.id] = j.stage;
   }
@@ -438,15 +450,22 @@ function renderJobs() {
   else text = `채보 PC 꺼짐${waiting ? ` · 대기 ${waiting}곡` : ''} — 호스트 PC에서 LINKBEAT 실행기를 켜면 만들어져요`;
   $('#pcText').textContent = text;
   $('#btnAiBatch').classList.toggle('hidden', !w.ai);
+  $('#btnAiOne').classList.toggle('hidden', !w.ai || !!net.room || !selId);
   $('#pcList').innerHTML = jobs.map((j) => {
     const live = j.stage === 'waitpc' || PC_ACTIVE.includes(j.stage);
     const msg = j.stage === 'done' ? '완료' : j.stage === 'canceled' ? '취소됨' : j.msg;
     return `<li class="${esc(j.stage)}"><span class="pt" title="${esc(j.title)}">${j.aiOnly ? '<span class="tag ai-tag">AI</span> ' : ''}${esc(j.title)}${j.by && j.by !== '호스트' ? ` <small class="muted">· ${esc(j.by)} 신청</small>` : ''}</span>
       <span class="pm" title="${esc(j.msg || '')}">${esc((msg || '').slice(0, 40))}</span>
-      ${live ? `<button class="ghost small-btn" data-cancel="${esc(j.id)}" type="button">취소</button>` : ''}</li>`;
+      ${live ? `<button class="ghost small-btn" data-cancel="${esc(j.id)}" type="button">취소</button>` : ''}${j.stage === 'error' ? `<button class="ghost small-btn" data-retry="${esc(j.id)}" type="button">다시</button>` : ''}</li>`;
   }).join('');
 }
 $('#pcList').addEventListener('click', async (e) => {
+  const rb = e.target.closest('button[data-retry]');
+  if (rb) {
+    rb.disabled = true;
+    try { await api(`/jobs/${rb.dataset.retry}/retry`, { method: 'POST', body: {} }); loadJobs(); } catch (err) { toast(err.message); rb.disabled = false; }
+    return;
+  }
   const b = e.target.closest('button[data-cancel]');
   if (!b) return;
   b.disabled = true;
@@ -455,7 +474,17 @@ $('#pcList').addEventListener('click', async (e) => {
 net.on('jobs', () => loadJobs());
 $('#btnAiBatch').addEventListener('click', async () => {
   const left = songs.filter((s) => !s.ai).length;
+  const old = songs.filter((s) => s.ai && !(s.ai.gen >= 2)).length;
   let all = false;
+  if (old && confirm(`예전 방식(롱노트 많음) AI 채보 ${old}곡${left ? `과 AI 채보가 없는 ${left}곡` : ''}을 새 방식으로 만들까요? (곡당 2~5분 · 기록은 그대로)`)) {
+    try {
+      const r = await api('/ai/batch', { method: 'POST', body: { old: true } });
+      toast(`${r.queued}곡을 AI 채보 대기열에 넣었어요.`, 3000);
+      loadJobs();
+    } catch (err) { toast(err.message); }
+    return;
+  }
+  if (old) return;
   if (!left) {
     if (!confirm(`모든 곡에 이미 AI 채보가 있어요. ${songs.length}곡의 AI 채보를 전부 새로 다시 만들까요? (곡당 2~5분 · 기록은 그대로)`)) return;
     all = true;

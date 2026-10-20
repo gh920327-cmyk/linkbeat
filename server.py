@@ -196,7 +196,7 @@ def ai_summary(song):
     if not isinstance(ai, dict) or not isinstance(ai.get("charts"), dict) or not ai["charts"]:
         return None
     ch = ai["charts"]
-    return {"by": str(ai.get("by", ""))[:60], "at": ai.get("at", 0),
+    return {"by": str(ai.get("by", ""))[:60], "at": ai.get("at", 0), "gen": ai.get("gen", 1),
             "counts": {d: len(n) for d, n in ch.items()},
             "stars": {d: chartgen.star_rating(n, 4) for d, n in ch.items()}}
 
@@ -881,6 +881,7 @@ def migrate_ai_accents():
                 ai = song and song.get("ai")
                 if not isinstance(ai, dict) or ai.get("fix", 0) >= AI_FIX or not isinstance(ai.get("charts"), dict):
                     continue
+                ai.setdefault("gen", 1)   # 이 업데이트 전에 만든 AI 채보 = 예전 방식 (롱노트 많은 osu! 스타일)
                 ai["charts"] = ai_accents(song, ai["charts"])
                 ai["fix"] = AI_FIX
                 ai.pop("acc", None)
@@ -912,7 +913,8 @@ def save_ai(vid, data):
         charts = {d: n for d, n in charts.items() if n}
         if not charts:
             raise HttpError(400, "AI 채보가 비어 있어요.")
-        song["ai"] = {"charts": ai_accents(song, charts), "by": str(data.get("by") or "AI")[:60], "at": time.time(), "fix": AI_FIX}
+        song["ai"] = {"charts": ai_accents(song, charts), "by": str(data.get("by") or "AI")[:60], "at": time.time(), "fix": AI_FIX,
+                      "gen": 2}   # 2 = 새 방식 (일반 노트 위주로 생성)
         save_song(song)
     notify_all({"type": "songs"})
     log("AI 채보 저장:", song.get("title"), {d: len(n) for d, n in charts.items()})
@@ -1389,9 +1391,18 @@ async def api(method, path, headers, body):
             raise HttpError(400, "클라우드 서버에서만 쓰는 기능이에요.")
         data = json_body(body) if body else {}
         n = 0
+        ids = data.get("ids")
+        if isinstance(ids, list):      # 고른 곡만 (곡 화면의 ✦ AI 버튼) — 이미 있어도 새로 만듦
+            for vid in ids[:200]:
+                song = load_song(str(vid)) if VID_RE.match(str(vid)) else None
+                if song:
+                    enqueue_pc(song["id"], title=song.get("title", song["id"]), ai_only=True)
+                    n += 1
+            return {"ok": True, "queued": n, "aiReady": WORKER["ai"], "online": worker_online()}
         for p in sorted(SONGS.glob("*.json"), key=lambda p: p.stat().st_mtime):
             song = load_song(p.stem) if VID_RE.match(p.stem) else None
-            if not song or (song.get("ai") and not data.get("all")):
+            ai = song.get("ai") if song else None
+            if not song or (ai and not data.get("all") and not (data.get("old") and ai.get("gen", 1) < 2)):
                 continue
             enqueue_pc(song["id"], title=song.get("title", song["id"]), batch=True, ai_only=True)
             n += 1
@@ -1400,6 +1411,22 @@ async def api(method, path, headers, body):
     if parts == ["jobs"] and method == "GET":
         require_host(headers)
         return {"jobs": recent_jobs(), "worker": worker_status() if CLOUD else None, "cloud": CLOUD}
+    if len(parts) == 3 and parts[0] == "jobs" and parts[2] == "retry" and method == "POST":
+        # 실패한 작업만 다시 (AI 작업이면 AI 채보만, 아니면 기존 채보)
+        require_host(headers)
+        j = JOBS.get(parts[1])
+        if not j or not j.get("pc"):
+            raise HttpError(404, "작업을 찾을 수 없어요.")
+        if j.get("aiOnly"):
+            if not load_song(j["vid"]):
+                raise HttpError(404, "곡이 없어요.")
+            nj = enqueue_pc(j["vid"], title=j.get("title", ""), ai_only=True)
+        else:
+            nj = enqueue_pc(j["vid"], j.get("keepEdited", False), j.get("keepTitle", False), j.get("title", ""), j.get("by", ""))
+        if nj is not j:
+            JOBS.pop(j["id"], None)    # 실패한 줄은 새 작업으로 바꿔치기
+            jobs_changed()
+        return {"ok": True, "jobId": nj["id"]}
     if len(parts) == 2 and parts[0] == "jobs" and method == "DELETE":
         require_host(headers)
         j = JOBS.get(parts[1])

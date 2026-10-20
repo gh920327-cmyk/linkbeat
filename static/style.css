@@ -148,6 +148,9 @@ h3 small { font-family: 'Noto Sans KR'; font-size: 12px; color: var(--muted); le
 .d-actions { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; padding: 0 10px 4px 6px; }
 .d-actions .skew { padding: 8px 11px; }
 .d-actions .play-btn { min-width: 140px; }
+.d-actions:has(#btnAiOne:not(.hidden)) { gap: 6px; }
+.d-actions:has(#btnAiOne:not(.hidden)) .skew { padding: 8px 8px; }
+.d-actions:has(#btnAiOne:not(.hidden)) .play-btn { min-width: 112px; }
 .play-btn {
   flex: 1; min-width: 160px; padding: 12px 18px; font-family: var(--head); font-weight: 900; font-size: 24px; letter-spacing: 4px; font-style: italic;
   background: linear-gradient(135deg, var(--blue), var(--cyan)); color: #04060d; border: none; transform: skewX(-12deg);
@@ -452,6 +455,11 @@ dialog::backdrop { background: rgba(0, 0, 0, .65); backdrop-filter: blur(3px); }
 .ai-chip.on, .ai-chip.on:hover:not(:disabled) { background: linear-gradient(135deg, #c8fff4, #3ee6c1 50%, #2fa8ff); color: #031014; box-shadow: 0 0 14px rgba(62, 230, 193, .45); }
 .ai-note { margin-top: 4px; color: #3ee6c1; font-weight: 700; }
 .ai-chip:disabled { cursor: default; }
+.ai-one { color: #3ee6c1; }
+.ai-badge { display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 3px; font-size: 10px; font-weight: 800; line-height: 16px; vertical-align: 1px;
+  background: linear-gradient(135deg, #3ee6c1, #2fa8ff); color: #031014; letter-spacing: .5px; }
+.ai-badge.old { background: #3a4458; color: #b9c3d6; }
+.ai-chip.on.old { filter: saturate(.35) brightness(.9); }
 .ai-tag { background: linear-gradient(135deg, #3ee6c1, #2fa8ff); color: #031014; }
 #confetti { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 30; }
 .hl-range { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--gold); }

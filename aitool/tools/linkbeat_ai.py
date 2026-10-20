@@ -430,7 +430,7 @@ def make_charts(vid, wav, targets, title, artist, duration):
         raise RuntimeError("AI가 채보를 제대로 만들지 못했어요.")
     chosen = pick_for_diffs(cands, targets)
     say(f"  {len(cands)}개 만들었어요 ({time.time() - t0:.0f}초)")
-    body = {"charts": {d: c[1] for d, c in chosen.items()}, "by": f"MuG Diffusion v{mug.version}"}
+    body = {"charts": {d: c[1] for d, c in chosen.items()}, "by": f"MuG Diffusion v{mug.version}", "style": "rc"}
     (odir / "upload.json").write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
     summary = {"vid": vid, "title": title, "at": time.time(), "seed": seed, "model": body["by"],
                "chosen": {d: {"file": c[2], "stars": c[0], "notes": len(c[1])} for d, c in chosen.items()},
