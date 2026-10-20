@@ -806,7 +806,7 @@ def finish_pc_job(job, meta, res):
 
 
 ACC_WIN = 0.05   # 기존 채보의 드럼 강타 시각과 이만큼(초) 가까운 AI 노트를 강타로
-AI_FIX = 7       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
+AI_FIX = 8       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
 HOLD_GAP = 0.1   # 롱노트 끝과 같은 줄 다음 노트 사이 최소 간격
 MAX_HOLDS = 1    # 동시에 누르고 있는 롱노트 최대 개수 (롱노트는 최소한으로)
 HOLD_MIN = 0.6   # 이보다 짧은 롱노트는 일반 노트로
@@ -887,6 +887,22 @@ def _beat_tools(song):
 
 
 BEAT_GAP = {"easy": 1 / 2, "normal": 1 / 3, "hard": 1 / 4, "extreme": 1 / 4}   # 노트 사이 최소 간격(박 단위): 이보다 촘촘한 연타는 막음
+GAP_CAP = {"easy": 0.32, "normal": 0.17, "hard": 0.105, "extreme": 0.08}   # 박 기준 간격의 상한(초): 템포를 절반으로 잡은 곡도 스트림이 살게
+
+
+def need_gap(diff, beats, t):
+    """t에서 노트 사이에 필요한 최소 간격(초)"""
+    min_gap = float((chartgen.DIFFS.get(diff) or {}).get("min_gap", 0.1))
+    return max(min_gap, min(beat_len_at(beats, t) * BEAT_GAP.get(diff, 0.25) * 0.92, GAP_CAP.get(diff, 0.11)))
+
+
+def stream_bonus(times, i):
+    """앞뒤 간격이 일정하게 이어지는 노트(스트림)면 보너스 — 덜어낼 때 나중에 빼게"""
+    if 0 < i < len(times) - 1:
+        a, b = times[i] - times[i - 1], times[i + 1] - times[i]
+        if 0.06 < a < 0.35 and 0.06 < b < 0.35 and abs(a - b) <= 0.15 * max(a, b):
+            return 1.2
+    return 0.0
 
 
 def beat_len_at(beats, t):
@@ -964,8 +980,10 @@ def fit_band(song, diff, notes, nl=4, pool=()):
         for n in notes:
             groups.setdefault(round(n["t"], 3), []).append(n)
         cand = []
-        for t, g in groups.items():
-            base_score = on_beat(t) + (1.0 if any(n.get("a") for n in g) else 0)
+        gtimes = sorted(groups)
+        for gi, t in enumerate(gtimes):
+            g = groups[t]
+            base_score = on_beat(t) + (1.0 if any(n.get("a") for n in g) else 0) + stream_bonus(gtimes, gi)
             if len(g) > 1:
                 cand.append((base_score - 0.7, t, g[-1]))      # 동시치기 곁가지부터
             cand.append((base_score, t, None))
@@ -1008,7 +1026,7 @@ def fit_band(song, diff, notes, nl=4, pool=()):
 
         def free(t, l):
             i = bisect.bisect_left(times, t)
-            need = max(min_gap, beat_len_at(beats, t) * BEAT_GAP.get(diff, 0.25) * 0.92)
+            need = need_gap(diff, beats, t)
             if any(0 <= j < len(times) and 0.003 < abs(times[j] - t) < need for j in (i - 1, i)):
                 return False
             lt = lane_times.get(l, [])
@@ -1159,9 +1177,12 @@ def ai_balance(song, diff, notes):
         if cnt <= allow:
             keep += gs
             continue
+        gtimes = sorted(groups)
+        gidx = {t: k for k, t in enumerate(gtimes)}
+
         def score(t):
             return (2 if near(btimes, t, 0.05) else 0) + (1.5 if near(grid, t, 0.04) else 0.8 if near(half, t, 0.04) else 0) \
-                   + (0.5 if any(n.get("a") for n in groups[t]) else 0)
+                   + (0.5 if any(n.get("a") for n in groups[t]) else 0) + stream_bonus(gtimes, gidx[t])
         ranked = sorted(gs, key=lambda t: (-score(t), t))
         total, chosen = 0, []
         for t in ranked:
@@ -1180,7 +1201,7 @@ def ai_balance(song, diff, notes):
     frac = BEAT_GAP.get(diff, 0.25)
     spaced = []
     for t in sorted(keep):
-        gap_need = max(min_gap, beat_len_at(beats_all, t) * frac * 0.92)   # 그 곡 박자 기준 (살짝 여유)
+        gap_need = need_gap(diff, beats_all, t)   # 그 곡 박자 기준 (템포를 절반으로 잡아도 스트림은 살게 상한)
         if spaced and t - spaced[-1] < gap_need - 0.002:
             if score2(t) > score2(spaced[-1]):
                 spaced[-1] = t
