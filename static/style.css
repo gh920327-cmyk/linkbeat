@@ -450,6 +450,8 @@ dialog::backdrop { background: rgba(0, 0, 0, .65); backdrop-filter: blur(3px); }
 .hl-chip.on.nohl { opacity: .55; }
 .hl-chip:disabled { cursor: default; }
 .ai-chip.on, .ai-chip.on:hover:not(:disabled) { background: linear-gradient(135deg, #c8fff4, #3ee6c1 50%, #2fa8ff); color: #031014; box-shadow: 0 0 14px rgba(62, 230, 193, .45); }
+.ai-note { margin-top: 4px; color: #3ee6c1; font-weight: 700; }
+.ai-chip:disabled { cursor: default; }
 .ai-tag { background: linear-gradient(135deg, #3ee6c1, #2fa8ff); color: #031014; }
 #confetti { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 30; }
 .hl-range { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--gold); }

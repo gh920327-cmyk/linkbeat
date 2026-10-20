@@ -26,23 +26,26 @@ async function refreshSongs() {
   }
 }
 const songById = (id) => songs.find((s) => s.id === id);
-/* AI 채보 (시험): 혼자 할 때 4키에서만. 곡에 AI 채보가 있고 'AI 채보' 칩을 켰을 때 그 채보로 플레이 (기록은 안 남음) */
-const aiOn = (s, nl = settings.mode, diff = settings.diff) => !net.room && nl === 4 && !!settings.aiChart && !!(s && s.ai && (s.ai.counts || {})[diff]);
+/* AI 채보 (기본): 4키에서 곡에 AI 채보가 있으면 그걸로 플레이. 'AI 채보' 칩을 끄면 기존 채보 (방에서는 방장이 정함)
+   기록·순위표는 AI 채보 / 기존 채보 따로 */
+function aiWanted() { return net.room ? net.room.ai !== false : settings.aiChart !== false; }
+const hasAi = (s, nl = settings.mode, diff = settings.diff) => nl === 4 && !!(s && s.ai && (s.ai.counts || {})[diff]);
+const aiOn = (s, nl = settings.mode, diff = settings.diff) => aiWanted() && hasAi(s, nl, diff);
 const starOf = (s, nl = settings.mode, diff = settings.diff) => aiOn(s, nl, diff) ? (s.ai.stars || {})[diff] || 0 : ((s.stars || {})[nl] || {})[diff] || 0;
 const countOf = (s, nl = settings.mode, diff = settings.diff) => aiOn(s, nl, diff) ? s.ai.counts[diff] : ((nl === 6 ? s.counts6 : s.counts) || {})[diff] || 0;
 /* 하이라이트 모드: 방에 있으면 방 설정(방장이 정함), 혼자면 내 설정 */
 function hlActive() { return net.room ? !!net.room.hl : !!settings.hlMode; }
 function hlPractice(h) { return h ? { start: h.start, from: h.from, end: h.end, rate: 1, loop: false, hl: true } : null; }
-function boardOf(s, nl, diff, hl = hlActive()) {
-  return (s.board || []).filter((e) => e.diff === diff && (e.keys || 4) === nl && !!e.hl === hl).sort((a, b) => b.score - a.score);
+function boardOf(s, nl, diff, hl = hlActive(), ai = aiOn(s, nl, diff)) {
+  return (s.board || []).filter((e) => e.diff === diff && (e.keys || 4) === nl && !!e.hl === hl && !!e.ai === ai).sort((a, b) => b.score - a.score);
 }
-function myRecord(s, nl, diff, hl = hlActive()) {
+function myRecord(s, nl, diff, hl = hlActive(), ai = aiOn(s, nl, diff)) {
   const nick = (settings.nick || '').trim();
   if (nick) {
-    const e = boardOf(s, nl, diff, hl).find((x) => x.name === nick);
+    const e = boardOf(s, nl, diff, hl, ai).find((x) => x.name === nick);
     if (e) return e;
   }
-  return getBest(s.id, diff, nl, hl);
+  return getBest(s.id, diff, nl, hl, ai);
 }
 
 /* ============================================================ 곡 목록 */
@@ -159,12 +162,13 @@ function renderDetail() {
   $('#dHlRange').textContent = hlOn ? (s.hl ? `${fmtTime(s.hl.from)}~${fmtTime(s.hl.end)}` : '구간 없음') : '';
   $('#btnPreview').classList.toggle('on', preview.id === s.id);
   $('#btnPractice').disabled = inRoom || !countOf(s, nl, settings.diff);
-  // AI 채보 칩: 이 곡에 AI 채보가 있을 때만 보임 (4키 · 혼자 할 때)
+  // AI 채보 칩: 이 곡에 AI 채보가 있을 때만 보임 (4키). 켜짐이 기본, 방에서는 방장만 바꿈
   const ac = $('#modAi');
-  const hasAi = !!(s.ai && s.ai.counts && Object.keys(s.ai.counts).length);
-  ac.classList.toggle('hidden', !hasAi || inRoom || nl !== 4);
-  ac.classList.toggle('on', hasAi && !!settings.aiChart);
-  ac.title = hasAi ? `AI가 만든 채보로 플레이 (${s.ai.by || 'AI'}) · 기본 채보와 따로 있어요 · 시험 중이라 기록은 안 남아요` : '';
+  const songAi = !!(s.ai && s.ai.counts && Object.keys(s.ai.counts).length);
+  ac.classList.toggle('hidden', !songAi || nl !== 4);
+  ac.classList.toggle('on', songAi && aiWanted());
+  ac.disabled = inRoom && !leader;
+  ac.title = songAi ? `다른 리듬게임 채보로 학습한 AI가 만든 채보 (${s.ai.by || 'AI'}) · 끄면 기존 채보 · 기록은 따로` : '';
 }
 function renderMods() {
   $('#modMirror').classList.toggle('on', !!settings.mirror);
@@ -177,10 +181,15 @@ $('#modMirror').addEventListener('click', () => { settings.mirror = !settings.mi
 $('#modRandom').addEventListener('click', () => { settings.random = !settings.random; saveSettings(); renderMods(); });
 $('#modGhost').addEventListener('click', () => { settings.ghost = settings.ghost === false; saveSettings(); renderMods(); });
 $('#modAi').addEventListener('click', () => {
-  settings.aiChart = !settings.aiChart;
+  if (net.room) {
+    if (net.isLeader()) net.send({ type: 'aimode', on: net.room.ai === false });
+    else toast('AI 채보 사용은 방장이 정해요.');
+    return;
+  }
+  settings.aiChart = settings.aiChart === false;
   saveSettings();
   renderSongs();
-  if (settings.aiChart) toast('AI 채보로 플레이해요. 시험 중이라 기록·업적은 안 남아요. 다시 누르면 기본 채보로 돌아가요.', 3400);
+  toast(settings.aiChart ? 'AI 채보로 플레이해요. (AI 채보가 있는 곡만 · 기록은 따로)' : '기존 채보로 플레이해요. (기록은 따로)', 2600);
 });
 $('#modHl').addEventListener('click', () => {
   if (net.room) {
@@ -415,7 +424,7 @@ async function loadJobs() {
   }
   renderJobs();
 }
-const PC_ACTIVE = ['claimed', 'info', 'download', 'analyze', 'upload'];
+const PC_ACTIVE = ['claimed', 'info', 'download', 'analyze', 'ai', 'upload'];
 function renderJobs() {
   if (!isHost || !isCloud) return;
   const w = pcJobs.worker || {};
@@ -424,14 +433,15 @@ function renderJobs() {
   const working = jobs.some((j) => PC_ACTIVE.includes(j.stage));
   $('#pcDot').className = 'pc-dot' + (w.online ? (working ? ' work' : ' on') : '');
   let text;
-  if (w.online) text = `채보 PC 연결됨${working ? ' · 만드는 중' : ''}${waiting ? ` · 대기 ${waiting}곡` : working ? '' : ' · 쉬는 중'}`;
+  if (w.online) text = `채보 PC 연결됨${w.ai ? ' · AI 채보 켜짐' : ''}${working ? ' · 만드는 중' : ''}${waiting ? ` · 대기 ${waiting}곡` : working ? '' : ' · 쉬는 중'}`;
   else if (engineState && engineState.state !== 'ready') text = `채보 엔진: ${engineState.msg || '준비 중...'}`;
   else text = `채보 PC 꺼짐${waiting ? ` · 대기 ${waiting}곡` : ''} — 호스트 PC에서 LINKBEAT 실행기를 켜면 만들어져요`;
   $('#pcText').textContent = text;
+  $('#btnAiBatch').classList.toggle('hidden', !w.ai);
   $('#pcList').innerHTML = jobs.map((j) => {
     const live = j.stage === 'waitpc' || PC_ACTIVE.includes(j.stage);
     const msg = j.stage === 'done' ? '완료' : j.stage === 'canceled' ? '취소됨' : j.msg;
-    return `<li class="${esc(j.stage)}"><span class="pt" title="${esc(j.title)}">${esc(j.title)}${j.by && j.by !== '호스트' ? ` <small class="muted">· ${esc(j.by)} 신청</small>` : ''}</span>
+    return `<li class="${esc(j.stage)}"><span class="pt" title="${esc(j.title)}">${j.aiOnly ? '<span class="tag ai-tag">AI</span> ' : ''}${esc(j.title)}${j.by && j.by !== '호스트' ? ` <small class="muted">· ${esc(j.by)} 신청</small>` : ''}</span>
       <span class="pm" title="${esc(j.msg || '')}">${esc((msg || '').slice(0, 40))}</span>
       ${live ? `<button class="ghost small-btn" data-cancel="${esc(j.id)}" type="button">취소</button>` : ''}</li>`;
   }).join('');
@@ -443,6 +453,16 @@ $('#pcList').addEventListener('click', async (e) => {
   try { await api('/jobs/' + b.dataset.cancel, { method: 'DELETE' }); loadJobs(); } catch (err) { toast(err.message); }
 });
 net.on('jobs', () => loadJobs());
+$('#btnAiBatch').addEventListener('click', async () => {
+  const left = songs.filter((s) => !s.ai).length;
+  if (!left) { toast('모든 곡에 이미 AI 채보가 있어요.'); return; }
+  if (!confirm(`AI 채보가 없는 ${left}곡을 대기열에 넣어요. 호스트 PC의 AI 채보 도구가 한 곡씩 만들어요 (곡당 2~5분).\n새로 추가한 곡이 항상 먼저 만들어져요. 진행할까요?`)) return;
+  try {
+    const r = await api('/ai/batch', { method: 'POST', body: {} });
+    toast(r.queued ? `${r.queued}곡을 AI 채보 대기열에 넣었어요.` : '넣을 곡이 없어요.', 3000);
+    loadJobs();
+  } catch (err) { toast(err.message); }
+});
 /* 실행기(exe): 예전에 내 PC에서 쓰던 곡·기록·프로필을 이 서버로 옮기기 */
 $('#btnImport').addEventListener('click', async () => {
   if (!window.lbDesktop) return;
@@ -537,15 +557,15 @@ net.on('songs', () => { if (currentScreen === 'lobby' && !addBusy) refreshSongs(
 async function fetchSong(id) { return api('/songs/' + id); }
 
 /* 고스트 대결 상대: 친구 1위 기록 (1위가 나면 내 최고 기록). 점수 흐름이 없는 예전 기록은 고르게 올랐다고 가정 */
-function ghostFor(id, diff, nl, hl) {
+function ghostFor(id, diff, nl, hl, ai) {
   const s = songById(id);
   if (!s) return null;
   const nick = (settings.nick || '').trim();
-  const top = boardOf(s, nl, diff, hl)[0];
+  const top = boardOf(s, nl, diff, hl, ai)[0];
   const linear = (score) => Array.from({ length: 21 }, (_, i) => Math.round((score * i) / 20));
   const mk = (e, label) => ({ label, score: e.score, g: Array.isArray(e.g) && e.g.length >= 2 ? e.g : linear(e.score) });
   if (top && top.name !== nick) return mk(top, `${top.name} · 1위`);
-  const mine = myRecord(s, nl, diff, hl);
+  const mine = myRecord(s, nl, diff, hl, ai);
   return mine && mine.score > 0 ? mk(mine, '내 최고 기록') : null;
 }
 
@@ -560,13 +580,13 @@ async function startSolo(id, diff, nl = 4, customNotes = null, practice = null) 
   stopPreview();
   if (game) game.destroy();
   if (practice && practice.hl && song._hl) practice = hlPractice(song._hl);   // 서버의 최신 구간으로
-  const useAi = !customNotes && aiOn(songById(id) || song, nl, diff) && !!(song.ai && song.ai.charts && song.ai.charts[diff]);
-  const notes = customNotes || (useAi ? song.ai.charts[diff] : chartOf(song, diff, nl));
+  const useAi = !customNotes && aiWanted() && !!aiChartOf(song, diff, nl);
+  const notes = customNotes || (useAi ? aiChartOf(song, diff, nl) : chartOf(song, diff, nl));
   if (!notes.length) { toast('이 난이도에는 노트가 없어요.'); return; }
   pendingResults = null;
   const g = new Game({ song, diff, keys: nl, notes, onExit: backFromGame, practice });
   game = g;
-  if (!customNotes && !useAi && (!practice || practice.hl)) g.ghost = ghostFor(id, diff, nl, !!(practice && practice.hl));
+  if (!customNotes && (!practice || practice.hl)) g.ghost = ghostFor(id, diff, nl, !!(practice && practice.hl), useAi);
   g.customNotes = customNotes;
   g.ai = useAi;
   setupGameScreen(g, false);
@@ -619,8 +639,8 @@ function prevBestOf(g) {
   const s = songById(g.song.id);
   const nick = (settings.nick || '').trim();
   const cands = [];
-  if (s && nick) { const e = boardOf(s, g.nl, g.diff, !!g.hl).find((x) => x.name === nick); if (e) cands.push(e); }
-  const lb = getBest(g.song.id, g.diff, g.nl, !!g.hl);
+  if (s && nick) { const e = boardOf(s, g.nl, g.diff, !!g.hl, !!g.ai).find((x) => x.name === nick); if (e) cands.push(e); }
+  const lb = getBest(g.song.id, g.diff, g.nl, !!g.hl, !!g.ai);
   if (lb) cands.push(lb);
   if (!cands.length) return null;
   const best = cands.reduce((a, b) => (b.score > a.score ? b : a));
@@ -653,9 +673,9 @@ function renderBestDelta(prev, r, show) {
 
 function showResult(g, r) {
   lastResult = { g, r };
-  const isTest = !!(editor && editor.testing) || !!g.customNotes || !!g.ai || (!!g.practice && !g.hl);
+  const isTest = !!(editor && editor.testing) || !!g.customNotes || (!!g.practice && !g.hl);
   const prevBest = isTest ? null : prevBestOf(g);      // 기록을 저장하기 전에 읽어 둠
-  const newLocal = !isTest && setBest(g.song.id, g.diff, g.nl, r, g.hl);
+  const newLocal = !isTest && setBest(g.song.id, g.diff, g.nl, r, g.hl, !!g.ai);
   renderBestDelta(prevBest, r, !isTest);
   const mods = (g.ai ? ' <span class="tag ai-tag">AI 채보</span>' : '') + (g.hl ? ' <span class="tag hl-tag">HIGHLIGHT</span>' : '') + (g.modNames.length ? ` <span class="warn">${g.modNames.join(' · ')}</span>` : '');
   $('#rSong').innerHTML = `${esc(g.song.title)} <span class="tag">${g.nl}KEY</span> ${DIFF_EN[g.diff]} ${starHtml(g.stars)}${mods}`;
@@ -669,7 +689,7 @@ function showResult(g, r) {
   $('#rGood').textContent = r.counts.good;
   $('#rMiss').textContent = r.counts.miss;
   $('#rBadge').textContent = r.incomplete ? '중도 포기' : r.counts.miss === 0 && r.counts.good === 0 && r.counts.great === 0 ? 'ALL PERFECT' : r.fc ? 'FULL COMBO' : '';
-  $('#rBest').textContent = g.ai ? 'AI 채보 시험 플레이라 기록은 남지 않아요.' : g.practice && !g.hl ? '연습 모드라 기록은 남지 않아요.' : isTest ? '테스트 플레이라 기록은 남지 않아요.' : newLocal ? (g.hl ? '하이라이트 최고 기록 갱신!' : '내 최고 기록 갱신!') : '';
+  $('#rBest').textContent = g.practice && !g.hl ? '연습 모드라 기록은 남지 않아요.' : isTest ? '테스트 플레이라 기록은 남지 않아요.' : newLocal ? (g.hl ? '하이라이트 최고 기록 갱신!' : '내 최고 기록 갱신!') : '';
   const rg = $('#rGhost');
   rg.classList.add('hidden');
   if (g.ghost && !r.incomplete && settings.ghost !== false) {
@@ -694,7 +714,7 @@ function showResult(g, r) {
   if (!isTest) {
     api('/scores', {
       method: 'POST',
-      body: { songId: g.song.id, diff: g.diff, keys: g.nl, name: settings.nick || '이름없음', ...r, hl: g.hl },
+      body: { songId: g.song.id, diff: g.diff, keys: g.nl, name: settings.nick || '이름없음', ...r, hl: g.hl, ai: !!g.ai },
     }).then((res) => {
       if (lastResult.g !== g || r.incomplete) return;
       const parts = [];
@@ -831,13 +851,13 @@ $('#btnRetry').addEventListener('click', () => {
   const g = lastResult.g;
   startSolo(g.song.id, g.diff, g.nl, g.customNotes, g.practice);
 });
-$('#btnResRank').addEventListener('click', () => lastResult && openRank(lastResult.g.song.id, lastResult.g.nl, lastResult.g.diff, lastResult.g.hl));
+$('#btnResRank').addEventListener('click', () => lastResult && openRank(lastResult.g.song.id, lastResult.g.nl, lastResult.g.diff, lastResult.g.hl, !!lastResult.g.ai));
 $('#btnToLobby').addEventListener('click', () => { game = null; backFromGame(); });
 
 /* ============================================================ 순위표 */
-const rankCtx = { id: null, mode: 4, diff: 'normal', hl: false, data: null };
-async function openRank(id, mode, diff, hl = hlActive()) {
-  Object.assign(rankCtx, { id, mode, diff, hl: !!hl, data: null });
+const rankCtx = { id: null, mode: 4, diff: 'normal', hl: false, ai: false, data: null };
+async function openRank(id, mode, diff, hl = hlActive(), ai = aiOn(songById(id), mode, diff)) {
+  Object.assign(rankCtx, { id, mode, diff, hl: !!hl, ai: !!ai, data: null });
   const s = songById(id);
   $('#rankTitle').textContent = s ? s.title : '';
   $('#rankList').innerHTML = '<li class="muted">불러오는 중...</li>';
@@ -855,13 +875,19 @@ async function openRank(id, mode, diff, hl = hlActive()) {
 }
 function renderRank() {
   const { mode, diff, hl, data } = rankCtx;
+  const sAi = songById(rankCtx.id);
+  const showAi = mode === 4 && !!(sAi && sAi.ai);
+  const ai = showAi && rankCtx.ai;
   $$('#rankMode button').forEach((b) => b.classList.toggle('on', +b.dataset.mode === mode));
   $$('#rankHl button').forEach((b) => b.classList.toggle('on', (b.dataset.hl === '1') === hl));
+  $('#rankAi').classList.toggle('hidden', !showAi);
+  $$('#rankAi button').forEach((b) => b.classList.toggle('on', (b.dataset.ai === '1') === ai));
   $$('#rankDiff button').forEach((b) => b.classList.toggle('on', b.dataset.diff === diff));
   if (!data) return;
   const s = songById(rankCtx.id);
-  $('#rankPlays').innerHTML = `총 ${data.plays}회 플레이${s ? ` · ${mode}KEY ${DIFF_EN[diff]} ${starHtml(starOf(s, mode, diff))}` : ''}`;
-  const rows = data.entries.filter((e) => e.diff === diff && (e.keys || 4) === mode && !!e.hl === hl).sort((a, b) => b.score - a.score);
+  const st = s ? (ai ? (s.ai.stars || {})[diff] || 0 : ((s.stars || {})[mode] || {})[diff] || 0) : 0;
+  $('#rankPlays').innerHTML = `총 ${data.plays}회 플레이${s ? ` · ${mode}KEY ${DIFF_EN[diff]}${ai ? ' AI' : ''} ${starHtml(st)}` : ''}`;
+  const rows = data.entries.filter((e) => e.diff === diff && (e.keys || 4) === mode && !!e.hl === hl && !!e.ai === ai).sort((a, b) => b.score - a.score);
   const nick = settings.nick || '';
   $('#rankList').innerHTML = rows.length ? rows.map((e, i) => {
     const d = new Date(e.at * 1000);
@@ -874,6 +900,7 @@ function renderRank() {
 $('#rankMode').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { rankCtx.mode = +b.dataset.mode; renderRank(); } });
 $('#rankDiff').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { rankCtx.diff = b.dataset.diff; renderRank(); } });
 $('#rankHl').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { rankCtx.hl = b.dataset.hl === '1'; renderRank(); } });
+$('#rankAi').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { rankCtx.ai = b.dataset.ai === '1'; renderRank(); } });
 $('#rankClose').addEventListener('click', () => $('#rankDlg').close());
 
 /* ============================================================ 멀티 */
@@ -896,6 +923,7 @@ function renderRoom() {
     paintMinis($('#roomPlayers'));
     $('#roomSong').textContent = r.songId ? r.songTitle : '방장이 곡을 고르는 중...';
     $('#roomDiff').innerHTML = (r.songId ? `난이도·키는 각자 골라요 · 내 선택 <span class="tag">${settings.mode}KEY</span> ${DIFF_EN[settings.diff]} ${s ? starHtml(starOf(s, settings.mode, settings.diff)) : ''}` : '')
+      + (r.ai === false ? '<div class="ai-note">기존 채보로 플레이 (방장이 AI 채보를 껐어요)</div>' : '')
       + (r.hl ? `<div class="hl-note">★ 하이라이트 모드 — 후렴만 플레이${s && s.hl ? ` (${fmtTime(s.hl.from)}~${fmtTime(s.hl.end)})` : ''}</div>` : '');
     // 방장이 곡을 바꾸면 내 목록에서도 그 곡을 골라 별점을 바로 보여줌
     if (r.songId && r.songId !== lastRoomSong && !net.isLeader() && songById(r.songId) && currentScreen === 'lobby') {
@@ -983,7 +1011,9 @@ net.on('prepare', async (m) => {
   }
   if (token !== prepareSeq || !net.room) return;   // 그사이 새 판이 시작됐거나 방을 나갔으면 버림
   if (game) game.destroy();
-  const g = new Game({ song, diff: m.diff, keys: m.keys || 4, multi: true, gameNo: m.game, onExit: backFromGame, practice: hlPractice(m.hl) });
+  const mAi = m.ai !== false ? aiChartOf(song, m.diff, m.keys || 4) : null;
+  const g = new Game({ song, diff: m.diff, keys: m.keys || 4, notes: mAi, multi: true, gameNo: m.game, onExit: backFromGame, practice: hlPractice(m.hl) });
+  g.ai = !!mAi;
   game = g;
   setupGameScreen(g, true);
   try { g.spec = new Spectator(g, m.players || (net.room && net.room.players) || []);

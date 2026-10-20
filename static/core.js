@@ -129,6 +129,8 @@ function starClass(v) {
 }
 function starHtml(v) { return `<span class="star ${starClass(v)}">★${(+v || 0).toFixed(1)}</span>`; }
 function chartOf(song, diff, nl) { return ((nl === 6 ? song.charts6 : song.charts) || {})[diff] || []; }
+/* AI 채보 (4키만, 기존 채보와 따로 저장) — 없으면 null */
+function aiChartOf(song, diff, nl) { const c = nl === 4 && song && song.ai && song.ai.charts && song.ai.charts[diff]; return c && c.length ? c : null; }
 
 let hostKey = store.get('hostKey', '');
 (function readHostParam() {
@@ -534,15 +536,16 @@ function showScreen(name) {
 
 /* ------------------------------------------------------------ 기록 */
 /* hl: 하이라이트 모드 기록은 전체곡 기록과 따로 */
-function bestKey(id, diff, nl = 4, hl = false) {
+function bestKey(id, diff, nl = 4, hl = false, ai = false) {
   const h = hl ? 'hl' : '';
+  if (nl !== 6 && ai) return `best_${id}_ai_${h ? h + '_' : ''}${diff}`;   // AI 채보 기록은 따로
   return nl === 6 ? `best_${id}_${h}6_${diff}` : `best_${id}_${h ? h + '_' : ''}${diff}`;
 }
-function getBest(id, diff, nl = 4, hl = false) { return store.get(bestKey(id, diff, nl, hl), null); }
-function setBest(id, diff, nl, r, hl = false) {
-  const b = getBest(id, diff, nl, hl);
+function getBest(id, diff, nl = 4, hl = false, ai = false) { return store.get(bestKey(id, diff, nl, hl, ai), null); }
+function setBest(id, diff, nl, r, hl = false, ai = false) {
+  const b = getBest(id, diff, nl, hl, ai);
   if (!b || r.score > b.score) {
-    store.set(bestKey(id, diff, nl, hl), { score: r.score, acc: r.acc, rank: r.rank, fc: r.fc, ...(Array.isArray(r.g) ? { g: r.g } : {}) });
+    store.set(bestKey(id, diff, nl, hl, ai), { score: r.score, acc: r.acc, rank: r.rank, fc: r.fc, ...(Array.isArray(r.g) ? { g: r.g } : {}) });
     if (typeof profileSync === 'function') profileSync();
     return true;
   }

@@ -11,14 +11,16 @@ import argparse
 import json
 import os
 import ssl
+import subprocess
 import sys
+import tempfile
 import time
 import traceback
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 # 가상환경의 실행 파일 폴더(deno 등)를 PATH 앞에 → yt-dlp가 JS 런타임을 찾을 수 있게
 os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
@@ -43,6 +45,42 @@ def _ssl_context():
 SSL_CTX = _ssl_context()
 
 
+# ------------------------------------------------------------------ AI 채보 도구 (선택: 호스트 PC에 설치돼 있으면)
+AUDIO_CACHE = Path(tempfile.gettempdir()) / "linkbeat_ai_audio"     # 기존 채보 만들 때 받은 오디오 (AI 채보에 다시 씀)
+
+
+def find_ai():
+    """F:\\LinkbeatAI 같은 AI 채보 도구 폴더 찾기 (LB_AI_DIR 환경 변수 → 각 드라이브의 LinkbeatAI)"""
+    cands = []
+    if os.environ.get("LB_AI_DIR"):
+        cands.append(Path(os.environ["LB_AI_DIR"]))
+    if os.name == "nt":
+        cands += [Path(f"{c}:\\LinkbeatAI") for c in "FDEGHCIJK"]
+    for d in cands:
+        py = d / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        tool = d / "tools" / "linkbeat_ai.py"
+        ck = d / "mug" / "models" / "ckpt" / "model.ckpt"
+        try:
+            if py.exists() and tool.exists() and ck.exists():
+                return {"dir": d, "py": py, "tool": tool}
+        except OSError:
+            continue
+    return None
+
+
+AI = None
+AI_CHECKED = 0.0
+
+
+def ai_tool():
+    """1분마다 다시 확인 (설치하거나 지우면 실행기를 다시 안 켜도 반영)"""
+    global AI, AI_CHECKED
+    if time.time() - AI_CHECKED > 60:
+        AI_CHECKED = time.time()
+        AI = find_ai()
+    return AI
+
+
 def status(state, msg="", **extra):
     print(json.dumps(dict(state=state, msg=msg, **extra), ensure_ascii=False), flush=True)
 
@@ -56,9 +94,9 @@ class Api:
         self.base = server.rstrip("/")
         self.key = key
 
-    def call(self, path, body=None, timeout=60):
-        data = json.dumps(body if body is not None else {}, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(self.base + "/api/" + path, data=data, method="POST",
+    def call(self, path, body=None, timeout=60, method="POST"):
+        data = json.dumps(body if body is not None else {}, ensure_ascii=False).encode("utf-8") if method != "GET" else None
+        req = urllib.request.Request(self.base + "/api/" + path, data=data, method=method,
                                      headers={"Content-Type": "application/json", "X-Host-Key": self.key,
                                               "User-Agent": f"LinkbeatEngine/{VERSION}"})
         try:
@@ -74,8 +112,7 @@ class Api:
             raise RuntimeError(msg)
 
 
-def run_job(api, job):
-    import pipeline
+def make_progress(api, job):
     jid = job["id"]
     last = [0.0]
 
@@ -86,15 +123,107 @@ def run_job(api, job):
         last[0] = now
         status("working", f"{job.get('title') or job['vid']} · {msg}")
         try:
-            r = api.call("worker/progress", {"jobId": jid, "stage": stage, "msg": msg, "version": VERSION}, timeout=15)
+            r = api.call("worker/progress", {"jobId": jid, "stage": stage, "msg": msg, "version": VERSION,
+                                             "ai": bool(ai_tool())}, timeout=15)
         except Exception:
             return
         if r.get("ok") is False:
             raise Cancelled()
+    return progress
+
+
+def run_ai_job(api, job):
+    """AI 채보만 만들기: 기존 채보 ★에 맞춰 AI 채보 생성 → 서버에 따로 저장 (기존 채보는 그대로)"""
+    import chartgen
+    import pipeline
+    vid, jid = job["vid"], job["id"]
+    progress = make_progress(api, job)
+    tool = ai_tool()
+    try:
+        if not tool:
+            raise RuntimeError("이 PC에 AI 채보 도구(LinkbeatAI)가 없어요.")
+        progress("info", "AI 채보 준비 중...", force=True)
+        song = api.call(f"songs/{vid}", method="GET", timeout=30)
+        charts = song.get("charts") or {}
+        targets = {d: chartgen.star_rating(n, 4) for d, n in charts.items() if n}
+        if not targets:
+            raise RuntimeError("기존 4키 채보가 없어요.")
+        AUDIO_CACHE.mkdir(parents=True, exist_ok=True)
+        cached = [f for f in AUDIO_CACHE.glob(vid + ".*") if f.is_file()]
+        with tempfile.TemporaryDirectory() as td:
+            if cached:
+                audio = cached[0]
+            else:
+                audio, _ = pipeline.download_audio(vid, td, progress)
+            tfile, ofile = Path(td) / "targets.json", Path(td) / "ai.json"
+            tfile.write_text(json.dumps(targets), encoding="utf-8")
+            progress("ai", "AI가 채보 쓰는 중... (그래픽카드로 2~5분)", force=True)
+            env = dict(os.environ, PYTHONIOENCODING="utf-8")
+            cmd = [str(tool["py"]), "-I", str(tool["tool"]), "--gen", vid, "--audio", str(audio),
+                   "--targets", str(tfile), "--out", str(ofile), "--title=" + str(song.get("title", ""))[:100],
+                   "--artist=" + str(song.get("artist", ""))[:80], "--duration", str(song.get("duration") or 900)]
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            proc = subprocess.Popen(cmd, cwd=str(tool["dir"]), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    env=env, creationflags=flags)
+            tail = []
+            try:
+                for raw in proc.stdout:
+                    line = raw.decode("utf-8", "replace").strip()
+                    if not line:
+                        continue
+                    tail = (tail + [line])[-8:]
+                    if "AI가 채보 쓰는 중" in line or "모델 불러오는" in line or "만들었어요" in line:
+                        progress("ai", line.strip()[:120])
+                proc.wait()
+            except Cancelled:
+                proc.kill()
+                raise
+            if proc.returncode != 0 or not ofile.exists():
+                msg = next((l for l in reversed(tail) if "문제가 생겼어요" in l or "메모리" in l), tail[-1] if tail else "")
+                raise RuntimeError("AI 채보 실패: " + msg[:200])
+            body = json.loads(ofile.read_text(encoding="utf-8"))
+        for f in cached:
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        progress("upload", "AI 채보 올리는 중...", force=True)
+        r = api.call("worker/done", {"jobId": jid, "ai": body, "version": VERSION}, timeout=180)
+        status("ready", f"AI 채보 완료: {job.get('title') or vid}" if r.get("ok") else f"저장 실패: {r.get('msg', '')}")
+    except Cancelled:
+        status("ready", f"취소됨: {job.get('title') or vid}")
+    except PermissionError:
+        raise
+    except Exception as e:
+        traceback.print_exc(file=sys.stderr)
+        msg = str(e)[:300]
+        status("ready", f"AI 채보 실패: {job.get('title') or vid} · {msg}")
+        try:
+            api.call("worker/fail", {"jobId": jid, "msg": msg, "version": VERSION}, timeout=15)
+        except Exception:
+            pass
+
+
+def clean_audio_cache():
+    """하루 넘은 오디오는 지움 (AI 작업이 취소됐거나 실패한 곡)"""
+    try:
+        for f in AUDIO_CACHE.glob("*"):
+            if time.time() - f.stat().st_mtime > 86400:
+                f.unlink()
+    except OSError:
+        pass
+
+
+def run_job(api, job):
+    import pipeline
+    if job.get("aiOnly"):
+        return run_ai_job(api, job)
+    jid = job["id"]
+    progress = make_progress(api, job)
 
     try:
         progress("info", "시작", force=True)
-        meta, res = pipeline.analyze(job["vid"], progress)
+        meta, res = pipeline.analyze(job["vid"], progress, keep_audio=AUDIO_CACHE if ai_tool() else None)
         progress("upload", "서버로 올리는 중...", force=True)
         r = api.call("worker/done", {"jobId": jid, "meta": meta, "res": res, "version": VERSION}, timeout=180)
         if r.get("ok"):
@@ -117,10 +246,14 @@ def run_job(api, job):
 
 def loop(api):
     status("ready", "서버 연결 중...")
+    clean_audio_cache()
+    t = ai_tool()
+    if t:
+        status("ready", f"AI 채보 도구 찾음: {t['dir']}")
     fails = 0
     while True:
         try:
-            r = api.call("worker/poll", {"version": VERSION}, timeout=20)
+            r = api.call("worker/poll", {"version": VERSION, "ai": bool(ai_tool())}, timeout=20)
             if fails:
                 status("ready", "서버에 다시 연결됐어요")
             fails = 0
@@ -138,7 +271,7 @@ def loop(api):
             run_job(api, job)
         else:
             if fails == 0:
-                status("ready", "대기 중")
+                status("ready", "대기 중" + (" · AI 채보 켜짐" if ai_tool() else ""))
             time.sleep(3)
 
 

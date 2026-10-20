@@ -44,7 +44,8 @@ class Spectator {
     const nl = p.keys === 6 ? 6 : 4;
     const diff = p.diff || 'normal';
     const pr = this.game.hl ? this.game.practice : null;   // 하이라이트 모드: 그 구간 노트만
-    const notes = chartOf(this.song, diff, nl).map((n) => ({ t: +n.t, l: n.l | 0, d: +n.d || 0 }))
+    const src = (this.game.ai && aiChartOf(this.song, diff, nl)) || chartOf(this.song, diff, nl);   // 방에서 AI 채보를 쓰면 같은 채보로
+    const notes = src.map((n) => ({ t: +n.t, l: n.l | 0, d: +n.d || 0 }))
       .filter((n) => !pr || (n.t >= (pr.from ?? pr.start) - 0.001 && n.t <= pr.end))
       .sort((a, b) => a.t - b.t);
     const el = document.createElement('div');

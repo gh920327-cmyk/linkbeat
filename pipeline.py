@@ -34,8 +34,35 @@ def friendly_error(e, updater="start.bat을 다시 실행해"):
     return msg[:400]
 
 
-def analyze(vid, progress=lambda stage, msg: None):
-    """vid의 오디오를 받아 채보를 분석. progress(stage, msg)로 진행 상황을 알림."""
+def download_audio(vid, folder, progress=lambda stage, msg: None):
+    """오디오만 받기 → (파일 경로, 유튜브 정보)"""
+    import yt_dlp
+    url = f"https://www.youtube.com/watch?v={vid}"
+    last = [-1]
+
+    def hook(d):
+        if d.get("status") == "downloading":
+            tot = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+            if tot:
+                pct = int(d.get("downloaded_bytes", 0) * 100 / tot)
+                if pct != last[0]:
+                    last[0] = pct
+                    progress("download", f"오디오 받는 중... {pct}%")
+
+    progress("download", "오디오 받는 중...")
+    opts = {"quiet": True, "no_warnings": True, "noplaylist": True, "format": "bestaudio/best",
+            "outtmpl": str(Path(folder) / "audio.%(ext)s"), "progress_hooks": [hook]}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info2 = ydl.extract_info(url, download=True)
+    files = [f for f in Path(folder).iterdir() if f.is_file() and not f.name.endswith(".part")]
+    if not files:
+        raise RuntimeError("오디오 파일을 받지 못했어요.")
+    return max(files, key=lambda f: f.stat().st_size), info2
+
+
+def analyze(vid, progress=lambda stage, msg: None, keep_audio=None):
+    """vid의 오디오를 받아 채보를 분석. progress(stage, msg)로 진행 상황을 알림.
+    keep_audio: 폴더를 주면 받은 오디오를 '<vid>.<확장자>'로 복사해 둠 (이어서 AI 채보를 만들 때 다시 안 받게)"""
     try:
         import yt_dlp
     except ImportError:
@@ -54,26 +81,14 @@ def analyze(vid, progress=lambda stage, msg: None):
         raise ValueError("라이브 방송은 사용할 수 없어요.")
 
     with tempfile.TemporaryDirectory() as td:
-        last = [-1]
-
-        def hook(d):
-            if d.get("status") == "downloading":
-                tot = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
-                if tot:
-                    pct = int(d.get("downloaded_bytes", 0) * 100 / tot)
-                    if pct != last[0]:
-                        last[0] = pct
-                        progress("download", f"오디오 받는 중... {pct}%")
-
-        progress("download", "오디오 받는 중...")
-        opts = dict(base_opts, format="bestaudio/best",
-                    outtmpl=str(Path(td) / "audio.%(ext)s"), progress_hooks=[hook])
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info2 = ydl.extract_info(url, download=True)
-        files = [f for f in Path(td).iterdir() if f.is_file() and not f.name.endswith(".part")]
-        if not files:
-            raise RuntimeError("오디오 파일을 받지 못했어요.")
-        audio_file = max(files, key=lambda f: f.stat().st_size)
+        audio_file, info2 = download_audio(vid, td, progress)
+        if keep_audio:
+            try:
+                import shutil
+                Path(keep_audio).mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(audio_file, Path(keep_audio) / (vid + audio_file.suffix))
+            except OSError:
+                pass
         progress("analyze", "리듬 분석 중...")
         y = chartgen.decode_audio(audio_file, ffmpeg_exe())
     # 임시 폴더가 닫히면서 오디오 파일은 자동 삭제됨 (채보만 남김)

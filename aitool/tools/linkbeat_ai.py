@@ -159,13 +159,19 @@ def download_audio(vid, folder):
     if not files:
         raise RuntimeError("오디오 파일을 받지 못했어요.")
     src = max(files, key=lambda f: f.stat().st_size)
+    return to_wav(src, folder), info
+
+
+def to_wav(src, folder):
+    """아무 오디오 → 22050Hz 모노 wav (MuG가 읽는 형식)"""
+    folder.mkdir(parents=True, exist_ok=True)
     wav = folder / "audio.wav"
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     r = subprocess.run([ffmpeg_exe(), "-v", "error", "-y", "-i", str(src), "-ac", "1", "-ar", "22050", str(wav)],
                        capture_output=True, creationflags=flags)
     if r.returncode != 0 or not wav.exists():
         raise RuntimeError("오디오 변환(ffmpeg)에 실패했어요: " + r.stderr.decode("utf-8", "replace")[:300])
-    return wav, info
+    return wav
 
 
 # ------------------------------------------------------------------ .osu → 링크비트 노트
@@ -388,40 +394,65 @@ def cmd_make(link):
     wav, info = download_audio(vid, wdir)
 
     say("\n[3/4] AI 채보 만들기 (그래픽카드로 2~5분)")
-    t0 = time.time()
-    mug = Mug()
-    odir = OUT / vid
-    if odir.exists():
-        shutil.rmtree(odir, ignore_errors=True)
-    seed = int(time.time()) % 100000000
-    made = mug.generate(wav, odir, SR_PROMPTS, PER_PROMPT, seed=seed, title=title, artist=song.get("artist", ""))
-    cands = []
-    for path, sr in made:
-        notes = [n for n in osu_to_notes(path) if n["t"] <= (song.get("duration") or 900) + 1]
-        if len(notes) < 20:
-            continue
-        cands.append((chartgen.star_rating(notes, 4), notes, path.stem))
-    if not cands:
-        raise SystemExit("AI가 채보를 제대로 만들지 못했어요. 다시 한 번 해 보거나 다른 곡으로 해 주세요.")
-    chosen = pick_for_diffs(cands, targets)
-    say(f"  {len(cands)}개 만들었어요 ({time.time() - t0:.0f}초)")
+    body, chosen = make_charts(vid, wav, targets, title, song.get("artist", ""), song.get("duration") or 900)
 
     say("\n[4/4] 서버에 'AI 채보'로 따로 저장 (기본 채보는 그대로)")
-    body = {"charts": {d: c[1] for d, c in chosen.items()}, "by": f"MuG Diffusion v{mug.version}"}
-    (odir / "upload.json").write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
     r = upload(srv, vid, body)
-    summary = {"vid": vid, "title": title, "at": time.time(), "seed": seed, "model": body["by"],
-               "chosen": {d: {"file": c[2], "stars": c[0], "notes": len(c[1])} for d, c in chosen.items()},
-               "candidates": [{"file": c[2], "stars": c[0], "notes": len(c[1])} for c in sorted(cands, key=lambda c: c[0])]}
-    (odir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
     shutil.rmtree(wdir, ignore_errors=True)   # 오디오는 지움 (채보만 남김)
     say("\n완료! 난이도별 비교 (★ = 링크비트 별점)")
     say("  난이도      기본 채보          AI 채보")
     for d in DIFF_ORDER:
         if d in chosen:
             say(f"  {DIFF_KO[d]:<6}  ★{targets[d]:4.1f} {len(basic[d]):5d}노트   ★{chosen[d][0]:4.1f} {len(chosen[d][1]):5d}노트")
-    say("\n게임에서 이 곡을 고르고 'AI 채보' 칩을 켜면 플레이할 수 있어요. (혼자 · 4키 · 기록은 안 남음)")
+    say("\n게임에서 이 곡을 고르면 4키는 AI 채보로 플레이돼요. ('AI 채보' 칩을 끄면 기존 채보)")
     return r
+
+
+def make_charts(vid, wav, targets, title, artist, duration):
+    """AI로 후보 채보를 여러 개 만들고, 기존 채보 ★와 비슷한 걸 난이도마다 하나씩 → (서버에 보낼 body, chosen)
+    out\\<곡ID>\\ 에 후보 .osu · summary.json · upload.json 보관"""
+    import chartgen
+    t0 = time.time()
+    mug = Mug()
+    odir = OUT / vid
+    if odir.exists():
+        shutil.rmtree(odir, ignore_errors=True)
+    seed = int(time.time()) % 100000000
+    made = mug.generate(wav, odir, SR_PROMPTS, PER_PROMPT, seed=seed, title=title, artist=artist)
+    cands = []
+    for path, sr in made:
+        notes = [n for n in osu_to_notes(path) if n["t"] <= duration + 1]
+        if len(notes) < 20:
+            continue
+        cands.append((chartgen.star_rating(notes, 4), notes, path.stem))
+    if not cands:
+        raise RuntimeError("AI가 채보를 제대로 만들지 못했어요.")
+    chosen = pick_for_diffs(cands, targets)
+    say(f"  {len(cands)}개 만들었어요 ({time.time() - t0:.0f}초)")
+    body = {"charts": {d: c[1] for d, c in chosen.items()}, "by": f"MuG Diffusion v{mug.version}"}
+    (odir / "upload.json").write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+    summary = {"vid": vid, "title": title, "at": time.time(), "seed": seed, "model": body["by"],
+               "chosen": {d: {"file": c[2], "stars": c[0], "notes": len(c[1])} for d, c in chosen.items()},
+               "candidates": [{"file": c[2], "stars": c[0], "notes": len(c[1])} for c in sorted(cands, key=lambda c: c[0])]}
+    (odir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+    return body, chosen
+
+
+def cmd_gen(vid, audio, targets_file, out_file, title="", artist="", duration=900.0):
+    """링크비트 실행기의 채보 엔진이 부름: 받은 오디오 + 기존 채보 ★ → AI 채보 json (인터넷 안 씀)"""
+    targets = json.loads(Path(targets_file).read_text(encoding="utf-8"))
+    targets = {d: float(v) for d, v in targets.items() if d in DIFF_ORDER}
+    if not targets:
+        raise RuntimeError("기존 채보 별점이 없어요.")
+    wdir = WORK / ("gen_" + vid)
+    try:
+        say("AI: 오디오 준비 중...")
+        wav = to_wav(Path(audio), wdir)
+        body, _ = make_charts(vid, wav, targets, title, artist, duration)
+        Path(out_file).write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+        say("AI: 완료")
+    finally:
+        shutil.rmtree(wdir, ignore_errors=True)
 
 
 def upload(srv, vid, body):
@@ -469,8 +500,19 @@ def main():
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--undo", action="store_true")
     ap.add_argument("--upload", default="", help="만들어 둔 AI 채보를 서버에 다시 보내기 (곡 ID)")
+    # 링크비트 실행기(채보 엔진)용
+    ap.add_argument("--gen", default="", help="곡 ID (엔진용: --audio --targets --out 와 함께)")
+    ap.add_argument("--audio", default="")
+    ap.add_argument("--targets", default="")
+    ap.add_argument("--out", default="")
+    ap.add_argument("--title", default="")
+    ap.add_argument("--artist", default="")
+    ap.add_argument("--duration", type=float, default=900.0)
     a = ap.parse_args()
     try:
+        if a.gen:
+            cmd_gen(a.gen, a.audio, a.targets, a.out, a.title, a.artist, a.duration)
+            return
         if a.check:
             sys.exit(0 if cmd_check() else 1)
         if a.upload:

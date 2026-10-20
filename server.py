@@ -360,9 +360,9 @@ def submit_score(data):
         return _submit_score(sid, diff, keys, name, data)
 
 
-def _same_board(e, diff, keys, hl):
-    """같은 순위표(난이도·키·전체곡/하이라이트)에 속하는 기록인지"""
-    return e["diff"] == diff and e.get("keys", 4) == keys and bool(e.get("hl")) == hl
+def _same_board(e, diff, keys, hl, ai=False):
+    """같은 순위표(난이도·키·전체곡/하이라이트·AI 채보/기존 채보)에 속하는 기록인지"""
+    return e["diff"] == diff and e.get("keys", 4) == keys and bool(e.get("hl")) == hl and bool(e.get("ai")) == ai
 
 
 def _submit_score(sid, diff, keys, name, data):
@@ -382,20 +382,23 @@ def _submit_score(sid, diff, keys, name, data):
     hl = bool(data.get("hl"))
     if hl:
         entry["hl"] = True                      # 하이라이트 모드 기록은 순위표를 따로
-    same = [e for e in sc["entries"] if e["name"] == name and _same_board(e, diff, keys, hl)]
+    ai = bool(data.get("ai")) and keys == 4
+    if ai:
+        entry["ai"] = True                      # AI 채보 기록도 순위표를 따로
+    same = [e for e in sc["entries"] if e["name"] == name and _same_board(e, diff, keys, hl, ai)]
     new_best = not same or entry["score"] > same[0]["score"]
     if data.get("incomplete"):
         new_best = False
     if new_best:
         sc["entries"] = [e for e in sc["entries"] if e not in same] + [entry]
         # 난이도·키 조합마다 상위 50명만 보관
-        combo = sorted([e for e in sc["entries"] if _same_board(e, diff, keys, hl)],
+        combo = sorted([e for e in sc["entries"] if _same_board(e, diff, keys, hl, ai)],
                        key=lambda e: -e["score"])
         drop = combo[50:]
         if drop:
             sc["entries"] = [e for e in sc["entries"] if e not in drop]
     save_scores(sid, sc)
-    board = sorted([e for e in sc["entries"] if _same_board(e, diff, keys, hl)],
+    board = sorted([e for e in sc["entries"] if _same_board(e, diff, keys, hl, ai)],
                    key=lambda e: -e["score"])
     mine = next((e for e in board if e["name"] == name), None)
     pos = (1 + sum(1 for e in board if e["score"] > mine["score"])) if mine else None   # 동점은 같은 순위
@@ -653,8 +656,8 @@ def run_job(job_id, vid, keep_edited=False, keep_title=False):
 # 호스트가 곡을 추가하거나 신청을 승인하면 여기 쌓이고, 호스트 PC의 채보 엔진이 하나씩 가져가서
 # 음원 받기·분석을 한 뒤 결과만 올려 보냄. 서버는 계속 돌아가고, 결과가 오면 곡 목록에 바로 나타남.
 QUEUE_FILE = DATA / "pcqueue.json"
-WORKER = {"seen": 0.0, "version": "", "busy": None}
-PENDING = ("waitpc", "claimed", "info", "download", "analyze", "upload")
+WORKER = {"seen": 0.0, "version": "", "busy": None, "ai": False}   # ai: 호스트 PC에 AI 채보 도구가 설치돼 있는지
+PENDING = ("waitpc", "claimed", "info", "download", "analyze", "ai", "upload")
 CLAIM_TIMEOUT = 20 * 60          # 엔진이 가져간 뒤 이 시간 동안 소식이 없으면 다시 대기열로
 
 
@@ -663,7 +666,7 @@ def worker_online():
 
 
 def worker_status():
-    return {"online": worker_online(), "seen": WORKER["seen"], "version": WORKER["version"]}
+    return {"online": worker_online(), "seen": WORKER["seen"], "version": WORKER["version"], "ai": WORKER["ai"]}
 
 
 def save_queue():
@@ -685,18 +688,19 @@ def jobs_changed():
     notify_all({"type": "jobs"})
 
 
-def enqueue_pc(vid, keep_edited=False, keep_title=False, title="", by="", batch=False):
-    """같은 곡이 이미 대기 중이면 그 작업을 돌려줌"""
+def enqueue_pc(vid, keep_edited=False, keep_title=False, title="", by="", batch=False, ai_only=False):
+    """같은 곡이 이미 대기 중이면 그 작업을 돌려줌.
+    ai_only: 기존 채보는 그대로 두고 AI 채보만 만드는 작업 (호스트 PC에 AI 채보 도구가 있을 때)"""
     for j in JOBS.values():
-        if j.get("pc") and j["vid"] == vid and j["stage"] in PENDING:
+        if j.get("pc") and j["vid"] == vid and j["stage"] in PENDING and bool(j.get("aiOnly")) == bool(ai_only):
             return j
     jid = secrets.token_hex(6)
-    j = {"id": jid, "vid": vid, "stage": "waitpc", "msg": "PC 채보 엔진을 기다리는 중...", "songId": None,
-         "created": time.time(), "pc": True, "keepEdited": bool(keep_edited), "keepTitle": bool(keep_title),
-         "title": title or vid, "by": by, "batch": bool(batch), "claimedAt": 0}
+    j = {"id": jid, "vid": vid, "stage": "waitpc", "msg": "PC 채보 엔진을 기다리는 중..." if not ai_only else "AI 채보 대기 중...",
+         "songId": None, "created": time.time(), "pc": True, "keepEdited": bool(keep_edited), "keepTitle": bool(keep_title),
+         "title": title or vid, "by": by, "batch": bool(batch), "claimedAt": 0, "aiOnly": bool(ai_only)}
     JOBS[jid] = j
     jobs_changed()
-    log("PC 작업 대기열에 추가:", title or vid)
+    log("PC 작업 대기열에 추가:", ("[AI] " if ai_only else "") + (title or vid))
     return j
 
 
@@ -705,7 +709,9 @@ def claim_job():
     for j in JOBS.values():          # 엔진이 가져가고 오래 소식이 없으면 다시 대기
         if j.get("pc") and j["stage"] in PENDING and j["stage"] != "waitpc" and now - j.get("claimedAt", 0) > CLAIM_TIMEOUT:
             j.update(stage="waitpc", msg="PC 채보 엔진을 기다리는 중... (다시 시도)")
-    waiting = sorted((j for j in JOBS.values() if j.get("pc") and j["stage"] == "waitpc"), key=lambda j: j["created"])
+    # AI 채보 작업은 AI 채보 도구가 있는 엔진만 가져감. 새 곡(기존 채보)이 AI 작업보다 먼저
+    waiting = sorted((j for j in JOBS.values() if j.get("pc") and j["stage"] == "waitpc" and (WORKER["ai"] or not j.get("aiOnly"))),
+                     key=lambda j: (bool(j.get("aiOnly")), j["created"]))
     if not waiting:
         return None
     j = waiting[0]
@@ -787,11 +793,53 @@ def clean_meta(meta, vid):
 def finish_pc_job(job, meta, res):
     """엔진이 보낸 결과로 곡 저장 (가수 찾기 검색이 있어 작업 스레드에서)"""
     try:
-        finish_song(job["vid"], meta, res, job.get("keepEdited"), job.get("keepTitle"))
+        song = finish_song(job["vid"], meta, res, job.get("keepEdited"), job.get("keepTitle"))
         job.update(stage="done", msg="완료!", songId=job["vid"], finished=time.time())
+        # 호스트 PC에 AI 채보 도구가 있으면 이어서 AI 채보도 (기존 채보는 이미 플레이 가능)
+        if WORKER["ai"] and not job.get("noAi") and not song.get("ai"):
+            enqueue_pc(job["vid"], title=song.get("title", job["vid"]), ai_only=True, batch=job.get("batch", False))
     except Exception as e:
         traceback.print_exc()
         job.update(stage="error", msg=f"저장하지 못했어요: {e}"[:300], finished=time.time())
+    jobs_changed()
+
+
+def save_ai(vid, data):
+    """AI 채보 저장 (기존 채보와 따로). data = {"charts": {난이도: 노트}, "by": "..."}"""
+    with FILE_LOCK:
+        song = load_song(vid)
+        if song is None:
+            raise HttpError(404, "곡이 없어요.")
+        src = data.get("charts") if isinstance(data, dict) else None
+        if not isinstance(src, dict):
+            raise HttpError(400, "AI 채보 형식이 잘못됐어요.")
+        charts = {}
+        try:
+            for d, notes in src.items():
+                if d in chartgen.DIFFS:
+                    charts[d] = validate_notes(notes, 4)
+        except (KeyError, TypeError, ValueError) as e:
+            raise HttpError(400, str(e) or "노트 형식이 잘못됐어요.")
+        charts = {d: n for d, n in charts.items() if n}
+        if not charts:
+            raise HttpError(400, "AI 채보가 비어 있어요.")
+        song["ai"] = {"charts": charts, "by": str(data.get("by") or "AI")[:60], "at": time.time()}
+        save_song(song)
+    notify_all({"type": "songs"})
+    log("AI 채보 저장:", song.get("title"), {d: len(n) for d, n in charts.items()})
+    return {"ok": True, "counts": {d: len(n) for d, n in charts.items()},
+            "stars": {d: chartgen.star_rating(n, 4) for d, n in charts.items()}}
+
+
+def finish_ai_job(job, ai):
+    try:
+        save_ai(job["vid"], ai)
+        job.update(stage="done", msg="AI 채보 완료!", songId=job["vid"], finished=time.time())
+    except HttpError as e:
+        job.update(stage="error", msg=f"AI 채보를 저장하지 못했어요: {e.msg}"[:300], finished=time.time())
+    except Exception as e:
+        traceback.print_exc()
+        job.update(stage="error", msg=f"AI 채보를 저장하지 못했어요: {e}"[:300], finished=time.time())
     jobs_changed()
 
 
@@ -863,7 +911,7 @@ def import_item(data):
             best = {}
             for e in sc["entries"] + [e for e in d["entries"] if isinstance(e, dict)]:
                 try:
-                    k = (str(e["name"])[:16], str(e["diff"]), int(e.get("keys", 4)), bool(e.get("hl")))
+                    k = (str(e["name"])[:16], str(e["diff"]), int(e.get("keys", 4)), bool(e.get("hl")), bool(e.get("ai")))
                     if k[1] not in chartgen.DIFFS or not math.isfinite(float(e["score"])):
                         continue
                 except (KeyError, TypeError, ValueError):
@@ -1204,9 +1252,12 @@ async def api(method, path, headers, body):
         data = json_body(body) if body else {}
         WORKER["seen"] = time.time()
         WORKER["version"] = str(data.get("version", ""))[:20]
+        if "ai" in data:
+            WORKER["ai"] = bool(data.get("ai"))
         if parts == ["worker", "poll"] and method == "POST":
             j = claim_job()
-            return {"job": {k: j[k] for k in ("id", "vid", "title", "keepEdited", "keepTitle")} if j else None}
+            return {"job": {"id": j["id"], "vid": j["vid"], "title": j["title"], "keepEdited": j["keepEdited"],
+                            "keepTitle": j["keepTitle"], "aiOnly": bool(j.get("aiOnly"))} if j else None}
         j = JOBS.get(str(data.get("jobId", "")))
         if parts == ["worker", "progress"] and method == "POST":
             if j and j.get("pc") and j["stage"] in PENDING:
@@ -1224,6 +1275,11 @@ async def api(method, path, headers, body):
         if parts == ["worker", "done"] and method == "POST":
             if not j or not j.get("pc") or j["stage"] not in PENDING:
                 return {"ok": False, "msg": "취소됐거나 없는 작업이에요."}
+            if j.get("aiOnly"):
+                j.update(stage="upload", msg="AI 채보 저장하는 중...")
+                notify_all({"type": "jobs"})
+                await loop.run_in_executor(EXECUTOR, finish_ai_job, j, data.get("ai"))
+                return {"ok": j["stage"] == "done", "msg": j["msg"]}
             try:
                 res = clean_result(data.get("res"))
             except (KeyError, TypeError, ValueError) as e:
@@ -1236,6 +1292,21 @@ async def api(method, path, headers, body):
             await loop.run_in_executor(EXECUTOR, finish_pc_job, j, meta, res)
             return {"ok": j["stage"] == "done", "msg": j["msg"]}
         raise HttpError(404, "없는 주소예요.")
+
+    if parts == ["ai", "batch"] and method == "POST":
+        # 예전 곡들도 AI 채보 만들기: AI 채보가 없는 곡을 대기열에 (all=true면 전부 다시)
+        require_host(headers)
+        if not CLOUD:
+            raise HttpError(400, "클라우드 서버에서만 쓰는 기능이에요.")
+        data = json_body(body) if body else {}
+        n = 0
+        for p in sorted(SONGS.glob("*.json"), key=lambda p: p.stat().st_mtime):
+            song = load_song(p.stem) if VID_RE.match(p.stem) else None
+            if not song or (song.get("ai") and not data.get("all")):
+                continue
+            enqueue_pc(song["id"], title=song.get("title", song["id"]), batch=True, ai_only=True)
+            n += 1
+        return {"ok": True, "queued": n, "aiReady": WORKER["ai"], "online": worker_online()}
 
     if parts == ["jobs"] and method == "GET":
         require_host(headers)
@@ -1441,6 +1512,8 @@ async def api(method, path, headers, body):
         if len(parts) == 3 and parts[2] == "ai" and method in ("PUT", "DELETE"):
             # AI 채보: 기본 채보와 따로 저장 (지우면 원래대로). 호스트 PC의 AI 채보 도구가 보냄
             require_host(headers)
+            if method == "PUT":
+                return await loop.run_in_executor(EXECUTOR, save_ai, sid, json_body(body))
             if method == "DELETE":
                 had = song.pop("ai", None) is not None
                 if had:
@@ -1448,26 +1521,6 @@ async def api(method, path, headers, body):
                     notify_all({"type": "songs"})
                     log("AI 채보 삭제:", song.get("title"))
                 return {"ok": True, "removed": had}
-            data = json_body(body)
-            src = data.get("charts")
-            if not isinstance(src, dict):
-                raise HttpError(400, "AI 채보 형식이 잘못됐어요.")
-            charts = {}
-            try:
-                for d, notes in src.items():
-                    if d in chartgen.DIFFS:
-                        charts[d] = validate_notes(notes, 4)
-            except (KeyError, TypeError, ValueError) as e:
-                raise HttpError(400, str(e) or "노트 형식이 잘못됐어요.")
-            charts = {d: n for d, n in charts.items() if n}
-            if not charts:
-                raise HttpError(400, "AI 채보가 비어 있어요.")
-            song["ai"] = {"charts": charts, "by": str(data.get("by") or "AI")[:60], "at": time.time()}
-            save_song(song)
-            notify_all({"type": "songs"})
-            log("AI 채보 저장:", song.get("title"), {d: len(n) for d, n in charts.items()})
-            return {"ok": True, "counts": {d: len(n) for d, n in charts.items()},
-                    "stars": {d: chartgen.star_rating(n, 4) for d, n in charts.items()}}
         if len(parts) == 4 and parts[2] == "charts" and method == "PUT":
             require_host(headers)
             diff = parts[3]
@@ -1726,6 +1779,7 @@ class Room:
         self.keys = 4
         self.hl = False             # 하이라이트 모드 (방장이 켜면 모두 후렴 구간만)
         self.cur_hl = False         # 지금 진행 중인 판이 하이라이트 모드인지
+        self.ai = True              # AI 채보 사용 (곡에 있으면). 방장이 끄면 모두 기존 채보
         self.phase = "lobby"        # lobby | preparing | playing
         self.game_no = 0
         self.timer = None
@@ -1733,7 +1787,7 @@ class Room:
     def state(self):
         return {
             "type": "room", "code": self.code, "leader": self.leader, "phase": self.phase,
-            "songId": self.song_id, "songTitle": self.song_title, "diff": self.diff, "keys": self.keys, "hl": self.hl,
+            "songId": self.song_id, "songTitle": self.song_title, "diff": self.diff, "keys": self.keys, "hl": self.hl, "ai": self.ai,
             "players": [{"id": c.id, "name": c.name, "state": c.state, "avatar": c.avatar, "title": c.title,
                          "diff": c.diff, "keys": c.keys} for c in self.players.values()],
         }
@@ -1939,6 +1993,10 @@ def handle_msg(c, m):
             room.keys = m["keys"]
         room.push()
         return
+    if t == "aimode" and room.leader == c.id and room.phase == "lobby":
+        room.ai = bool(m.get("on"))
+        room.push()
+        return
     if t == "hlmode" and room.leader == c.id and room.phase == "lobby":
         room.hl = bool(m.get("on"))
         room.push()
@@ -1964,7 +2022,7 @@ def handle_msg(c, m):
         roster = room.roster()
         for p in room.players.values():   # 난이도/키는 사람마다 달라서 각자에게 보냄
             p.send({"type": "prepare", "songId": room.song_id, "diff": p.diff, "keys": p.keys,
-                    "game": room.game_no, "players": roster, "hl": hl_range})
+                    "game": room.game_no, "players": roster, "hl": hl_range, "ai": room.ai})
         room.push()
         loop = asyncio.get_running_loop()
         g = room.game_no
