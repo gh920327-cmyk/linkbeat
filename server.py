@@ -190,6 +190,17 @@ def song_stars(song):
     return table
 
 
+def ai_summary(song):
+    """AI 채보(4키, 기본 채보와 따로 저장)가 있으면 난이도별 노트 수·별점"""
+    ai = song.get("ai")
+    if not isinstance(ai, dict) or not isinstance(ai.get("charts"), dict) or not ai["charts"]:
+        return None
+    ch = ai["charts"]
+    return {"by": str(ai.get("by", ""))[:60], "at": ai.get("at", 0),
+            "counts": {d: len(n) for d, n in ch.items()},
+            "stars": {d: chartgen.star_rating(n, 4) for d, n in ch.items()}}
+
+
 def song_artist(song):
     """저장된 가수가 있으면 그것, 아직 확인 전이면 제목·채널로 추측"""
     if song.get("artistSrc"):
@@ -209,6 +220,7 @@ def song_summary(song):
         "counts6": {d: len(n) for d, n in (song.get("charts6") or {}).items()},
         "stars": song_stars(song),
         "hl": song_hl(song),
+        "ai": ai_summary(song),
         "plays": sc["plays"],
         "board": sc["entries"],
     }
@@ -606,6 +618,8 @@ def finish_song(vid, meta, res, keep_edited=False, keep_title=False):
         song["artist"], song["artistSrc"] = old.get("artist", ""), "manual"
         if old.get("artistAt"):
             song["artistAt"] = old["artistAt"]
+    if old and isinstance(old.get("ai"), dict):   # AI 채보는 따로 만든 거라 기본 채보를 다시 만들어도 그대로 둠
+        song["ai"] = old["ai"]
     if old and keep_edited and old.get("edited"):
         for key, at in old["edited"].items():
             six = key.startswith("6-")
@@ -1424,6 +1438,36 @@ async def api(method, path, headers, body):
                 if need_reguess:   # 저장한 다음에, 배운 걸로 다른 곡들도 다시 판단
                     loop.run_in_executor(None, reguess_all)
                 return song_summary(song)
+        if len(parts) == 3 and parts[2] == "ai" and method in ("PUT", "DELETE"):
+            # AI 채보: 기본 채보와 따로 저장 (지우면 원래대로). 호스트 PC의 AI 채보 도구가 보냄
+            require_host(headers)
+            if method == "DELETE":
+                had = song.pop("ai", None) is not None
+                if had:
+                    save_song(song)
+                    notify_all({"type": "songs"})
+                    log("AI 채보 삭제:", song.get("title"))
+                return {"ok": True, "removed": had}
+            data = json_body(body)
+            src = data.get("charts")
+            if not isinstance(src, dict):
+                raise HttpError(400, "AI 채보 형식이 잘못됐어요.")
+            charts = {}
+            try:
+                for d, notes in src.items():
+                    if d in chartgen.DIFFS:
+                        charts[d] = validate_notes(notes, 4)
+            except (KeyError, TypeError, ValueError) as e:
+                raise HttpError(400, str(e) or "노트 형식이 잘못됐어요.")
+            charts = {d: n for d, n in charts.items() if n}
+            if not charts:
+                raise HttpError(400, "AI 채보가 비어 있어요.")
+            song["ai"] = {"charts": charts, "by": str(data.get("by") or "AI")[:60], "at": time.time()}
+            save_song(song)
+            notify_all({"type": "songs"})
+            log("AI 채보 저장:", song.get("title"), {d: len(n) for d, n in charts.items()})
+            return {"ok": True, "counts": {d: len(n) for d, n in charts.items()},
+                    "stars": {d: chartgen.star_rating(n, 4) for d, n in charts.items()}}
         if len(parts) == 4 and parts[2] == "charts" and method == "PUT":
             require_host(headers)
             diff = parts[3]

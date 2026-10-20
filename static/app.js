@@ -26,8 +26,10 @@ async function refreshSongs() {
   }
 }
 const songById = (id) => songs.find((s) => s.id === id);
-const starOf = (s, nl = settings.mode, diff = settings.diff) => ((s.stars || {})[nl] || {})[diff] || 0;
-const countOf = (s, nl = settings.mode, diff = settings.diff) => ((nl === 6 ? s.counts6 : s.counts) || {})[diff] || 0;
+/* AI 채보 (시험): 혼자 할 때 4키에서만. 곡에 AI 채보가 있고 'AI 채보' 칩을 켰을 때 그 채보로 플레이 (기록은 안 남음) */
+const aiOn = (s, nl = settings.mode, diff = settings.diff) => !net.room && nl === 4 && !!settings.aiChart && !!(s && s.ai && (s.ai.counts || {})[diff]);
+const starOf = (s, nl = settings.mode, diff = settings.diff) => aiOn(s, nl, diff) ? (s.ai.stars || {})[diff] || 0 : ((s.stars || {})[nl] || {})[diff] || 0;
+const countOf = (s, nl = settings.mode, diff = settings.diff) => aiOn(s, nl, diff) ? s.ai.counts[diff] : ((nl === 6 ? s.counts6 : s.counts) || {})[diff] || 0;
 /* 하이라이트 모드: 방에 있으면 방 설정(방장이 정함), 혼자면 내 설정 */
 function hlActive() { return net.room ? !!net.room.hl : !!settings.hlMode; }
 function hlPractice(h) { return h ? { start: h.start, from: h.from, end: h.end, rate: 1, loop: false, hl: true } : null; }
@@ -157,6 +159,12 @@ function renderDetail() {
   $('#dHlRange').textContent = hlOn ? (s.hl ? `${fmtTime(s.hl.from)}~${fmtTime(s.hl.end)}` : '구간 없음') : '';
   $('#btnPreview').classList.toggle('on', preview.id === s.id);
   $('#btnPractice').disabled = inRoom || !countOf(s, nl, settings.diff);
+  // AI 채보 칩: 이 곡에 AI 채보가 있을 때만 보임 (4키 · 혼자 할 때)
+  const ac = $('#modAi');
+  const hasAi = !!(s.ai && s.ai.counts && Object.keys(s.ai.counts).length);
+  ac.classList.toggle('hidden', !hasAi || inRoom || nl !== 4);
+  ac.classList.toggle('on', hasAi && !!settings.aiChart);
+  ac.title = hasAi ? `AI가 만든 채보로 플레이 (${s.ai.by || 'AI'}) · 기본 채보와 따로 있어요 · 시험 중이라 기록은 안 남아요` : '';
 }
 function renderMods() {
   $('#modMirror').classList.toggle('on', !!settings.mirror);
@@ -168,6 +176,12 @@ function renderMods() {
 $('#modMirror').addEventListener('click', () => { settings.mirror = !settings.mirror; saveSettings(); renderMods(); });
 $('#modRandom').addEventListener('click', () => { settings.random = !settings.random; saveSettings(); renderMods(); });
 $('#modGhost').addEventListener('click', () => { settings.ghost = settings.ghost === false; saveSettings(); renderMods(); });
+$('#modAi').addEventListener('click', () => {
+  settings.aiChart = !settings.aiChart;
+  saveSettings();
+  renderSongs();
+  if (settings.aiChart) toast('AI 채보로 플레이해요. 시험 중이라 기록·업적은 안 남아요. 다시 누르면 기본 채보로 돌아가요.', 3400);
+});
 $('#modHl').addEventListener('click', () => {
   if (net.room) {
     if (net.isLeader()) net.send({ type: 'hlmode', on: !net.room.hl });
@@ -546,13 +560,15 @@ async function startSolo(id, diff, nl = 4, customNotes = null, practice = null) 
   stopPreview();
   if (game) game.destroy();
   if (practice && practice.hl && song._hl) practice = hlPractice(song._hl);   // 서버의 최신 구간으로
-  const notes = customNotes || chartOf(song, diff, nl);
+  const useAi = !customNotes && aiOn(songById(id) || song, nl, diff) && !!(song.ai && song.ai.charts && song.ai.charts[diff]);
+  const notes = customNotes || (useAi ? song.ai.charts[diff] : chartOf(song, diff, nl));
   if (!notes.length) { toast('이 난이도에는 노트가 없어요.'); return; }
   pendingResults = null;
   const g = new Game({ song, diff, keys: nl, notes, onExit: backFromGame, practice });
   game = g;
-  if (!customNotes && (!practice || practice.hl)) g.ghost = ghostFor(id, diff, nl, !!(practice && practice.hl));
+  if (!customNotes && !useAi && (!practice || practice.hl)) g.ghost = ghostFor(id, diff, nl, !!(practice && practice.hl));
   g.customNotes = customNotes;
+  g.ai = useAi;
   setupGameScreen(g, false);
   if (practice && !g.notes.length) { g.destroy(); toast('그 구간에는 노트가 없어요.'); backFromGame(); return; }
   try {
@@ -568,7 +584,7 @@ async function startSolo(id, diff, nl = 4, customNotes = null, practice = null) 
 function setupGameScreen(g, multi) {
   hideOverlay();
   $('#gTitle').textContent = g.song.title;
-  const extra = [...g.modNames, g.hl ? 'HIGHLIGHT' : g.practice ? `연습 x${g.practice.rate}` : ''].filter(Boolean).join(' · ');
+  const extra = [g.ai ? 'AI 채보' : '', ...g.modNames, g.hl ? 'HIGHLIGHT' : g.practice ? `연습 x${g.practice.rate}` : ''].filter(Boolean).join(' · ');
   $('#gMeta').innerHTML = `<span class="tag">${g.nl}KEY</span> ${DIFF_EN[g.diff]} ${starHtml(g.stars)} · BPM ${Math.round(g.song.bpm)} · ${fmtTime(g.song.duration)}${extra ? ` <br><span class="warn">${esc(extra)}</span>` : ''}`;
   $('#livePanel').classList.toggle('hidden', !multi);
   $('#screen-game').classList.toggle('multi', !!multi);
@@ -637,11 +653,11 @@ function renderBestDelta(prev, r, show) {
 
 function showResult(g, r) {
   lastResult = { g, r };
-  const isTest = !!(editor && editor.testing) || !!g.customNotes || (!!g.practice && !g.hl);
+  const isTest = !!(editor && editor.testing) || !!g.customNotes || !!g.ai || (!!g.practice && !g.hl);
   const prevBest = isTest ? null : prevBestOf(g);      // 기록을 저장하기 전에 읽어 둠
   const newLocal = !isTest && setBest(g.song.id, g.diff, g.nl, r, g.hl);
   renderBestDelta(prevBest, r, !isTest);
-  const mods = (g.hl ? ' <span class="tag hl-tag">HIGHLIGHT</span>' : '') + (g.modNames.length ? ` <span class="warn">${g.modNames.join(' · ')}</span>` : '');
+  const mods = (g.ai ? ' <span class="tag ai-tag">AI 채보</span>' : '') + (g.hl ? ' <span class="tag hl-tag">HIGHLIGHT</span>' : '') + (g.modNames.length ? ` <span class="warn">${g.modNames.join(' · ')}</span>` : '');
   $('#rSong').innerHTML = `${esc(g.song.title)} <span class="tag">${g.nl}KEY</span> ${DIFF_EN[g.diff]} ${starHtml(g.stars)}${mods}`;
   $('#rRank').textContent = r.rank;
   $('#rRank').className = 'r-rank rank-' + r.rank;
@@ -653,7 +669,7 @@ function showResult(g, r) {
   $('#rGood').textContent = r.counts.good;
   $('#rMiss').textContent = r.counts.miss;
   $('#rBadge').textContent = r.incomplete ? '중도 포기' : r.counts.miss === 0 && r.counts.good === 0 && r.counts.great === 0 ? 'ALL PERFECT' : r.fc ? 'FULL COMBO' : '';
-  $('#rBest').textContent = g.practice && !g.hl ? '연습 모드라 기록은 남지 않아요.' : isTest ? '테스트 플레이라 기록은 남지 않아요.' : newLocal ? (g.hl ? '하이라이트 최고 기록 갱신!' : '내 최고 기록 갱신!') : '';
+  $('#rBest').textContent = g.ai ? 'AI 채보 시험 플레이라 기록은 남지 않아요.' : g.practice && !g.hl ? '연습 모드라 기록은 남지 않아요.' : isTest ? '테스트 플레이라 기록은 남지 않아요.' : newLocal ? (g.hl ? '하이라이트 최고 기록 갱신!' : '내 최고 기록 갱신!') : '';
   const rg = $('#rGhost');
   rg.classList.add('hidden');
   if (g.ghost && !r.incomplete && settings.ghost !== false) {
