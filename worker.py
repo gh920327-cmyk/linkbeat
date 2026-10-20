@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 # 가상환경의 실행 파일 폴더(deno 등)를 PATH 앞에 → yt-dlp가 JS 런타임을 찾을 수 있게
 os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
@@ -159,7 +159,7 @@ def run_ai_job(api, job):
             tfile.write_text(json.dumps(targets), encoding="utf-8")
             progress("ai", "AI가 채보 쓰는 중... (그래픽카드로 2~5분)", force=True)
             env = dict(os.environ, PYTHONIOENCODING="utf-8")
-            cmd = [str(tool["py"]), "-I", str(tool["tool"]), "--gen", vid, "--audio", str(audio),
+            cmd = [str(tool["py"]), "-I", str(tool["tool"]), "--gen=" + vid, "--audio", str(audio),   # ID가 '-'로 시작해도 되게
                    "--targets", str(tfile), "--out", str(ofile), "--title=" + str(song.get("title", ""))[:100],
                    "--artist=" + str(song.get("artist", ""))[:80], "--duration", str(song.get("duration") or 900)]
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)

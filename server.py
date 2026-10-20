@@ -632,6 +632,7 @@ def finish_song(vid, meta, res, keep_edited=False, keep_title=False):
                 song["charts6" if six else "charts"][diff] = src[diff]
                 song["edited"][key] = at
         # 고친 채보는 노트 시각(초)이 그대로라 새 BPM 분석과 함께 써도 플레이에 문제없음
+    fit_basic(song)
     save_song(song)
     drop_requests_for(vid)
     notify_all({"type": "songs"})
@@ -805,7 +806,7 @@ def finish_pc_job(job, meta, res):
 
 
 ACC_WIN = 0.05   # 기존 채보의 드럼 강타 시각과 이만큼(초) 가까운 AI 노트를 강타로
-AI_FIX = 5       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
+AI_FIX = 6       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
 HOLD_GAP = 0.1   # 롱노트 끝과 같은 줄 다음 노트 사이 최소 간격
 MAX_HOLDS = 1    # 동시에 누르고 있는 롱노트 최대 개수 (롱노트는 최소한으로)
 HOLD_MIN = 0.6   # 이보다 짧은 롱노트는 일반 노트로
@@ -848,6 +849,185 @@ def ai_tidy(notes):
     return [{"t": round(n["t"], 3), "l": n["l"], "d": round(n["d"], 3)} for n in out]
 
 
+# 난이도별 목표 별점 범위 (방장이 정함): 쉬움 1.5~2.5 · 보통 3~5 · 어려움 6~7 · 극한 8 이상
+STAR_BANDS = {"easy": (1.5, 2.5), "normal": (3.0, 5.0), "hard": (6.0, 7.0), "extreme": (8.0, 10.0)}
+CHORD_MAX = {"easy": 1, "normal": 2, "hard": 3, "extreme": 3}   # 동시치기 최대 개수 (6키는 +1)
+CHORD_RARE = {"hard": 0.03}   # 어려움: 3개짜리 동시치기는 드물게 (박 덩어리의 3%까지, 강타 먼저)
+
+
+def band_mid(diff):
+    lo, hi = STAR_BANDS.get(diff, (3.0, 5.0))
+    return (lo + min(hi, lo + 1.0)) / 2 if diff == "extreme" else (lo + hi) / 2
+
+
+def _beat_tools(song):
+    import bisect
+    grid = sorted(set(round(float(b), 3) for b in (song.get("beats") or [])))
+    half = sorted(set(grid + [round((x + y) / 2, 3) for x, y in zip(grid, grid[1:])]))
+
+    def near(arr, t, w):
+        i = bisect.bisect_left(arr, t)
+        return any(0 <= j < len(arr) and abs(arr[j] - t) <= w for j in (i - 1, i))
+
+    def on_beat(t):
+        return 1.5 if near(grid, t, 0.04) else 0.8 if near(half, t, 0.04) else 0.0
+    return near, on_beat
+
+
+def limit_chords(notes, diff, nl=4):
+    """동시치기 최대 개수: 쉬움 1 · 보통/어려움 2 · 극한 3 (6키는 +1). 넘치면 서로 먼 줄을 남김"""
+    cmax = CHORD_MAX.get(diff, 2) + (1 if nl == 6 and diff != "easy" else 0)
+    groups = {}
+    for n in notes:
+        groups.setdefault(round(float(n["t"]), 3), []).append(n)
+    def trim(g, m):
+        g = sorted(g, key=lambda n: n["l"])
+        idx = sorted({round(i * (len(g) - 1) / max(1, m - 1)) for i in range(m)}) if m > 1 else [0]
+        return [g[i] for i in idx][:m]
+    for t in groups:
+        if len(groups[t]) > cmax:
+            groups[t] = trim(groups[t], cmax)
+    rare = CHORD_RARE.get(diff)
+    if rare:                              # 가장 큰 동시치기는 드물게: 강타부터 남기고 나머지는 하나 줄임
+        big = [t for t, g in groups.items() if len(g) >= cmax]
+        allow = int(len(groups) * rare)
+        big.sort(key=lambda t: (0 if any(n.get("a") for n in groups[t]) else 1, t))
+        for t in big[allow:]:
+            groups[t] = trim(groups[t], cmax - 1)
+    return [n for t in sorted(groups) for n in groups[t]]
+
+
+def fit_band(song, diff, notes, nl=4, pool=()):
+    """별점이 그 난이도의 목표 범위에 들어오게: 넘치면 박자에서 벗어난 노트·동시치기 곁가지부터 덜고,
+    모자라면 pool(위 난이도 채보 등)에서 박자에 맞는 노트를 비어 있는 곳부터 더함. 그래도 모자라면 센 박에 동시치기 추가."""
+    import bisect
+    lo, hi = STAR_BANDS.get(diff, (0, 99))
+    near, on_beat = _beat_tools(song)
+    min_gap = float((chartgen.DIFFS.get(diff) or {}).get("min_gap", 0.1))
+    jack = JACK_MIN.get(diff, 0.17)
+    cmax = CHORD_MAX.get(diff, 2) + (1 if nl == 6 and diff != "easy" else 0) - (1 if diff in CHORD_RARE else 0)   # 새로 붙일 땐 드문 크기 제외
+    notes = sorted((dict(n) for n in notes), key=lambda n: (n["t"], n["l"]))
+    star = lambda ns: chartgen.star_rating(ns, nl)
+    cur = star(notes)
+    # 덜기
+    it = 0
+    while cur > hi and len(notes) > 16 and it < 40:
+        it += 1
+        groups = {}
+        for n in notes:
+            groups.setdefault(round(n["t"], 3), []).append(n)
+        cand = []
+        for t, g in groups.items():
+            base_score = on_beat(t) + (1.0 if any(n.get("a") for n in g) else 0)
+            if len(g) > 1:
+                cand.append((base_score - 0.7, t, g[-1]))      # 동시치기 곁가지부터
+            cand.append((base_score, t, None))
+        cand.sort(key=lambda c: c[0])
+        k = max(1, int(len(notes) * 0.04))
+        drop_ids, drop_t = set(), set()
+        for sc, t, n in cand:
+            if len(drop_ids) + sum(len(groups[x]) for x in drop_t) >= k:
+                break
+            if t in drop_t:
+                continue
+            if n is not None:
+                drop_ids.add(id(n))
+            else:
+                drop_t.add(t)
+        notes = [n for n in notes if id(n) not in drop_ids and round(n["t"], 3) not in drop_t]
+        cur = star(notes)
+    # 더하기
+    it = 0
+    pool = sorted(({k: v for k, v in n.items() if k in ("t", "l", "d", "a")} for n in pool), key=lambda n: n["t"])
+    used_pool = set()
+    beats = sorted(float(b) for b in (song.get("beats") or []))
+    grid_pts = []
+    sub = 4 if diff in ("hard", "extreme") else 2
+    if notes:
+        first, last = notes[0]["t"] - 0.5, notes[-1]["t"] + 0.5
+        for x, y2 in zip(beats, beats[1:]):
+            for k2 in range(sub):
+                gt = round(x + (y2 - x) * k2 / sub, 3)
+                if first <= gt <= last:
+                    grid_pts.append(gt)
+    while cur < lo and it < 80:
+        it += 1
+        times = sorted({round(n["t"], 3) for n in notes})
+        lane_times = {}
+        for n in notes:
+            lane_times.setdefault(n["l"], []).append(n["t"])
+        for v in lane_times.values():
+            v.sort()
+
+        def free(t, l):
+            i = bisect.bisect_left(times, t)
+            if any(0 <= j < len(times) and 0.003 < abs(times[j] - t) < min_gap for j in (i - 1, i)):
+                return False
+            lt = lane_times.get(l, [])
+            i = bisect.bisect_left(lt, t)
+            return not any(0 <= j < len(lt) and abs(lt[j] - t) < jack for j in (i - 1, i))
+        sec = {}
+        for t in times:
+            sec[int(t)] = sec.get(int(t), 0) + 1
+        k = max(2, int(len(notes) * 0.04))
+        cands = []
+        for i, n in enumerate(pool):
+            if i in used_pool or not free(n["t"], n["l"]):
+                continue
+            same = [x for x in notes if abs(x["t"] - n["t"]) < 0.003]
+            if same and (len(same) >= cmax or any(x["l"] == n["l"] for x in same)):
+                continue
+            cands.append((-(on_beat(n["t"]) + (0.8 if n.get("a") else 0)) + 0.15 * sec.get(int(n["t"]), 0), i))
+        cands.sort()
+        added = 0
+        for _, i in cands[:k]:
+            notes.append(dict(pool[i]))
+            used_pool.add(i)
+            added += 1
+        if not added and grid_pts:             # 가져올 노트가 없으면: 박·반박(어려움 이상은 1/4박) 빈자리에 노트
+            gc = []
+            for t in grid_pts:
+                if any(abs(x - t) < 0.003 for x in times[max(0, bisect.bisect_left(times, t) - 1):bisect.bisect_left(times, t) + 1]):
+                    continue
+                lanes = [l for l in range(nl) if free(t, l)]
+                if lanes:
+                    gc.append((-on_beat(t) + 0.2 * sec.get(int(t), 0), t, lanes))
+            gc.sort()
+            for _, t, lanes in gc[:k]:
+                lanes = [l for l in lanes if free(t, l)]      # 같은 묶음에서 먼저 넣은 노트와 겹치지 않게
+                if not lanes:
+                    continue
+                prev = [n for n in notes if abs(n["t"] - t) < 0.6]
+                l2 = max(lanes, key=lambda l: (min((abs(l - n["l"]) for n in prev), default=2), random.random()))
+                notes.append({"t": t, "l": l2, "d": 0.0})
+                lane_times.setdefault(l2, []).append(t)
+                lane_times[l2].sort()
+                i2 = bisect.bisect_left(times, t)
+                times.insert(i2, t)
+                added += 1
+        if not added:                      # 더 가져올 노트가 없으면: 센 박의 한 개짜리 노트에 동시치기
+            groups = {}
+            for n in notes:
+                groups.setdefault(round(n["t"], 3), []).append(n)
+            strong = sorted((t for t, g in groups.items() if len(g) < cmax and on_beat(t) >= 0.8),
+                            key=lambda t: (-(1 if any(n.get("a") for n in groups[t]) else 0), -on_beat(t), sec.get(int(t), 0)))
+            for t in strong[:k]:
+                taken = {n["l"] for n in groups[t]}
+                lanes = [l for l in range(nl) if l not in taken and free(t, l) or (l not in taken and not lane_times.get(l))]
+                if not lanes:
+                    continue
+                l2 = max(lanes, key=lambda l: min(abs(l - u) for u in taken))
+                notes.append({"t": t, "l": l2, "d": 0.0})
+                lane_times.setdefault(l2, []).append(t)
+                lane_times[l2].sort()
+                added += 1
+            if not added:
+                break
+        notes.sort(key=lambda n: (n["t"], n["l"]))
+        cur = star(notes)
+    return notes
+
+
 GAP_FILL = 1.6     # AI 채보가 이보다 오래(초) 비어 있고 기존 채보엔 노트가 있으면 기존 채보로 채움
 DENSE_X = 1.25     # 1초 구간 AI 노트 수가 기존 채보의 이 배수(+1개)를 넘으면 덜어냄
 JACK_MIN = {"easy": 0.45, "normal": 0.28, "hard": 0.17, "extreme": 0.12}   # 같은 줄 연타 최소 간격(초)
@@ -888,6 +1068,10 @@ def ai_balance(song, diff, notes):
     for t in btimes:
         if 0 <= t <= nsec:
             bcount[int(t)] += 1
+    # 기존 채보 별점이 목표 범위와 다르면 그만큼 기준 밀도도 맞춰서 비교
+    bstar = chartgen.star_rating(base, 4) or 1.0
+    scale = max(0.6, min(2.5, band_mid(diff) / bstar))
+    bcount = [int(round(c * scale)) for c in bcount]
     busy = sorted(c for c in bcount if c)
     p90 = busy[int(len(busy) * 0.9)] if busy else 4
     grid = sorted(set(round(float(b), 3) for b in (song.get("beats") or [])))
@@ -950,9 +1134,25 @@ def ai_accents(song, charts):
     import bisect
     acc = sorted({round(float(n["t"]), 3) for notes in (song.get("charts") or {}).values() for n in notes if n.get("a")})
     out = {}
-    for d, notes in charts.items():
+    order = [d for d in ("easy", "normal", "hard", "extreme") if d in charts]
+    basic = song.get("charts") or {}
+    tidied = {d: limit_chords(ai_tidy(ai_balance(song, d, charts[d])), d) for d in order}
+    for i, d in enumerate(order):
+        # 모자랄 때 가져올 노트: 위 난이도 AI 채보 → 같은·위 난이도 기존 채보
+        pool = [n for u in order[i + 1:] for n in tidied[u]] + \
+               [n for u in ("easy", "normal", "hard", "extreme")[("easy", "normal", "hard", "extreme").index(d):] for n in basic.get(u, [])]
+        cur = tidied[d]
+        for _ in range(4):            # 다듬기(동시치기·롱노트 정리)로 별이 다시 빠지면 한 번 더 맞춤
+            cur = ai_tidy(limit_chords(fit_band(song, d, cur, 4, pool), d))
+            st = chartgen.star_rating(cur, 4)
+            lo, hi = STAR_BANDS[d]
+            if lo <= st <= hi or (st > hi and d == "extreme"):
+                break
+        tidied[d] = cur
+    for d in order:
+        notes = tidied[d]
         res = []
-        for n in ai_tidy(ai_balance(song, d, notes)):
+        for n in notes:
             n = {k: v for k, v in n.items() if k != "a"}
             if acc:
                 i = bisect.bisect_left(acc, n["t"])
@@ -988,6 +1188,28 @@ def migrate_ai_accents():
     if n:
         log(f"AI 채보 {n}곡을 다듬었어요 (빈 구간 채우기 · 몰림 덜기 · 롱노트 정리 · 강타 표시).")
         notify_all({"type": "songs"})
+
+
+def fit_basic(song):
+    """기존(자동) 채보도 난이도별 별점 범위에 맞춤 — 채보 수정기로 고친 난이도는 그대로"""
+    order = ("easy", "normal", "hard", "extreme")
+    edited = song.get("edited") or {}
+    for key, nl in (("charts", 4), ("charts6", 6)):
+        ch = song.get(key) or {}
+        for i, d in enumerate(order):
+            if d not in ch or not ch[d] or edited.get(d if nl == 4 else f"6-{d}"):
+                continue
+            pool = [n for u in order[i + 1:] for n in ch.get(u, [])]
+            try:
+                cur = ch[d]
+                for _ in range(3):
+                    cur = limit_chords(fit_band(song, d, cur, nl, pool), d, nl)
+                    lo, hi = STAR_BANDS[d]
+                    if lo <= chartgen.star_rating(cur, nl) <= hi:
+                        break
+                ch[d] = validate_notes(cur, nl)
+            except Exception:
+                traceback.print_exc()
 
 
 def save_ai(vid, data):

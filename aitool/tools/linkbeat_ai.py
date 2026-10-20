@@ -29,7 +29,9 @@ DEFAULT_SERVER = "https://linkbeat.43-202-116-151.sslip.io"
 DIFF_ORDER = ["easy", "normal", "hard", "extreme"]
 DIFF_KO = {"easy": "쉬움", "normal": "보통", "hard": "어려움", "extreme": "극한"}
 # AI에게 줄 osu! 별점(SR) 후보 — 넓게 만들어 두고, 링크비트 기본 채보 ★와 가장 비슷한 걸 고름
-SR_PROMPTS = [1.6, 2.4, 3.2, 4.0, 4.8, 5.6, 6.4]
+SR_PROMPTS = [1.6, 2.4, 3.2, 4.0, 4.8, 5.6, 6.4, 7.2, 8.0]
+# 난이도별 목표 별점 (방장이 정한 범위의 가운데): 쉬움 1.5~2.5 · 보통 3~5 · 어려움 6~7 · 극한 8 이상
+BAND_MID = {"easy": 2.0, "normal": 4.0, "hard": 6.5, "extreme": 8.5}
 PER_PROMPT = 2
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -225,7 +227,7 @@ def pick_for_diffs(cands, targets):
             continue
         tgt = targets[d]
         pool = [i for i, c in enumerate(cands) if c[0] >= lo and i not in used] or \
-               [i for i, c in enumerate(cands) if c[0] >= lo] or list(range(len(cands)))
+               [i for i, c in enumerate(cands) if i not in used] or list(range(len(cands)))   # 같은 후보는 되도록 다시 안 씀
         i = min(pool, key=lambda j: abs(cands[j][0] - tgt))
         chosen[d] = cands[i]
         used.add(i)
@@ -428,7 +430,7 @@ def make_charts(vid, wav, targets, title, artist, duration):
         cands.append((chartgen.star_rating(notes, 4), notes, path.stem))
     if not cands:
         raise RuntimeError("AI가 채보를 제대로 만들지 못했어요.")
-    chosen = pick_for_diffs(cands, targets)
+    chosen = pick_for_diffs(cands, {d: BAND_MID.get(d, v) for d, v in targets.items()})
     say(f"  {len(cands)}개 만들었어요 ({time.time() - t0:.0f}초)")
     body = {"charts": {d: c[1] for d, c in chosen.items()}, "by": f"MuG Diffusion v{mug.version}", "style": "rc"}
     (odir / "upload.json").write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
@@ -509,7 +511,13 @@ def main():
     ap.add_argument("--title", default="")
     ap.add_argument("--artist", default="")
     ap.add_argument("--duration", type=float, default=900.0)
-    a = ap.parse_args()
+    # 유튜브 ID가 '-'로 시작하면(예: -tKVN2mAKRI) 옵션으로 오해하지 않게 '--gen=ID' 꼴로 바꿈
+    argv = sys.argv[1:]
+    for i, x in enumerate(argv[:-1]):
+        if x in ("--gen", "--upload", "--title", "--artist") and argv[i + 1].startswith("-"):
+            argv[i:i + 2] = [f"{x}={argv[i + 1]}"]
+            break
+    a = ap.parse_args(argv)
     try:
         if a.gen:
             cmd_gen(a.gen, a.audio, a.targets, a.out, a.title, a.artist, a.duration)
