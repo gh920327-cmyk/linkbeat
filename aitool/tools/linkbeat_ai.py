@@ -322,7 +322,8 @@ class Mug:
 
             for k, sr in enumerate(sr_list):
                 say(f"  AI가 채보 쓰는 중... {k + 1}/{len(sr_list)} (osu 별점 {sr:.1f} 기준 {count}개)")
-                c = self._features(count, {"rank_status": "ranked", "sr": sr})
+                # rc=1 · ln_ratio=0: 롱노트가 적은(10% 미만) 일반 노트 위주 채보로 (링크비트 취향)
+                c = self._features(count, {"rank_status": "ranked", "sr": sr, "rc": 1, "ln_ratio": 0.0})
                 samples, _ = self.sampler.sample(S=step, c=c, w=w, batch_size=count, shape=None, verbose=False,
                                                  unconditional_guidance_scale=scale, unconditional_conditioning=uc,
                                                  eta=0.0, tqdm_class=tqdm)
@@ -335,7 +336,7 @@ class Mug:
                         "Creator": creator, "Version": f"AI {name}", "AudioFilename": "audio.mp3",
                         "Title": title or "LINKBEAT", "TitleUnicode": title or "LINKBEAT",
                         "Artist": artist or "-", "ArtistUnicode": artist or "-",
-                        "AIMode": creator, "AIPrompt": f"style=ranked, sr={sr}, step={step}, cfg={scale}, seed={seed}, {i}",
+                        "AIMode": creator, "AIPrompt": f"style=ranked, type=rc, ln=0, sr={sr}, step={step}, cfg={scale}, seed={seed}, {i}",
                     }, gridify=snap)
                     results.append((path, sr))
                 if self.cuda:

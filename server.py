@@ -805,9 +805,11 @@ def finish_pc_job(job, meta, res):
 
 
 ACC_WIN = 0.05   # 기존 채보의 드럼 강타 시각과 이만큼(초) 가까운 AI 노트를 강타로
-AI_FIX = 2       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
+AI_FIX = 3       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
 HOLD_GAP = 0.1   # 롱노트 끝과 같은 줄 다음 노트 사이 최소 간격
-MAX_HOLDS = 2    # 4키에서 동시에 누르고 있는 롱노트 최대 개수
+MAX_HOLDS = 1    # 동시에 누르고 있는 롱노트 최대 개수 (롱노트는 최소한으로)
+HOLD_MIN = 0.6   # 이보다 짧은 롱노트는 일반 노트로
+HOLD_RATIO = 0.05   # 롱노트는 전체 노트의 5%까지만 (긴 것부터 남김)
 
 
 def ai_tidy(notes):
@@ -829,6 +831,12 @@ def ai_tidy(notes):
                 a["d"] = b["t"] - HOLD_GAP - a["t"]
                 if a["d"] < 0.2:
                     a["d"] = 0.0
+    for n in out:                         # 짧은 롱노트 → 일반 노트
+        if 0 < n["d"] < HOLD_MIN:
+            n["d"] = 0.0
+    holds = sorted((n for n in out if n["d"] > 0), key=lambda n: -n["d"])
+    for n in holds[int(len(out) * HOLD_RATIO):]:   # 너무 많으면 긴 것만 남김
+        n["d"] = 0.0
     held = []                             # 동시에 누르는 롱노트 수 제한
     for n in out:
         held = [e for e in held if e > n["t"] + 0.001]

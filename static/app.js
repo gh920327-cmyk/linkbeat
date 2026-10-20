@@ -455,10 +455,13 @@ $('#pcList').addEventListener('click', async (e) => {
 net.on('jobs', () => loadJobs());
 $('#btnAiBatch').addEventListener('click', async () => {
   const left = songs.filter((s) => !s.ai).length;
-  if (!left) { toast('모든 곡에 이미 AI 채보가 있어요.'); return; }
-  if (!confirm(`AI 채보가 없는 ${left}곡을 대기열에 넣어요. 호스트 PC의 AI 채보 도구가 한 곡씩 만들어요 (곡당 2~5분).\n새로 추가한 곡이 항상 먼저 만들어져요. 진행할까요?`)) return;
+  let all = false;
+  if (!left) {
+    if (!confirm(`모든 곡에 이미 AI 채보가 있어요. ${songs.length}곡의 AI 채보를 전부 새로 다시 만들까요? (곡당 2~5분 · 기록은 그대로)`)) return;
+    all = true;
+  } else if (!confirm(`AI 채보가 없는 ${left}곡을 대기열에 넣어요. 호스트 PC의 AI 채보 도구가 한 곡씩 만들어요 (곡당 2~5분).\n새로 추가한 곡이 항상 먼저 만들어져요. 진행할까요?`)) return;
   try {
-    const r = await api('/ai/batch', { method: 'POST', body: {} });
+    const r = await api('/ai/batch', { method: 'POST', body: { all } });
     toast(r.queued ? `${r.queued}곡을 AI 채보 대기열에 넣었어요.` : '넣을 곡이 없어요.', 3000);
     loadJobs();
   } catch (err) { toast(err.message); }
