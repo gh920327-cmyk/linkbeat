@@ -805,7 +805,7 @@ def finish_pc_job(job, meta, res):
 
 
 ACC_WIN = 0.05   # 기존 채보의 드럼 강타 시각과 이만큼(초) 가까운 AI 노트를 강타로
-AI_FIX = 4       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
+AI_FIX = 5       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
 HOLD_GAP = 0.1   # 롱노트 끝과 같은 줄 다음 노트 사이 최소 간격
 MAX_HOLDS = 1    # 동시에 누르고 있는 롱노트 최대 개수 (롱노트는 최소한으로)
 HOLD_MIN = 0.6   # 이보다 짧은 롱노트는 일반 노트로
@@ -849,7 +849,8 @@ def ai_tidy(notes):
 
 
 GAP_FILL = 1.6     # AI 채보가 이보다 오래(초) 비어 있고 기존 채보엔 노트가 있으면 기존 채보로 채움
-DENSE_X = 1.5      # 1초 구간 AI 노트 수가 기존 채보의 이 배수(+2개)를 넘으면 덜어냄
+DENSE_X = 1.25     # 1초 구간 AI 노트 수가 기존 채보의 이 배수(+1개)를 넘으면 덜어냄
+JACK_MIN = {"easy": 0.45, "normal": 0.28, "hard": 0.17, "extreme": 0.12}   # 같은 줄 연타 최소 간격(초)
 
 
 def ai_balance(song, diff, notes):
@@ -905,7 +906,7 @@ def ai_balance(song, diff, notes):
         cnt = sum(len(groups[t]) for t in gs)
         # 앞뒤 1초까지 같이 봐서 기존 채보가 부드럽게 비교되게
         nb = max(bcount[max(0, sec - 1):sec + 2]) if bcount else 0
-        allow = max(int(nb * DENSE_X) + 2, int(p90 * 1.2))
+        allow = max(int(nb * DENSE_X) + 1, int(p90 * 1.1))
         if cnt <= allow:
             keep += gs
             continue
@@ -920,7 +921,26 @@ def ai_balance(song, diff, notes):
             chosen.append(t)
             total += len(groups[t])
         keep += chosen
-    out = [n for t in sorted(keep) for n in groups[t]]
+    # 3) 난이도별 최소 간격 (기존 채보와 같은 기준): 너무 붙은 노트는 박자에 맞는 쪽만
+    min_gap = float((chartgen.DIFFS.get(diff) or {}).get("min_gap", 0.1))
+    jack = JACK_MIN.get(diff, 0.17)
+    def score2(t):
+        return (2 if near(btimes, t, 0.05) else 0) + (1.5 if near(grid, t, 0.04) else 0.8 if near(half, t, 0.04) else 0) \
+               + (0.5 if any(n.get("a") for n in groups[t]) else 0)
+    spaced = []
+    for t in sorted(keep):
+        if spaced and t - spaced[-1] < min_gap - 0.002:
+            if score2(t) > score2(spaced[-1]):
+                spaced[-1] = t
+            continue
+        spaced.append(t)
+    out, lane_last = [], {}
+    for t in spaced:
+        for n in groups[t]:
+            if t - lane_last.get(n["l"], -9) < jack:     # 같은 줄 너무 빠른 연타 → 뺌
+                continue
+            lane_last[n["l"]] = t + float(n.get("d", 0) or 0)
+            out.append(n)
     return out
 
 
