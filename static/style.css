@@ -732,7 +732,7 @@ dialog::backdrop { background: rgba(0, 0, 0, .65); backdrop-filter: blur(3px); }
 @keyframes rankGlow { 50% { box-shadow: 0 0 26px rgba(255,200,61,.6); } }
 
 /* 배경 연출: 곡 썸네일을 흐리고 어둡게, 박자마다 숨 쉬듯 (CSS 변수만 바뀜) */
-#screen-game { position: relative; }
+/* (#screen-game 은 .screen 의 position: fixed 를 그대로 써야 화면 크기가 창에 맞음) */
 #screen-game > .stage { position: relative; z-index: 1; }
 .game-bg { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; opacity: 0; transition: opacity .4s; --pulse: 0; --tint: 0; --fever: 0; }
 .game-bg.on { opacity: 1; }
