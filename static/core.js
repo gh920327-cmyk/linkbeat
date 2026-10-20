@@ -64,6 +64,8 @@ const DEFAULT_SKIN = {
   punch: 'mid', shake: true,   // 타격감 강도, 화면 흔들림
   chorusFx: true,              // 후렴(하이라이트)에 들어갈 때 연출
   applause: true,              // 풀콤보·올퍼펙트 박수
+  lineStyle: 'auto',           // 판정선 모양: auto(원형 노트면 원형 받침) | bar | ring | thin
+  bgFx: 'soft',                // 배경 연출: off | soft | strong
 };
 settings.skin = Object.assign({ ...DEFAULT_SKIN, hitSound: settings.hit ? 'click' : 'off' }, settings.skin || {});
 settings.skin.colors = Object.assign({ ...DEFAULT_SKIN.colors }, settings.skin.colors || {});

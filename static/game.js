@@ -126,6 +126,34 @@ function drawNote(L, lane, yHead, yTail, state, accent = false) {
     ctx.fillStyle = rg;
     ctx.fill();
     return;
+  } else if (sk.note === 'diamond') {
+    // 마름모
+    const r = Math.min(nw * 0.42, nh * 0.9 + 4);
+    const cx = x + nw / 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, yHead - r); ctx.lineTo(cx + r * 1.08, yHead); ctx.lineTo(cx, yHead + r); ctx.lineTo(cx - r * 1.08, yHead); ctx.closePath();
+    const dg = ctx.createLinearGradient(0, yHead - r, 0, yHead + r);
+    dg.addColorStop(0, state === 'dead' ? '#6a7088' : '#ffffff'); dg.addColorStop(0.45, col); dg.addColorStop(1, state === 'dead' ? '#30354a' : shade(col));
+    ctx.fillStyle = dg;
+    ctx.fill();
+    if (state !== 'dead') { ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.5; ctx.stroke(); }
+    return;
+  } else if (sk.note === 'hollow') {
+    // 속 빈 원 (링)
+    const r = Math.min(nw * 0.42, nh * 0.9 + 4);
+    ctx.beginPath();
+    ctx.arc(x + nw / 2, yHead, r - 2, 0, Math.PI * 2);
+    ctx.lineWidth = Math.max(4, r * 0.32);
+    ctx.strokeStyle = col;
+    ctx.shadowColor = col;
+    ctx.shadowBlur = state === 'dead' ? 0 : 10;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(x + nw / 2, yHead, Math.max(2, r * 0.22), 0, Math.PI * 2);
+    ctx.fillStyle = state === 'dead' ? '#4a5066' : '#ffffff';
+    ctx.fill();
+    return;
   } else if (sk.note === 'line') {
     // 얇은 빛줄기
     ctx.fillStyle = col;
@@ -149,37 +177,100 @@ function shade(hex) {
   return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`;
 }
 
-function drawJudgeLine(L, judgeY, pressed) {
+/* 판정선 모양: 자동이면 원형·속 빈 원 노트일 때 원형 받침, 아니면 막대 */
+function lineStyleOf() {
+  const sk = settings.skin;
+  const st = sk.lineStyle || 'auto';
+  if (st !== 'auto') return st;
+  return sk.note === 'circle' || sk.note === 'hollow' || sk.note === 'diamond' ? 'ring' : 'bar';
+}
+function receptorR(L) {
+  const nw = L.laneW - 4;
+  return Math.min(nw * 0.42, settings.skin.noteH * 0.9 + 4);
+}
+function drawJudgeLine(L, judgeY, pressed, fx = null, now = performance.now()) {
   const { ctx, laneW, fieldW, x0, nl, colors } = L;
-  // 붉은 판정선 + 아래 기어 패널
+  // 판정선 + 아래 기어 패널
   const pg = ctx.createLinearGradient(0, judgeY, 0, L.h);
   pg.addColorStop(0, '#1a2038'); pg.addColorStop(1, '#0b0e1c');
   ctx.fillStyle = pg;
-  ctx.fillRect(x0 - 9, judgeY + 6, fieldW + 18, L.h - judgeY - 6);
+  const style = lineStyleOf();
   const lc = LINE_COLORS[settings.skin.line] || C_RED;
-  ctx.fillStyle = lc;
-  ctx.shadowColor = lc;
-  ctx.shadowBlur = 18;
-  ctx.fillRect(x0, judgeY - 3, fieldW, 6);
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = 'rgba(255,255,255,0.75)';
-  ctx.fillRect(x0, judgeY - 1, fieldW, 1);
+  if (style === 'ring') {
+    // 원형 받침 (동그란 노트 전용): 줄마다 노트 크기의 동그란 받침, 누르면 차오르고 칠 때 링이 퍼짐
+    const r = receptorR(L);
+    ctx.fillRect(x0 - 9, judgeY + r + 6, fieldW + 18, L.h - judgeY - r - 6);
+    ctx.fillStyle = lc + '40';
+    ctx.fillRect(x0, judgeY - 1, fieldW, 2);
+    for (let l = 0; l < nl; l++) {
+      const cx = x0 + l * laneW + laneW / 2;
+      const on = pressed && pressed[l];
+      const hit = fx ? (now - (fx.flash[l] || -1e9)) / 180 : 9;
+      const grow = hit < 1 ? (1 - hit) * 0.18 : 0;
+      ctx.beginPath();
+      ctx.arc(cx, judgeY, r * (1 + grow), 0, Math.PI * 2);
+      ctx.fillStyle = on ? colors[l] + 'cc' : 'rgba(10,14,28,0.85)';
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = on ? '#ffffff' : lc;
+      ctx.shadowColor = on ? colors[l] : lc;
+      ctx.shadowBlur = on ? 22 : 12;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.arc(cx, judgeY, r * 0.55, 0, Math.PI * 2);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = on ? 'rgba(255,255,255,0.9)' : colors[l] + '66';
+      ctx.stroke();
+      if (hit < 1) {                       // 칠 때 퍼지는 링
+        ctx.beginPath();
+        ctx.arc(cx, judgeY, r * (1 + hit * 0.9), 0, Math.PI * 2);
+        ctx.lineWidth = 3 * (1 - hit);
+        ctx.strokeStyle = `rgba(255,255,255,${(0.8 * (1 - hit)).toFixed(3)})`;
+        ctx.stroke();
+      }
+    }
+  } else {
+    ctx.fillRect(x0 - 9, judgeY + 6, fieldW + 18, L.h - judgeY - 6);
+    const th = style === 'thin' ? 2 : 6;
+    ctx.fillStyle = lc;
+    ctx.shadowColor = lc;
+    ctx.shadowBlur = style === 'thin' ? 12 : 18;
+    ctx.fillRect(x0, judgeY - th / 2, fieldW, th);
+    ctx.shadowBlur = 0;
+    if (style !== 'thin') {
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.fillRect(x0, judgeY - 1, fieldW, 1);
+    }
+  }
   // 키(터치 영역) 표시
   const keys = keysFor(nl);
   ctx.font = `700 ${laneW < 60 ? 12 : 15}px "JetBrains Mono", monospace`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const bh = isTouch ? 64 : 40;
+  if (style === 'ring') {       // 원형 받침: 키 이름은 받침 안에 (아래 칸 없이)
+    if (!isTouch) {
+      ctx.font = `700 ${laneW < 60 ? 10 : 12}px "JetBrains Mono", monospace`;
+      for (let l = 0; l < nl; l++) {
+        const on = pressed && pressed[l];
+        ctx.fillStyle = on ? '#0b0b14' : 'rgba(255,255,255,0.55)';
+        ctx.fillText(keyLabel(keys[l]), x0 + l * laneW + laneW / 2, judgeY + 1);
+      }
+    }
+    return;
+  }
+  const top = judgeY + 14;
   for (let l = 0; l < nl; l++) {
     const x = x0 + l * laneW;
     const on = pressed && pressed[l];
     ctx.fillStyle = on ? colors[l] : 'rgba(255,255,255,0.07)';
-    ctx.fillRect(x + 3, judgeY + 14, laneW - 6, bh);
+    ctx.fillRect(x + 3, top, laneW - 6, bh);
     ctx.fillStyle = on ? 'rgba(255,255,255,0.6)' : colors[l] + '55';
-    ctx.fillRect(x + 3, judgeY + 14, laneW - 6, 3);
+    ctx.fillRect(x + 3, top, laneW - 6, 3);
     if (!isTouch) {
       ctx.fillStyle = on ? '#0b0b14' : 'rgba(255,255,255,0.6)';
-      ctx.fillText(keyLabel(keys[l]), x + laneW / 2, judgeY + 12 + bh / 2);
+      ctx.fillText(keyLabel(keys[l]), x + laneW / 2, top - 2 + bh / 2);
     }
   }
 }
@@ -343,7 +434,7 @@ function drawPunch(L, judgeY, fx, now) {
   ctx.clip();
   // 판정선 펄스
   const tl = (now - fx.line) / 140;
-  if (tl < 1) {
+  if (tl < 1 && lineStyleOf() !== 'ring') {
     const lc = LINE_COLORS[settings.skin.line] || C_RED;
     ctx.globalAlpha = (1 - tl) * Math.min(1, 0.5 + 0.35 * k);
     ctx.fillStyle = '#ffffff';
@@ -1024,6 +1115,39 @@ class Game {
     ctx.restore();
   }
 
+  /* 배경 연출: 화면 뒤에 곡 썸네일을 흐리게 깔고, 박자마다 살짝 밝아지고 커짐 (후렴 금빛 · 피버 분홍빛)
+     CSS 변수만 바꿔서 가볍게 (흐림은 한 번만 그려 둠) */
+  drawBg(gt) {
+    const el = this.bgEl || (this.bgEl = document.getElementById('gameBg'));
+    if (!el) return;
+    const mode = settings.skin.bgFx || 'soft';
+    const on = mode !== 'off' && (this.phase === 'playing' || this.phase === 'preroll' || this.phase === 'countdown' || this.phase === 'paused');
+    el.classList.toggle('on', mode !== 'off');
+    if (!on) { el.style.setProperty('--pulse', '0'); el.style.setProperty('--tint', '0'); return; }
+    const beats = this.bgBeats || (this.bgBeats = (Array.isArray(this.song.beats) && this.song.beats.length > 8) ? this.song.beats.map(Number) : null);
+    let ph;
+    if (beats) {
+      let i = this.bgBi || 0;
+      while (i + 1 < beats.length && beats[i + 1] <= gt) i++;
+      while (i > 0 && beats[i] > gt) i--;
+      this.bgBi = i;
+      const a = beats[i], b = beats[i + 1] || a + 0.5;
+      ph = gt < a ? 1 : (gt - a) / Math.max(0.05, b - a);
+    } else {
+      const bl = 60 / (this.song.bpm || 120);
+      ph = (((gt - (this.song.offset || 0)) / bl) % 1 + 1) % 1;
+    }
+    const k = mode === 'strong' ? 1 : 0.55;
+    let chorus = 0;
+    for (const c of this.chorus) if (gt >= c[0] && gt < c[1]) { chorus = clamp((gt - c[0]) / 0.5, 0, 1) * clamp((c[1] - gt) / 0.6, 0, 1); break; }
+    const fv = this.fever;
+    const fever = fv && fv.mult > 1 && gt <= fv.until + 0.2 ? 1 : 0;
+    const pulse = Math.exp(-ph * 6) * k * (1 + chorus * 0.8);
+    el.style.setProperty('--pulse', pulse.toFixed(3));
+    el.style.setProperty('--tint', (chorus * k).toFixed(3));
+    el.style.setProperty('--fever', (fever * k).toFixed(3));
+  }
+
   /* 후렴(하이라이트): 들어가는 순간 빛이 터지고 글자, 후렴 동안 기어 양옆이 박자에 맞춰 은은하게 빛남 */
   drawChorus(L, judgeY, gt, now) {
     if (!this.chorus.length || settings.skin.chorusFx === false) return;
@@ -1143,6 +1267,7 @@ class Game {
     const pps = (150 + settings.speed * 90) * (h < 600 ? h / 600 : 1);
     const nowF = performance.now();
     const off0 = fxOffset(this.fx, nowF);       // 기어 반동·흔들림
+    this.drawBg(gt);
     ctx.clearRect(0, 0, w, h);
     ctx.save();
     ctx.translate(off0.dx, off0.dy);
@@ -1193,7 +1318,7 @@ class Game {
       drawNote(L, n.l, yHead, yTail, state, n.a);
     }
 
-    drawJudgeLine(L, judgeY, this.pressed);
+    drawJudgeLine(L, judgeY, this.pressed, this.fx, now);
     drawFx(L, judgeY, this.fx, now);   // 타격 이펙트
     for (let l = 0; l < this.nl; l++) if (this.activeHold[l] && (this.phase === 'playing' || this.phase === 'preroll')) fxHoldSpark(this.fx, l, now);
     drawPunch(L, judgeY, this.fx, now);

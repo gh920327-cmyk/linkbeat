@@ -94,7 +94,7 @@ class SkinPreview {
       if (yTail === null && yHead < -20) continue;
       drawNote(L, n.l, yHead, yTail, holding ? 'hold' : 'live', n.a);
     }
-    drawJudgeLine(L, judgeY, this.pressed);
+    drawJudgeLine(L, judgeY, this.pressed, this.fx, now);
     drawFx(L, judgeY, this.fx, now);
     for (let l = 0; l < this.nl; l++) if (this.pressed[l] && t < this.holdUntil[l] - 0.08) fxHoldSpark(this.fx, l, now);
     drawPunch(L, judgeY, this.fx, now);
@@ -158,6 +158,8 @@ function renderSkin() {
   $('#optChorus').checked = sk.chorusFx !== false;
   $('#optApplause').checked = sk.applause !== false;
   $$('#punchOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.punch || 'mid')));
+  $$('#lineStyleOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.lineStyle || 'auto')));
+  $$('#bgFxOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.bgFx || 'soft')));
 }
 function skinChanged() { saveSettings(); renderSkin(); }
 
@@ -232,6 +234,14 @@ for (const [id, big] of [['#applauseTest', false], ['#applauseTestAp', true]]) {
     sfx.applause(big);
   });
 }
+$('#lineStyleOpt').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-v]');
+  if (b) { settings.skin.lineStyle = b.dataset.v; skinChanged(); }
+});
+$('#bgFxOpt').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-v]');
+  if (b) { settings.skin.bgFx = b.dataset.v; skinChanged(); }
+});
 $('#punchOpt').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-v]');
   if (b) { settings.skin.punch = b.dataset.v; skinChanged(); }
