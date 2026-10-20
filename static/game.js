@@ -366,6 +366,69 @@ function fxBurst(fx, lane, kind, now = performance.now()) {
   if (fx.bursts.length > 40) fx.bursts.splice(0, fx.bursts.length - 40);
   if (fx.shards.length > 260) fx.shards.splice(0, fx.shards.length - 260);
 }
+/* 롱노트를 누르는 동안: 판정선 위가 숨 쉬듯 빛나고 살짝 떨림 */
+function drawHoldGlow(L, judgeY, lane, now) {
+  if (settings.skin.effect === 'off') return;
+  const { ctx, laneW, x0, colors } = L;
+  const cx = x0 + lane * laneW + laneW / 2 + Math.sin(now / 23 + lane) * 1.5;
+  const pulse = 0.65 + 0.35 * Math.sin(now / 70);
+  const r = laneW * 0.55;
+  const g = ctx.createRadialGradient(cx, judgeY, 2, cx, judgeY, r);
+  g.addColorStop(0, `rgba(255,255,255,${(0.55 * pulse).toFixed(3)})`);
+  g.addColorStop(0.35, colors[lane] + 'aa');
+  g.addColorStop(1, colors[lane] + '00');
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = g;
+  ctx.fillRect(cx - r, judgeY - r, r * 2, r * 2);
+  ctx.restore();
+}
+
+/* 판정 오차 막대: 가운데가 정확, 왼쪽 빠름 · 오른쪽 느림. 최근 친 노트가 점으로 찍히고 3초 동안 서서히 사라짐 */
+function drawErrorBar(L, judgeY, hist, now) {
+  const { ctx, fieldW, x0, laneW, h } = L;
+  const w = Math.min(fieldW * 0.62, 260);
+  const cx = x0 + fieldW / 2;
+  // 키 칸 아래에 자리가 있으면 거기, 없으면 판정선 바로 위에 (가리지 않게 얇게)
+  const below = lineStyleOf() === 'ring' ? judgeY + receptorR(L) + 16 : judgeY + (isTouch ? 86 : 64);
+  const y = below + 8 <= h - 2 ? below : judgeY - (lineStyleOf() === 'ring' ? receptorR(L) + 14 : 22);
+  const sc = (w / 2) / JUDGE.good;
+  ctx.save();
+  // 판정 구간 (GOOD · GREAT · PERFECT)
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = JUDGE_COLORS.good; ctx.fillRect(cx - JUDGE.good * sc, y - 2, JUDGE.good * sc * 2, 4);
+  ctx.fillStyle = JUDGE_COLORS.great; ctx.fillRect(cx - JUDGE.great * sc, y - 2, JUDGE.great * sc * 2, 4);
+  ctx.fillStyle = JUDGE_COLORS.perfect; ctx.fillRect(cx - JUDGE.perfect * sc, y - 2, JUDGE.perfect * sc * 2, 4);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(cx - 1, y - 7, 2, 14);
+  // 최근 타격
+  let sum = 0, cnt = 0;
+  for (const e of hist || []) {
+    const age = (now - e.at) / 3000;
+    if (age >= 1) continue;
+    const x = cx + clamp(e.dt, -JUDGE.good, JUDGE.good) * sc;
+    ctx.globalAlpha = 1 - age;
+    ctx.fillStyle = JUDGE_COLORS[e.kind] || '#fff';
+    ctx.fillRect(x - 1, y - 6, 2, 12);
+    sum += e.dt; cnt++;
+  }
+  // 평균 위치 (요즘 빠른지 느린지)
+  if (cnt >= 3) {
+    const ax = cx + clamp(sum / cnt, -JUDGE.good, JUDGE.good) * sc;
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.moveTo(ax, y - 8); ctx.lineTo(ax - 4, y - 14); ctx.lineTo(ax + 4, y - 14); ctx.closePath(); ctx.fill();
+  }
+  ctx.globalAlpha = 0.6;
+  ctx.font = `600 9px ${UI_FONT}`;
+  ctx.fillStyle = '#cfd8ff';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'right'; ctx.fillText('빠름', cx - w / 2 - 6, y);
+  ctx.textAlign = 'left'; ctx.fillText('느림', cx + w / 2 + 6, y);
+  ctx.restore();
+}
+
 /* 롱노트를 누르고 있는 동안 튀는 작은 불꽃 */
 function fxHoldSpark(fx, lane, now) {
   if (settings.skin.effect === 'off' || now - fx.holdTick[lane] < 45) return;
@@ -921,9 +984,9 @@ class Game {
     const a = Math.abs(dt);
     const kind = a <= JUDGE.perfect ? 'perfect' : a <= JUDGE.great ? 'great' : a <= JUDGE.good ? 'good' : 'miss';
     n.head = kind;
-    if (kind !== 'miss') this.offsets.push(dt);
+    if (kind !== 'miss') { this.offsets.push(dt); (this.errHist || (this.errHist = [])).push({ dt, kind, at: performance.now() }); if (this.errHist.length > 40) this.errHist.shift(); }
     this.judge(kind, lane, dt, false, n.t);
-    if (n.a && kind !== 'miss') fxAccent(this.fx, lane, kind);   // 드럼 강타: 크게 터짐
+    if (n.a && kind !== 'miss') { fxAccent(this.fx, lane, kind); sfx.accent(); }   // 드럼 강타: 크게 터지고 묵직한 소리
     if (n.d > 0) {
       if (kind === 'miss') { n.tail = 'miss'; this.judge('miss', lane, 0, true, n.t + n.d); }
       else this.activeHold[lane] = n;
@@ -938,7 +1001,15 @@ class Game {
     const gt = this.gtAt(ts);
     this.activeHold[lane] = null;
     if (gt < n.t + n.d - 0.15 * this.rate) { n.tail = 'miss'; this.judge('miss', lane, 0, true, n.t + n.d); }
-    else { n.tail = 'perfect'; this.judge('perfect', lane, 0, true, n.t + n.d); }
+    else { n.tail = 'perfect'; this.judge('perfect', lane, 0, true, n.t + n.d); this.holdDone(lane); }
+  }
+
+  /* 롱노트를 정확히 끝까지 눌렀다 뗌: '딱' + 작은 폭발 */
+  holdDone(lane) {
+    const now = performance.now();
+    fxHit(this.fx, lane, now);
+    fxBurst(this.fx, lane, 'great', now);
+    sfx.release();
   }
 
   judge(kind, lane, dt, tail = false, t = this.gt) {
@@ -956,7 +1027,7 @@ class Game {
     }
     const now = performance.now();
     if (kind === 'miss') {
-      if (this.combo >= 20) fxShake(this.fx, 1.5, now);   // 긴 콤보가 끊기면 살짝 흔들림
+      if (this.combo >= 20) { fxShake(this.fx, 1.5, now); sfx.comboBreak(); }   // 긴 콤보가 끊기면 살짝 흔들림 + '툭'
       this.combo = 0;
       if (this.stage) this.stage.onMiss();
       fxMiss(this.fx, lane, now);
@@ -1012,6 +1083,7 @@ class Game {
         h.tail = 'perfect';
         this.judge('perfect', l, 0, true, h.t + h.d);
         this.activeHold[l] = null;
+        this.holdDone(l);
       }
     }
     if (this.fever.mult > 1 && gt > this.fever.until + 0.2) this.fever.mult = 1;  // 화면 표시용 만료
@@ -1320,7 +1392,8 @@ class Game {
 
     drawJudgeLine(L, judgeY, this.pressed, this.fx, now);
     drawFx(L, judgeY, this.fx, now);   // 타격 이펙트
-    for (let l = 0; l < this.nl; l++) if (this.activeHold[l] && (this.phase === 'playing' || this.phase === 'preroll')) fxHoldSpark(this.fx, l, now);
+    for (let l = 0; l < this.nl; l++) if (this.activeHold[l] && (this.phase === 'playing' || this.phase === 'preroll')) { fxHoldSpark(this.fx, l, now); drawHoldGlow(L, judgeY, l, now); }
+    if (settings.skin.errorBar !== false) drawErrorBar(L, judgeY, this.errHist, now);
     drawPunch(L, judgeY, this.fx, now);
 
     // 진행 바

@@ -565,6 +565,12 @@
             </div>
           </div>
           <div class="set-row"><span>타격음 음량 <b id="hitVolVal"></b></span><input id="hitVol" type="range" min="0" max="100" step="5"></div>
+          <div class="checks">
+            <label><input type="checkbox" id="optAccentSnd"> 강타 소리 <small class="muted">드럼 강타 노트에 쿵+치익</small></label>
+            <label><input type="checkbox" id="optHoldSnd"> 롱노트 마무리 소리</label>
+            <label><input type="checkbox" id="optBreakSnd"> 콤보 끊김 소리</label>
+            <button id="fxSndTest" class="small-btn" type="button">▶ 들어보기</button>
+          </div>
           <div class="set-row"><label><input type="checkbox" id="optApplause"> 풀콤보 박수 <small class="muted">ALL PERFECT면 더 크게</small></label>
             <div class="hit-row"><button id="applauseTest" class="small-btn" type="button">▶ 풀콤보</button><button id="applauseTestAp" class="small-btn" type="button">▶ 올퍼펙트</button></div></div>
         </section>
@@ -576,6 +582,7 @@
             <select id="judgeText"><option value="normal">보통</option><option value="small">작게</option><option value="off">숨김</option></select></div>
           <div class="checks">
             <label><input type="checkbox" id="optEarly"> 빠름·느림 표시</label>
+            <label><input type="checkbox" id="optErrBar"> 판정 오차 막대</label>
             <label><input type="checkbox" id="optCombo"> 콤보 숫자</label>
             <label><input type="checkbox" id="optFever"> 피버 연출</label>
             <label><input type="checkbox" id="optShake"> 화면 흔들림</label>
