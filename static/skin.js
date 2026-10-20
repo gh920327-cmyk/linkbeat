@@ -73,6 +73,7 @@ class SkinPreview {
         this.fever = Math.min(100, this.fever + 4);
         fxHit(this.fx, n.l, now);
         fxBurst(this.fx, n.l, kind, now);
+        if (kind === 'perfect') fxPerfect(this.fx, n.l, now);
         (this.errHist || (this.errHist = [])).push({ dt: (kind === 'perfect' ? (r - 0.4) * 0.08 : (r < 0.9 ? -0.065 : 0.07)), kind, at: now });
         if (this.errHist.length > 30) this.errHist.shift();
         if (n.a) fxAccent(this.fx, n.l, kind, now);
@@ -100,6 +101,7 @@ class SkinPreview {
     drawFx(L, judgeY, this.fx, now);
     for (let l = 0; l < this.nl; l++) if (this.pressed[l] && t < this.holdUntil[l] - 0.08) { fxHoldSpark(this.fx, l, now); drawHoldGlow(L, judgeY, l, now); }
     drawPunch(L, judgeY, this.fx, now);
+    drawGlints(L, judgeY, this.fx, now);
     if (settings.skin.errorBar !== false) drawErrorBar(L, judgeY, this.errHist, now);
     // 피버 게이지 + 연출
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
@@ -165,6 +167,7 @@ function renderSkin() {
   $('#optHoldSnd').checked = sk.holdSound !== false;
   $('#optBreakSnd').checked = sk.breakSound !== false;
   $('#optErrBar').checked = sk.errorBar !== false;
+  $('#optGlint').checked = sk.perfectGlint !== false;
   $$('#lineStyleOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.lineStyle || 'auto')));
   $$('#bgFxOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.bgFx || 'soft')));
 }
@@ -241,7 +244,7 @@ for (const [id, big] of [['#applauseTest', false], ['#applauseTestAp', true]]) {
     sfx.applause(big);
   });
 }
-for (const [id, key] of [['#optAccentSnd', 'accentSound'], ['#optHoldSnd', 'holdSound'], ['#optBreakSnd', 'breakSound'], ['#optErrBar', 'errorBar']]) {
+for (const [id, key] of [['#optAccentSnd', 'accentSound'], ['#optHoldSnd', 'holdSound'], ['#optBreakSnd', 'breakSound'], ['#optErrBar', 'errorBar'], ['#optGlint', 'perfectGlint']]) {
   $(id).addEventListener('change', (e) => { settings.skin[key] = e.target.checked; skinChanged(); });
 }
 $('#fxSndTest').addEventListener('click', () => {   // 강타 → 롱노트 마무리 → 콤보 끊김 순서로

@@ -280,7 +280,7 @@ function fxNew(nl) {
   return {
     flash: new Array(nl).fill(0), rings: [], parts: [],
     // 타격감: 폭발·파편·키 빔·판정선 펄스·기어 반동·흔들림·미스 번쩍임·콤보 축하
-    bursts: [], shards: [], beamOff: new Array(nl).fill(-1e9), miss: new Array(nl).fill(-1e9),
+    bursts: [], shards: [], glints: [], beamOff: new Array(nl).fill(-1e9), miss: new Array(nl).fill(-1e9),
     holdTick: new Array(nl).fill(0), line: -1e9, bump: -1e9, bumpAmp: 0, shake: -1e9, shakeAmp: 0, mile: null,
   };
 }
@@ -297,6 +297,36 @@ function fxHit(fx, lane, now = performance.now()) {
   }
   if (fx.rings.length > 40) fx.rings.splice(0, fx.rings.length - 40);
   if (fx.parts.length > 300) fx.parts.splice(0, fx.parts.length - 300);
+}
+/* PERFECT 보너스: 다른 판정 연출은 그대로 두고, PERFECT일 때만 작은 별빛 반짝임을 하나 더 얹음 */
+function fxPerfect(fx, lane, now = performance.now()) {
+  if (settings.skin.perfectGlint === false || settings.skin.effect === 'off') return;
+  fx.glints.push({ lane, at: now, rot: Math.random() * Math.PI });
+  if (fx.glints.length > 24) fx.glints.shift();
+}
+function drawGlints(L, judgeY, fx, now) {
+  if (!fx.glints || !fx.glints.length) return;
+  const { ctx, laneW, x0 } = L;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  fx.glints = fx.glints.filter((g) => now - g.at < 320);
+  for (const g of fx.glints) {
+    const k = (now - g.at) / 320;
+    const cx = x0 + g.lane * laneW + laneW / 2, cy = judgeY;
+    const len = laneW * (0.28 + 0.32 * Math.sin(Math.min(1, k * 1.6) * Math.PI / 2)) * (1 - k * 0.35);
+    ctx.save();
+    ctx.globalAlpha = (1 - k) * 0.95;
+    ctx.translate(cx, cy);
+    ctx.rotate(g.rot + k * 0.6);
+    const grad = ctx.createLinearGradient(-len, 0, len, 0);
+    grad.addColorStop(0, 'rgba(255,240,170,0)'); grad.addColorStop(0.5, 'rgba(255,250,220,1)'); grad.addColorStop(1, 'rgba(255,240,170,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(-len, -1.2, len * 2, 2.4);           // 가로 빛줄기
+    ctx.rotate(Math.PI / 2);
+    ctx.fillRect(-len * 0.7, -1, len * 1.4, 2);       // 세로 빛줄기 (조금 짧게)
+    ctx.restore();
+  }
+  ctx.restore();
 }
 function drawFx(L, judgeY, fx, now) {
   const { ctx, laneW, x0, colors } = L;
@@ -1038,6 +1068,7 @@ class Game {
       if (!tail) {
         fxHit(this.fx, lane);
         fxBurst(this.fx, lane, kind, now);
+        if (kind === 'perfect') fxPerfect(this.fx, lane, now);
         // 동시치기: 같은 순간 두 번째 타격이면 화면을 살짝 흔듦
         if (Math.abs(t - this.lastHitT) < 0.02 && now - this.lastHitAt < 60) fxShake(this.fx, 2.2, now);
         this.lastHitT = t; this.lastHitAt = now;
@@ -1395,6 +1426,7 @@ class Game {
     for (let l = 0; l < this.nl; l++) if (this.activeHold[l] && (this.phase === 'playing' || this.phase === 'preroll')) { fxHoldSpark(this.fx, l, now); drawHoldGlow(L, judgeY, l, now); }
     if (settings.skin.errorBar !== false) drawErrorBar(L, judgeY, this.errHist, now);
     drawPunch(L, judgeY, this.fx, now);
+    drawGlints(L, judgeY, this.fx, now);
 
     // 진행 바
     const p0 = this.startT, p1 = this.practice ? this.practice.end : (this.song.duration || this.lastEnd || 1);

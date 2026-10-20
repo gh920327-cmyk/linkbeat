@@ -68,6 +68,7 @@ const DEFAULT_SKIN = {
   holdSound: true,             // 롱노트를 정확히 뗐을 때 '딱'
   breakSound: true,            // 긴 콤보가 끊길 때 '툭'
   errorBar: true,              // 판정 오차 막대 (빠름 ← → 느림)
+  perfectGlint: true,          // PERFECT일 때만 작은 별빛 반짝임을 하나 더
   lineStyle: 'auto',           // 판정선 모양: auto(원형 노트면 원형 받침) | bar | ring | thin
   bgFx: 'soft',                // 배경 연출: off | soft | strong
 };
