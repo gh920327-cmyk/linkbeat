@@ -29,8 +29,23 @@ const songById = (id) => songs.find((s) => s.id === id);
 /* AI 채보 (기본): 4키에서 곡에 AI 채보가 있으면 그걸로 플레이. 'AI 채보' 칩을 끄면 기존 채보 (방에서는 방장이 정함)
    기록·순위표는 AI 채보 / 기존 채보 따로 */
 function aiWanted() { return net.room ? net.room.ai !== false : settings.aiChart !== false; }
+/* 곡마다 AI 채보와 기존 채보 중 하나만 (섞지 않음): AI가 음원과 잘 맞는 곡(rec)만 AI가 기본.
+   혼자 할 때는 칩으로 곡마다 바꿀 수 있고(기억함), 방에서는 방장 설정 + 곡 추천을 따름 */
+function aiRec(s) {
+  const ai = s && s.ai;
+  if (!ai) return false;
+  if (ai.fit) return ai.fit.rec !== false;      // 전체 곡 정보
+  return ai.rec !== false;                       // 곡 목록 요약
+}
+function songPick(s) {
+  if (!s) return false;
+  if (net.room) return net.room.ai !== false && aiRec(s);
+  const o = (settings.aiPick || {})[s.id];
+  if (typeof o === 'boolean') return o;
+  return settings.aiChart !== false && aiRec(s);
+}
 const hasAi = (s, nl = settings.mode, diff = settings.diff) => nl === 4 && !!(s && s.ai && (s.ai.counts || {})[diff]);
-const aiOn = (s, nl = settings.mode, diff = settings.diff) => aiWanted() && hasAi(s, nl, diff);
+const aiOn = (s, nl = settings.mode, diff = settings.diff) => hasAi(s, nl, diff) && songPick(s);
 const starOf = (s, nl = settings.mode, diff = settings.diff) => aiOn(s, nl, diff) ? (s.ai.stars || {})[diff] || 0 : ((s.stars || {})[nl] || {})[diff] || 0;
 const countOf = (s, nl = settings.mode, diff = settings.diff) => aiOn(s, nl, diff) ? s.ai.counts[diff] : ((nl === 6 ? s.counts6 : s.counts) || {})[diff] || 0;
 /* 하이라이트 모드: 방에 있으면 방 설정(방장이 정함), 혼자면 내 설정 */
@@ -88,7 +103,7 @@ function renderSongs() {
       const roomSel = net.room && net.room.songId === s.id ? ' roomsel' : '';
       return `<div class="row${s.id === selId ? ' sel' : ''}${roomSel}" data-id="${s.id}">
         <img class="row-thumb" src="https://i.ytimg.com/vi/${s.id}/default.jpg" alt="" loading="lazy">
-        <div class="row-info"><div class="row-title">${s.ai ? (s.ai.gen >= 2 ? '<span class="ai-badge" title="AI 채보 (새 방식 · 일반 노트 위주)">AI</span>' : '<span class="ai-badge old" title="AI 채보 (예전 방식 · 롱노트 많음) — 호스트가 다시 만들 수 있어요">AI 구</span>') : ''}${esc(s.title)}</div><div class="row-artist">${esc(artistOf(s))}</div></div>
+        <div class="row-info"><div class="row-title">${s.ai && songPick(s) ? '<span class="ai-badge" title="이 곡은 AI 채보로 플레이 (곡 화면의 AI 채보 칩으로 바꿀 수 있어요)">AI</span>' : ''}${esc(s.title)}</div><div class="row-artist">${esc(artistOf(s))}</div></div>
         <div class="row-stars">${pips}</div>
         <div class="row-rank">${rec ? `<b class="rank-${esc(rec.rank)}">${esc(rec.rank)}</b>` : ''}</div>
       </div>`;
@@ -167,9 +182,9 @@ function renderDetail() {
   const ac = $('#modAi');
   const songAi = !!(s.ai && s.ai.counts && Object.keys(s.ai.counts).length);
   ac.classList.toggle('hidden', !songAi || nl !== 4);
-  ac.classList.toggle('on', songAi && aiWanted());
+  ac.classList.toggle('on', songAi && songPick(s));
   ac.disabled = inRoom && !leader;
-  ac.title = songAi ? `다른 리듬게임 채보로 학습한 AI가 만든 채보 · ${s.ai.gen >= 2 ? '새 방식 (일반 노트 위주)' : '예전 방식 (롱노트 많음 · ✦ AI로 다시 만들 수 있어요)'}${s.ai.at ? ` · ${new Date(s.ai.at * 1000).toLocaleDateString()} 생성` : ''} · 끄면 기존 채보 · 기록은 따로` : '';
+  ac.title = songAi ? `다른 리듬게임 채보로 학습한 AI가 만든 채보 · ${aiRec(s) ? '이 곡은 AI 채보가 기본' : '이 곡은 AI가 음원과 잘 안 맞아서 기존 채보가 기본'}${s.ai.match != null ? ` (음원과 맞음 ${Math.round(s.ai.match * 100)}%)` : ''}${s.ai.at ? ` · ${new Date(s.ai.at * 1000).toLocaleDateString()} 생성` : ''} · 누르면 이 곡만 바꿔요 · 기록은 따로` : '';
   ac.classList.toggle('old', songAi && !(s.ai.gen >= 2));
 }
 function renderMods() {
@@ -188,10 +203,13 @@ $('#modAi').addEventListener('click', () => {
     else toast('AI 채보 사용은 방장이 정해요.');
     return;
   }
-  settings.aiChart = settings.aiChart === false;
+  const s = songById(selId);
+  if (!s) return;
+  const next = !songPick(s);
+  settings.aiPick = Object.assign({}, settings.aiPick || {}, { [s.id]: next });
   saveSettings();
   renderSongs();
-  toast(settings.aiChart ? 'AI 채보로 플레이해요. (AI 채보가 있는 곡만 · 기록은 따로)' : '기존 채보로 플레이해요. (기록은 따로)', 2600);
+  toast(next ? `이 곡은 AI 채보로 플레이해요.${aiRec(s) ? '' : ' (AI가 음원과 잘 안 맞는 곡이라 어색할 수 있어요)'} · 기록은 따로` : '이 곡은 기존 채보로 플레이해요. · 기록은 따로', 2800);
 });
 $('#modHl').addEventListener('click', () => {
   if (net.room) {
@@ -612,7 +630,7 @@ async function startSolo(id, diff, nl = 4, customNotes = null, practice = null) 
   stopPreview();
   if (game) game.destroy();
   if (practice && practice.hl && song._hl) practice = hlPractice(song._hl);   // 서버의 최신 구간으로
-  const useAi = !customNotes && aiWanted() && !!aiChartOf(song, diff, nl);
+  const useAi = !customNotes && !!aiChartOf(song, diff, nl) && songPick(songById(id) || song);
   const notes = customNotes || (useAi ? aiChartOf(song, diff, nl) : chartOf(song, diff, nl));
   if (!notes.length) { toast('이 난이도에는 노트가 없어요.'); return; }
   pendingResults = null;
@@ -1043,7 +1061,7 @@ net.on('prepare', async (m) => {
   }
   if (token !== prepareSeq || !net.room) return;   // 그사이 새 판이 시작됐거나 방을 나갔으면 버림
   if (game) game.destroy();
-  const mAi = m.ai !== false ? aiChartOf(song, m.diff, m.keys || 4) : null;
+  const mAi = m.ai !== false && aiRec(song) ? aiChartOf(song, m.diff, m.keys || 4) : null;   // 방: 방장 설정 + AI가 잘 맞는 곡만
   const g = new Game({ song, diff: m.diff, keys: m.keys || 4, notes: mAi, multi: true, gameNo: m.game, onExit: backFromGame, practice: hlPractice(m.hl) });
   g.ai = !!mAi;
   game = g;
@@ -1550,9 +1568,18 @@ $('#btnSongInfo').addEventListener('click', () => {
   $('#siTitle').value = s.title;
   $('#siArtist').value = s.artist || '';   // 통일된 이름 (저장하면 같은 가수 곡 전부 이 이름으로)
   $('#siArtist').placeholder = s.channel || '가수 이름';
+  siShift = +s.noteShift || 0;
+  $('#siShift').textContent = `${siShift > 0 ? '+' : ''}${siShift}ms`;
   $('#siInfo').textContent = `업로드 채널: ${s.channel || '-'} · 가수 정보: ${ARTIST_SRC[s.artistSrc || ''] || '-'}${s.artistRaw && s.artistRaw !== s.artist ? ` · 원래 표기: ${s.artistRaw}` : ''} · 여기서 고친 가수 이름은 같은 가수의 다른 곡에도 똑같이 적용돼요.`;
   $('#songInfoDlg').showModal();
   setTimeout(() => $('#siArtist').focus(), 30);
+});
+let siShift = 0;
+$('#songInfoDlg').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-ns]');
+  if (!b) return;
+  siShift = Math.max(-150, Math.min(150, siShift + +b.dataset.ns));
+  $('#siShift').textContent = `${siShift > 0 ? '+' : ''}${siShift}ms`;
 });
 $('#siCancel').addEventListener('click', () => $('#songInfoDlg').close());
 async function saveSongInfo(body) {
@@ -1568,7 +1595,7 @@ async function saveSongInfo(body) {
 $('#siSave').addEventListener('click', () => {
   const title = $('#siTitle').value.trim();
   if (!title) { toast('제목을 입력해 주세요.'); return; }
-  saveSongInfo({ title, artist: $('#siArtist').value.trim() });
+  saveSongInfo({ title, artist: $('#siArtist').value.trim(), noteShift: siShift });
 });
 $('#siAuto').addEventListener('click', () => saveSongInfo({ title: $('#siTitle').value.trim() || undefined, artist: '' }));
 $('#siArtist').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) $('#siSave').click(); });

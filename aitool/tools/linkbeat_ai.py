@@ -32,7 +32,21 @@ DIFF_KO = {"easy": "쉬움", "normal": "보통", "hard": "어려움", "extreme":
 # osu 별점 → 링크비트 별: 1.6≈★3.7 · 2.4≈★5 · 3.2≈★8 · 4.0≈★11 (실제 39곡에서 확인) → 쓸모 있는 1.0~3.8을 촘촘하게
 SR_PROMPTS = [1.0, 1.4, 1.8, 2.2, 2.5, 2.8, 3.1, 3.4, 3.8]
 # 난이도별 목표 별점 (방장이 정한 범위의 가운데): 쉬움 1.5~2.5 · 보통 3~5 · 어려움 6~7 · 극한 8 이상
-BAND_MID = {"easy": 2.0, "normal": 4.0, "hard": 6.5, "extreme": 8.5}
+MIN_STEP = 0.8   # 난이도 사이 최소 별 차이 (곡 기준 난이도: 기존 채보 별을 따라가되, 위 난이도는 확실히 더 어렵게)
+
+
+def relative_targets(targets):
+    """기존 채보 별(그 곡의 자연스러운 난이도)을 목표로, 난이도마다 최소 0.8★씩 차이 나게"""
+    out, prev = {}, None
+    for d in DIFF_ORDER:
+        if d not in targets:
+            continue
+        v = float(targets[d])
+        if prev is not None:
+            v = max(v, prev + MIN_STEP)
+        out[d] = round(v, 2)
+        prev = v
+    return out
 PER_PROMPT = 2
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -448,7 +462,7 @@ def make_charts(vid, wav, targets, title, artist, duration):
         cands.append((chartgen.star_rating(notes, 4), notes, path.stem))
     if not cands:
         raise RuntimeError("AI가 채보를 제대로 만들지 못했어요.")
-    chosen = pick_for_diffs(cands, {d: BAND_MID.get(d, v) for d, v in targets.items()})
+    chosen = pick_for_diffs(cands, relative_targets(targets))
     say(f"  {len(cands)}개 만들었어요 ({time.time() - t0:.0f}초)")
     body = {"charts": {d: c[1] for d, c in chosen.items()}, "by": f"MuG Diffusion v{mug.version}", "style": "rc"}
     (odir / "upload.json").write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")

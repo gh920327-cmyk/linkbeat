@@ -617,7 +617,8 @@ class Game {
     this.startT = practice ? practice.start : 0;
     // 하이라이트 모드: 영상은 한 마디 앞(start)부터, 노트는 후렴 시작(from)부터
     const from = practice ? (practice.from ?? practice.start) : 0;
-    this.notes = src.map((n) => ({ t: +n.t, l: map[n.l | 0] ?? (n.l | 0), d: +n.d || 0, a: n.a ? 1 : 0, head: null, tail: null }))
+    const shift = (+song.noteShift || 0) / 1000;   // 곡마다 노트 전체 타이밍 (호스트가 곡 정보에서 ±)
+    this.notes = src.map((n) => ({ t: +n.t + shift, l: map[n.l | 0] ?? (n.l | 0), d: +n.d || 0, a: n.a ? 1 : 0, head: null, tail: null }))
       .filter((n) => n.l >= 0 && n.l < this.nl && (!practice || (n.t >= from - 0.001 && n.t <= practice.end)))
       .sort((a, b) => a.t - b.t || a.l - b.l);
     this.hl = !!(practice && practice.hl);

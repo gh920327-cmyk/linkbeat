@@ -196,7 +196,9 @@ def ai_summary(song):
     if not isinstance(ai, dict) or not isinstance(ai.get("charts"), dict) or not ai["charts"]:
         return None
     ch = ai["charts"]
+    fit = ai.get("fit") or {}
     return {"by": str(ai.get("by", ""))[:60], "at": ai.get("at", 0), "gen": ai.get("gen", 1),
+            "rec": fit.get("rec", True), "shift": fit.get("shift", 0), "match": fit.get("match"),
             "counts": {d: len(n) for d, n in ch.items()},
             "stars": {d: chartgen.star_rating(n, 4) for d, n in ch.items()}}
 
@@ -214,7 +216,7 @@ def song_summary(song):
         "id": song["id"], "title": song.get("title", song["id"]),
         "channel": song.get("channel", ""), "duration": song.get("duration", 0),
         "artist": song_artist(song)[0], "artistSrc": song_artist(song)[1], "artistAt": song.get("artistAt", 0),
-        "bpm": song.get("bpm", 120), "offset": song.get("offset", 0),
+        "bpm": song.get("bpm", 120), "offset": song.get("offset", 0), "noteShift": song.get("noteShift", 0),
         "created": song.get("created", 0), "edited": song.get("edited", {}),
         "counts": {d: len(n) for d, n in song.get("charts", {}).items()},
         "counts6": {d: len(n) for d, n in (song.get("charts6") or {}).items()},
@@ -632,7 +634,6 @@ def finish_song(vid, meta, res, keep_edited=False, keep_title=False):
                 song["charts6" if six else "charts"][diff] = src[diff]
                 song["edited"][key] = at
         # 고친 채보는 노트 시각(초)이 그대로라 새 BPM 분석과 함께 써도 플레이에 문제없음
-    fit_basic(song)
     save_song(song)
     drop_requests_for(vid)
     notify_all({"type": "songs"})
@@ -806,7 +807,7 @@ def finish_pc_job(job, meta, res):
 
 
 ACC_WIN = 0.05   # 기존 채보의 드럼 강타 시각과 이만큼(초) 가까운 AI 노트를 강타로
-AI_FIX = 10       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
+AI_FIX = 11       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
 HOLD_GAP = 0.1   # 롱노트 끝과 같은 줄 다음 노트 사이 최소 간격
 MAX_HOLDS = 1    # 동시에 누르고 있는 롱노트 최대 개수 (롱노트는 최소한으로)
 HOLD_MIN = 0.6   # 이보다 짧은 롱노트는 일반 노트로
@@ -1227,23 +1228,113 @@ def ai_balance(song, diff, notes):
     return out
 
 
-def ai_accents(song, charts):
-    """타격감(드럼 강타 연출)을 AI 채보에도: 기존 채보가 음원에서 찾은 강타 시각을 모아서,
-    그 시각에 있는 AI 노트에 강타 표시(a)를 붙임. 노트를 더하거나 빼지는 않음."""
+AI_REC_OFF = 0.10     # AI 노트 중 '소리 없는 곳(기존 채보가 찾은 소리와 60ms 넘게 떨어짐)' 비율이 이보다 적고
+AI_REC_MATCH = 0.5    # 소리와 25ms 안으로 맞는 비율이 이 이상이면 AI 채보를 기본으로 (아니면 기존 채보가 기본, 칩으로 바꿀 수 있음)
+SAFE_GAP = {"easy": 0.3, "normal": 0.15, "hard": 0.075, "extreme": 0.06}   # 이보다 붙은 노트는 사람이 못 침 (안전장치만)
+
+
+def basic_onsets(song):
+    """기존 채보(음원에서 찾은 소리 위치)의 시각들 — AI 채보 박자를 맞추는 기준"""
+    return sorted({round(float(n["t"]), 3) for v in (song.get("charts") or {}).values() for n in v})
+
+
+def _match_rate(times, onsets, shift, w):
     import bisect
+    k = 0
+    for t in times:
+        x = t + shift
+        i = bisect.bisect_left(onsets, x)
+        if any(0 <= j < len(onsets) and abs(onsets[j] - x) <= w for j in (i - 1, i)):
+            k += 1
+    return k / max(1, len(times))
+
+
+def ai_fit(song, charts):
+    """AI 채보가 음원보다 얼마나 일찍/늦게 나오는지 재기 (실제 39곡: 15~60ms 일찍, 곡마다 다름)
+    → (밀 시간 초, 맞는 비율, 소리 없는 곳 비율)"""
+    onsets = basic_onsets(song)
+    times = sorted({round(float(n["t"]), 3) for v in charts.values() for n in v})
+    if len(onsets) < 30 or len(times) < 30:
+        return 0.0, 0.0, 0.0
+    base = _match_rate(times, onsets, 0.0, 0.015)
+    best = max(((_match_rate(times, onsets, sh / 1000, 0.015), sh) for sh in range(-60, 125, 5)), key=lambda x: (x[0], -abs(x[1])))
+    fine = max(((_match_rate(times, onsets, sh / 1000, 0.012), sh) for sh in range(best[1] - 4, best[1] + 5)), key=lambda x: (x[0], -abs(x[1])))
+    shift = fine[1] / 1000 if best[0] - base >= 0.03 and abs(fine[1]) >= 5 else 0.0
+    match = _match_rate(times, onsets, shift, 0.025)
+    off = 1 - _match_rate(times, onsets, shift, 0.06)
+    return shift, round(match, 3), round(off, 3)
+
+
+def ai_safe(song, diff, notes):
+    """AI 채보는 거의 그대로 — 사람이 칠 수 없는 것만 고침:
+    1) 아주 긴 빈 구간(전주·간주에서 AI가 통째로 비운 곳)만 기존 채보로 채움 (노트끼리 섞지 않고 구간 단위)
+    2) 1초에 사람 한계보다 많이 몰린 곳(랩 폭주 등)만 덜어냄
+    3) 붙어서 칠 수 없는 노트 · 같은 줄 너무 빠른 연타만 뺌"""
+    import bisect
+    base = sorted(((song.get("charts") or {}).get(diff) or []), key=lambda n: n["t"])
+    notes = sorted((dict(n) for n in notes), key=lambda n: (n["t"], n["l"]))
+    if not notes:
+        return notes
+    beat = 60.0 / max(40.0, min(300.0, float(song.get("bpm") or 120)))
+    gap_min = max(3.0, 8 * beat)                     # 두 마디쯤 통째로 비었을 때만
+    if base:
+        btimes = [float(n["t"]) for n in base]
+        times = [-1.0] + [n["t"] for n in notes] + [float(song.get("duration") or btimes[-1] + 1) + 1.0]
+        fill = []
+        for a, b in zip(times, times[1:]):
+            if b - a < gap_min:
+                continue
+            i = bisect.bisect_left(btimes, a + 0.4)
+            while i < len(base) and base[i]["t"] < b - 0.4:
+                n = base[i]
+                if n["t"] + float(n.get("d", 0) or 0) < b - 0.2:
+                    fill.append({k: v for k, v in n.items() if k in ("t", "l", "d", "a")})
+                i += 1
+        notes = sorted(notes + fill, key=lambda n: (n["t"], n["l"]))
+    groups = {}
+    for n in notes:
+        groups.setdefault(round(n["t"], 3), []).append(n)
+    gtimes = sorted(groups)
+    cap = NPS_CAP.get(diff, 11)
+    keep = []
+    for sec in range(int(gtimes[-1]) + 2):           # 사람 한계를 넘는 1초만 덜기 (스트림·박자 위 노트를 남김)
+        gs = [t for t in gtimes if sec <= t < sec + 1]
+        if sum(len(groups[t]) for t in gs) <= cap:
+            keep += gs
+            continue
+        idx = {t: k for k, t in enumerate(gtimes)}
+        ranked = sorted(gs, key=lambda t: (-(stream_bonus(gtimes, idx[t]) + (1 if any(n.get("a") for n in groups[t]) else 0)), t))
+        tot = 0
+        for t in ranked:
+            if tot + len(groups[t]) <= cap:
+                keep.append(t)
+                tot += len(groups[t])
+    floor = SAFE_GAP.get(diff, 0.075)
+    jack = JACK_MIN.get(diff, 0.14)
+    spaced = []
+    for t in sorted(keep):
+        if spaced and t - spaced[-1] < floor - 0.002:
+            continue
+        spaced.append(t)
+    out, lane_last = [], {}
+    for t in spaced:
+        for n in groups[t]:
+            if t - lane_last.get(n["l"], -9) < jack:
+                continue
+            lane_last[n["l"]] = t + float(n.get("d", 0) or 0)
+            out.append(n)
+    return out
+
+
+def ai_accents(song, charts):
+    """AI 채보 다듬기 (최소한만): 박자 밀기(음원에 맞춤) → 칠 수 없는 것만 고침 → 롱노트 정리 → 동시치기 제한 → 강타 표시"""
+    import bisect
+    shift, match, off = ai_fit(song, charts)
     acc = sorted({round(float(n["t"]), 3) for notes in (song.get("charts") or {}).values() for n in notes if n.get("a")})
     out = {}
-    order = [d for d in ("easy", "normal", "hard", "extreme") if d in charts]
-    basic = song.get("charts") or {}
-    tidied = {d: limit_chords(ai_tidy(ai_balance(song, d, charts[d])), d) for d in order}
-    for i, d in enumerate(order):
-        # 모자랄 때 가져올 노트: 위 난이도 AI 채보 → 같은·위 난이도 기존 채보
-        pool = [n for u in order[i + 1:] for n in tidied[u]] + \
-               [n for u in ("easy", "normal", "hard", "extreme")[("easy", "normal", "hard", "extreme").index(d):] for n in basic.get(u, [])]
-        # AI 채보는 조금만 손봄: 노트의 20%까지, 음원에 있는 노트(기존 채보·위 난이도)로만 (박자 칸에 새로 만들지 않음)
-        tidied[d] = ai_tidy(limit_chords(fit_band(song, d, tidied[d], 4, pool, max_change=AI_MAX_CHANGE, synth=False), d))
-    for d in order:
-        notes = tidied[d]
+    for d in [d for d in ("easy", "normal", "hard", "extreme") if d in charts]:
+        moved = [dict(n, t=round(float(n["t"]) + shift, 3)) for n in charts[d] if float(n["t"]) + shift >= 0]
+        notes = limit_chords(ai_tidy(ai_safe(song, d, moved)), d)
         res = []
         for n in notes:
             n = {k: v for k, v in n.items() if k != "a"}
@@ -1255,6 +1346,7 @@ def ai_accents(song, charts):
                     n["d"] = 0.0 if n.get("d", 0) < 0.3 else n["d"]
             res.append(n)
         out[d] = res
+    out["_fit"] = {"shift": round(shift * 1000), "match": match, "off": off, "rec": off < AI_REC_OFF and match >= AI_REC_MATCH}
     return out
 
 
@@ -1272,6 +1364,7 @@ def migrate_ai_accents():
                     continue
                 ai.setdefault("gen", 1)   # 이 업데이트 전에 만든 AI 채보 = 예전 방식 (롱노트 많은 osu! 스타일)
                 ai["charts"] = ai_accents(song, ai.get("raw") or ai["charts"])   # AI 원본이 있으면 원본부터 다시 다듬음
+                ai["fit"] = ai["charts"].pop("_fit")
                 ai["fix"] = AI_FIX
                 ai.pop("acc", None)
                 save_song(song)
@@ -1284,6 +1377,68 @@ def migrate_ai_accents():
 
 
 BAND_VER = 1   # 기존 채보 별 범위 맞춤 버전 (올리면 저장된 곡도 서버 켤 때 한 번 맞춤)
+
+
+BACKUPS = Path(os.environ.get("LB_BACKUPS") or "/var/backups/linkbeat")
+RESTORE_BEFORE = "20261020"   # 별 범위 맞추기(10/20 밤)를 하기 전 백업
+RESTORE_MARK = DATA / ".basic_restored_v1"
+
+
+def restore_basic_from_backup():
+    """기존 채보를 '별 범위 맞추기' 전으로 되돌림 (서버 켤 때 한 번) — 서버가 남겨 둔 매일 백업에서 기존 채보만 꺼냄.
+    AI 채보·기록·제목·직접 고친 난이도(백업 뒤에 고친 것)는 그대로. 백업에 없는 곡(그 뒤 추가)은 PC에서 다시 만들기 대기열로."""
+    import tarfile
+    if RESTORE_MARK.exists():
+        return
+    touched = [p.stem for p in SONGS.glob("*.json") if VID_RE.match(p.stem) and (load_song(p.stem) or {}).get("bandFix")]
+    if not touched:
+        RESTORE_MARK.write_text("nothing", encoding="utf-8")
+        return
+    cands = sorted(p for p in BACKUPS.glob("linkbeat-*.tgz") if p.stem.split("-")[-1][:8] <= RESTORE_BEFORE) if BACKUPS.is_dir() else []
+    backup = {}
+    when = 0.0
+    if cands:
+        try:
+            with tarfile.open(cands[-1], "r:gz") as tf:
+                for m in tf:
+                    parts = m.name.split("/")
+                    if m.isfile() and len(parts) >= 2 and parts[-2] == "songs" and parts[-1].endswith(".json") and parts[-1][:-5] in touched:
+                        try:
+                            backup[parts[-1][:-5]] = json.loads(tf.extractfile(m).read().decode("utf-8"))
+                            when = max(when, m.mtime)
+                        except Exception:
+                            pass
+        except Exception:
+            traceback.print_exc()
+    restored = rebuilt = 0
+    for sid in touched:
+        with FILE_LOCK:
+            song = load_song(sid)
+            if not song:
+                continue
+            old = backup.get(sid)
+            if isinstance(old, dict) and not old.get("bandFix"):
+                edited = song.get("edited") or {}
+                for key, nl in (("charts", 4), ("charts6", 6)):
+                    src = old.get(key) or {}
+                    for d, notes in src.items():
+                        ek = d if nl == 4 else f"6-{d}"
+                        if edited.get(ek, 0) > when:      # 백업 뒤에 직접 고친 난이도는 그대로
+                            continue
+                        song.setdefault(key, {})[d] = notes
+                song.pop("bandFix", None)
+                save_song(song)
+                restored += 1
+                continue
+            # 백업에 없는 곡: PC 채보 엔진이 원래 방식으로 다시 만듦 (제목·고친 난이도 유지, AI 채보는 그대로)
+            song.pop("bandFix", None)
+            save_song(song)
+        if CLOUD:
+            enqueue_pc(sid, True, True, song.get("title", sid), batch=True)
+        rebuilt += 1
+    RESTORE_MARK.write_text(json.dumps({"backup": str(cands[-1]) if cands else None, "restored": restored, "rebuild": rebuilt}), encoding="utf-8")
+    log(f"기존 채보 되돌리기: 백업에서 {restored}곡 · PC에서 다시 만들기 {rebuilt}곡" + (f" ({cands[-1].name})" if cands else " (백업 없음)"))
+    notify_all({"type": "songs"})
 
 
 def migrate_basic_bands():
@@ -1349,13 +1504,15 @@ def save_ai(vid, data):
         charts = {d: n for d, n in charts.items() if n}
         if not charts:
             raise HttpError(400, "AI 채보가 비어 있어요.")
-        song["ai"] = {"charts": ai_accents(song, charts), "raw": charts, "by": str(data.get("by") or "AI")[:60], "at": time.time(), "fix": AI_FIX,
+        polished = ai_accents(song, charts)
+        fit = polished.pop("_fit")
+        song["ai"] = {"charts": polished, "raw": charts, "fit": fit, "by": str(data.get("by") or "AI")[:60], "at": time.time(), "fix": AI_FIX,
                       "gen": 2}   # 2 = 새 방식 (일반 노트 위주로 생성)
         save_song(song)
     notify_all({"type": "songs"})
     log("AI 채보 저장:", song.get("title"), {d: len(n) for d, n in charts.items()})
-    return {"ok": True, "counts": {d: len(n) for d, n in charts.items()},
-            "stars": {d: chartgen.star_rating(n, 4) for d, n in charts.items()}}
+    return {"ok": True, "counts": {d: len(n) for d, n in polished.items()},
+            "stars": {d: chartgen.star_rating(n, 4) for d, n in polished.items()}, "fit": fit}
 
 
 def finish_ai_job(job, ai):
@@ -2048,6 +2205,11 @@ async def api(method, path, headers, body):
                     song["offset"] = round(max(-30.0, min(30.0, off)), 3)
                 if "title" in data and str(data["title"]).strip():
                     song["title"] = str(data["title"]).strip()[:200]
+                if "noteShift" in data:      # 이 곡 노트 전체 타이밍 (ms, +면 늦게) — 호스트가 곡마다 미세 조정
+                    try:
+                        song["noteShift"] = int(max(-150, min(150, round(float(data["noteShift"])))))
+                    except (TypeError, ValueError):
+                        raise HttpError(400, "노트 타이밍 값이 올바르지 않아요.")
                 need_reguess = False
                 if "artist" in data:
                     a = str(data["artist"] or "").strip()[:80]
@@ -2679,11 +2841,15 @@ async def main():
     server = await asyncio.start_server(handle_conn, BIND, PORT)
     asyncio.create_task(reaper())
     def _migrate():
-        migrate_basic_bands()      # 기존 채보 먼저 (AI 채보 다듬기가 기존 채보를 기준으로 씀)
+        try:
+            restore_basic_from_backup()   # 기존 채보 먼저 원래대로 (AI 채보 박자 맞추기가 기존 채보를 기준으로 씀)
+        except Exception:
+            traceback.print_exc()
         migrate_ai_accents()
+    if CLOUD:
+        load_queue()                      # 대기열을 먼저 불러온 다음 (되돌리기가 대기열에 곡을 넣을 수 있어서)
     threading.Thread(target=_migrate, daemon=True).start()
     if CLOUD:
-        load_queue()
         print(f"링크비트 클라우드 서버 실행 중 · {BIND}:{PORT} · 데이터 {DATA}", flush=True)
         async with server:
             await server.serve_forever()

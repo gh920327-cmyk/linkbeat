@@ -456,6 +456,9 @@ dialog::backdrop { background: rgba(0, 0, 0, .65); backdrop-filter: blur(3px); }
 .ai-note { margin-top: 4px; color: #3ee6c1; font-weight: 700; }
 .ai-chip:disabled { cursor: default; }
 .ai-one { color: #3ee6c1; }
+.si-shift { display: flex; align-items: center; gap: 6px; }
+.si-shift > span { min-width: 64px; }
+.si-shift b { min-width: 52px; text-align: center; font-family: 'JetBrains Mono', monospace; }
 .ai-badge { display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 3px; font-size: 10px; font-weight: 800; line-height: 16px; vertical-align: 1px;
   background: linear-gradient(135deg, #3ee6c1, #2fa8ff); color: #031014; letter-spacing: .5px; }
 .ai-badge.old { background: #3a4458; color: #b9c3d6; }
