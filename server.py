@@ -806,7 +806,7 @@ def finish_pc_job(job, meta, res):
 
 
 ACC_WIN = 0.05   # 기존 채보의 드럼 강타 시각과 이만큼(초) 가까운 AI 노트를 강타로
-AI_FIX = 9       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
+AI_FIX = 10       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
 HOLD_GAP = 0.1   # 롱노트 끝과 같은 줄 다음 노트 사이 최소 간격
 MAX_HOLDS = 1    # 동시에 누르고 있는 롱노트 최대 개수 (롱노트는 최소한으로)
 HOLD_MIN = 0.6   # 이보다 짧은 롱노트는 일반 노트로
@@ -960,7 +960,7 @@ def limit_chords(notes, diff, nl=4):
     return [n for t in sorted(groups) for n in groups[t]]
 
 
-def fit_band(song, diff, notes, nl=4, pool=()):
+def fit_band(song, diff, notes, nl=4, pool=(), max_change=None, synth=True):
     """별점이 그 난이도의 목표 범위에 들어오게: 넘치면 박자에서 벗어난 노트·동시치기 곁가지부터 덜고,
     모자라면 pool(위 난이도 채보 등)에서 박자에 맞는 노트를 비어 있는 곳부터 더함. 그래도 모자라면 센 박에 동시치기 추가."""
     import bisect
@@ -972,9 +972,11 @@ def fit_band(song, diff, notes, nl=4, pool=()):
     notes = sorted((dict(n) for n in notes), key=lambda n: (n["t"], n["l"]))
     star = lambda ns: chartgen.star_rating(ns, nl)
     cur = star(notes)
+    n0 = len(notes)
+    budget = int(n0 * max_change) if max_change is not None else 10 ** 9   # 바꿀 수 있는 노트 수
     # 덜기
     it = 0
-    while cur > hi and len(notes) > 16 and it < 40:
+    while cur > hi and len(notes) > 16 and it < 40 and n0 - len(notes) < budget:
         it += 1
         groups = {}
         for n in notes:
@@ -1015,7 +1017,7 @@ def fit_band(song, diff, notes, nl=4, pool=()):
                 gt = round(x + (y2 - x) * k2 / sub, 3)
                 if first <= gt <= last:
                     grid_pts.append(gt)
-    while cur < lo and it < 80:
+    while cur < lo and it < 80 and len(notes) - n0 < budget:
         it += 1
         times = sorted({round(n["t"], 3) for n in notes})
         lane_times = {}
@@ -1065,7 +1067,7 @@ def fit_band(song, diff, notes, nl=4, pool=()):
             lane_times.setdefault(n["l"], []).append(n["t"])
             lane_times[n["l"]].sort()
             added += 1
-        if not added and grid_pts:             # 가져올 노트가 없으면: 박·반박(어려움 이상은 1/4박) 빈자리에 노트
+        if not added and grid_pts and synth:   # 가져올 노트가 없으면: 박·반박(어려움 이상은 1/4박) 빈자리에 노트
             gc = []
             for t in grid_pts:
                 if any(abs(x - t) < 0.003 for x in times[max(0, bisect.bisect_left(times, t) - 1):bisect.bisect_left(times, t) + 1]):
@@ -1093,7 +1095,7 @@ def fit_band(song, diff, notes, nl=4, pool=()):
                 i2 = bisect.bisect_left(times, t)
                 times.insert(i2, t)
                 added += 1
-        if not added:                      # 더 가져올 노트가 없으면: 센 박의 한 개짜리 노트에 동시치기
+        if not added and synth:            # 더 가져올 노트가 없으면: 센 박의 한 개짜리 노트에 동시치기
             groups = {}
             for n in notes:
                 groups.setdefault(round(n["t"], 3), []).append(n)
@@ -1118,7 +1120,9 @@ def fit_band(song, diff, notes, nl=4, pool=()):
 
 GAP_FILL = 1.6     # AI 채보가 이보다 오래(초) 비어 있고 기존 채보엔 노트가 있으면 기존 채보로 채움
 DENSE_X = 1.25     # 1초 구간 AI 노트 수가 기존 채보의 이 배수(+1개)를 넘으면 덜어냄
-JACK_MIN = {"easy": 0.45, "normal": 0.28, "hard": 0.17, "extreme": 0.12}   # 같은 줄 연타 최소 간격(초)
+JACK_MIN = {"easy": 0.4, "normal": 0.25, "hard": 0.14, "extreme": 0.1}
+NPS_CAP = {"easy": 4, "normal": 7, "hard": 11, "extreme": 15}   # 1초에 이보다 많으면(랩 폭주 등)만 덜어냄
+AI_MAX_CHANGE = 0.2   # 별 범위 맞추기로 AI 채보를 바꾸는 건 노트의 20%까지 (AI 채보 느낌 유지)   # 같은 줄 연타 최소 간격(초)
 
 
 def ai_balance(song, diff, notes):
@@ -1130,7 +1134,8 @@ def ai_balance(song, diff, notes):
     base = sorted(((song.get("charts") or {}).get(diff) or []), key=lambda n: n["t"])
     if not base or not notes:
         return notes
-    notes = sorted(snap_to_grid(song, notes), key=lambda n: (n["t"], n["l"]))
+    # AI(MuG)는 이미 자기 박자 칸에 맞춰 둠 → 우리 박 분석으로 다시 옮기지 않음 (옮기면 박이 어긋나고 스트림 간격이 흐트러짐)
+    notes = sorted((dict(n) for n in notes), key=lambda n: (n["t"], n["l"]))
     bpm = float(song.get("bpm") or 120)
     beat = 60.0 / max(40.0, min(300.0, bpm))
     gap_min = max(GAP_FILL, 3 * beat)
@@ -1177,8 +1182,8 @@ def ai_balance(song, diff, notes):
         gs = [t for t in groups if sec <= t < sec + 1]
         cnt = sum(len(groups[t]) for t in gs)
         # 앞뒤 1초까지 같이 봐서 기존 채보가 부드럽게 비교되게
-        nb = max(bcount[max(0, sec - 1):sec + 2]) if bcount else 0
-        allow = max(int(nb * DENSE_X) + 1, int(p90 * 1.1))
+        # 기존 채보와 비교하지 않고, 사람이 칠 수 있는 한계(초당 개수)를 넘을 때만 덜어냄 → AI 채보 느낌 유지
+        allow = NPS_CAP.get(diff, 11)
         if cnt <= allow:
             keep += gs
             continue
@@ -1235,14 +1240,8 @@ def ai_accents(song, charts):
         # 모자랄 때 가져올 노트: 위 난이도 AI 채보 → 같은·위 난이도 기존 채보
         pool = [n for u in order[i + 1:] for n in tidied[u]] + \
                [n for u in ("easy", "normal", "hard", "extreme")[("easy", "normal", "hard", "extreme").index(d):] for n in basic.get(u, [])]
-        cur = tidied[d]
-        for _ in range(4):            # 다듬기(동시치기·롱노트 정리)로 별이 다시 빠지면 한 번 더 맞춤
-            cur = ai_tidy(limit_chords(fit_band(song, d, cur, 4, pool), d))
-            st = chartgen.star_rating(cur, 4)
-            lo, hi = STAR_BANDS[d]
-            if lo <= st <= hi or (st > hi and d == "extreme"):
-                break
-        tidied[d] = cur
+        # AI 채보는 조금만 손봄: 노트의 20%까지, 음원에 있는 노트(기존 채보·위 난이도)로만 (박자 칸에 새로 만들지 않음)
+        tidied[d] = ai_tidy(limit_chords(fit_band(song, d, tidied[d], 4, pool, max_change=AI_MAX_CHANGE, synth=False), d))
     for d in order:
         notes = tidied[d]
         res = []
@@ -1272,7 +1271,7 @@ def migrate_ai_accents():
                 if not isinstance(ai, dict) or ai.get("fix", 0) >= AI_FIX or not isinstance(ai.get("charts"), dict):
                     continue
                 ai.setdefault("gen", 1)   # 이 업데이트 전에 만든 AI 채보 = 예전 방식 (롱노트 많은 osu! 스타일)
-                ai["charts"] = ai_accents(song, ai["charts"])
+                ai["charts"] = ai_accents(song, ai.get("raw") or ai["charts"])   # AI 원본이 있으면 원본부터 다시 다듬음
                 ai["fix"] = AI_FIX
                 ai.pop("acc", None)
                 save_song(song)
@@ -1350,7 +1349,7 @@ def save_ai(vid, data):
         charts = {d: n for d, n in charts.items() if n}
         if not charts:
             raise HttpError(400, "AI 채보가 비어 있어요.")
-        song["ai"] = {"charts": ai_accents(song, charts), "by": str(data.get("by") or "AI")[:60], "at": time.time(), "fix": AI_FIX,
+        song["ai"] = {"charts": ai_accents(song, charts), "raw": charts, "by": str(data.get("by") or "AI")[:60], "at": time.time(), "fix": AI_FIX,
                       "gen": 2}   # 2 = 새 방식 (일반 노트 위주로 생성)
         save_song(song)
     notify_all({"type": "songs"})
@@ -2021,6 +2020,8 @@ async def api(method, path, headers, body):
         if len(parts) == 2:
             if method == "GET":
                 song["_hl"] = song_hl(song)   # 하이라이트 모드 구간 (파일에는 저장 안 함)
+                if isinstance(song.get("ai"), dict) and "raw" in song["ai"]:
+                    song["ai"] = {k: v for k, v in song["ai"].items() if k != "raw"}   # AI 원본은 서버에만 (다시 다듬을 때 씀)
                 return song
             if method == "DELETE":
                 require_host(headers)

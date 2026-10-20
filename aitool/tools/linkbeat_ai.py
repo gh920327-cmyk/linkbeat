@@ -29,7 +29,8 @@ DEFAULT_SERVER = "https://linkbeat.43-202-116-151.sslip.io"
 DIFF_ORDER = ["easy", "normal", "hard", "extreme"]
 DIFF_KO = {"easy": "쉬움", "normal": "보통", "hard": "어려움", "extreme": "극한"}
 # AI에게 줄 osu! 별점(SR) 후보 — 넓게 만들어 두고, 링크비트 기본 채보 ★와 가장 비슷한 걸 고름
-SR_PROMPTS = [1.6, 2.4, 3.2, 4.0, 4.8, 5.6, 6.4, 7.2, 8.0]
+# osu 별점 → 링크비트 별: 1.6≈★3.7 · 2.4≈★5 · 3.2≈★8 · 4.0≈★11 (실제 39곡에서 확인) → 쓸모 있는 1.0~3.8을 촘촘하게
+SR_PROMPTS = [1.0, 1.4, 1.8, 2.2, 2.5, 2.8, 3.1, 3.4, 3.8]
 # 난이도별 목표 별점 (방장이 정한 범위의 가운데): 쉬움 1.5~2.5 · 보통 3~5 · 어려움 6~7 · 극한 8 이상
 BAND_MID = {"easy": 2.0, "normal": 4.0, "hard": 6.5, "extreme": 8.5}
 PER_PROMPT = 2
@@ -521,6 +522,27 @@ def cmd_export():
     say(f"\n만들었어요: {dst}\n이 파일을 채팅에 올려 주세요. ({dst.stat().st_size // 1024} KB)")
 
 
+def cmd_resend_all():
+    """out 폴더에 남아 있는 AI 원본 채보를 전부 서버에 다시 보냄 (서버가 새 방식으로 다시 다듬음, 그래픽카드 안 씀)"""
+    srv = get_server(need_key=True)
+    files = sorted(OUT.glob("*/upload.json")) if OUT.exists() else []
+    if not files:
+        say("다시 보낼 AI 채보가 없어요.")
+        return
+    ok = 0
+    for i, p in enumerate(files):
+        vid = p.parent.name
+        try:
+            r = upload(srv, vid, json.loads(p.read_text(encoding="utf-8")))
+            ok += 1
+            say(f"  {i + 1}/{len(files)} 보냄: {vid} {r.get('stars', '')}")
+        except SystemExit:
+            raise
+        except Exception as e:
+            say(f"  {i + 1}/{len(files)} 건너뜀: {vid} ({e})")
+    say(f"\n{ok}곡을 다시 보냈어요. 게임을 새로고침하면 반영돼요.")
+
+
 def cmd_undo(vid=None):
     srv = get_server(need_key=True)
     if vid:
@@ -543,6 +565,7 @@ def main():
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--undo", action="store_true")
     ap.add_argument("--export", action="store_true", help="확인용 zip 만들기")
+    ap.add_argument("--resend-all", action="store_true", help="out 폴더의 AI 원본을 전부 서버에 다시 보내기")
     ap.add_argument("--upload", default="", help="만들어 둔 AI 채보를 서버에 다시 보내기 (곡 ID)")
     # 링크비트 실행기(채보 엔진)용
     ap.add_argument("--gen", default="", help="곡 ID (엔진용: --audio --targets --out 와 함께)")
@@ -565,6 +588,9 @@ def main():
             return
         if a.check:
             sys.exit(0 if cmd_check() else 1)
+        if a.resend_all:
+            cmd_resend_all()
+            return
         if a.export:
             cmd_export()
             return
