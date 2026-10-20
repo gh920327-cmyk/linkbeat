@@ -67,7 +67,7 @@ if (-not (Test-Path $Py)) {
 Step 3 'AI 실행 부품(PyTorch, 약 2.5GB) 받는 중 — 인터넷 속도에 따라 5~20분'
 & $Uv pip install --python $Py 'torch==2.3.1' --index-url 'https://download.pytorch.org/whl/cu121'
 if ($LASTEXITCODE -ne 0) { Fail 'PyTorch 설치에 실패했어요. 인터넷 연결을 확인하고 다시 실행해 주세요.' }
-& $Uv pip install --python $Py 'numpy<2' 'scipy' 'librosa==0.10.2.post1' 'audioread' 'soundfile' 'einops' 'omegaconf' 'pyyaml' 'tqdm' 'scikit-learn' 'packaging' 'opt-einsum' 'pytorch_lightning==1.9.5' 'yt-dlp[default]' 'imageio-ffmpeg' 'certifi' 'deno'
+& $Uv pip install --python $Py 'numpy<2' 'scipy' 'librosa==0.10.2.post1' 'audioread' 'soundfile' 'einops' 'omegaconf' 'pyyaml' 'tqdm' 'scikit-learn' 'packaging' 'opt-einsum' 'pytorch_lightning==1.9.5' 'setuptools<70' 'yt-dlp[default]' 'imageio-ffmpeg' 'certifi' 'deno'
 if ($LASTEXITCODE -ne 0) { Fail '부품 설치에 실패했어요. 다시 실행해 주세요.' }
 
 # ffmpeg (오디오 변환) — imageio-ffmpeg 에 들어 있는 걸 bin\ffmpeg.exe 로 복사
