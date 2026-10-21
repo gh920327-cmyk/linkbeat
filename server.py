@@ -198,7 +198,7 @@ def ai_summary(song):
     ch = ai["charts"]
     fit = ai.get("fit") or {}
     return {"by": str(ai.get("by", ""))[:60], "at": ai.get("at", 0), "gen": ai.get("gen", 1),
-            "rec": fit.get("rec", True), "shift": fit.get("shift", 0), "match": fit.get("match"),
+            "rec": fit.get("rec", True) and not song.get("aiOff"), "off": bool(song.get("aiOff")), "shift": fit.get("shift", 0), "match": fit.get("match"),
             "counts": {d: len(n) for d, n in ch.items()},
             "stars": {d: chartgen.star_rating(n, 4) for d, n in ch.items()}}
 
@@ -2211,6 +2211,8 @@ async def api(method, path, headers, body):
                 if isinstance(song.get("ai"), dict) and "raw" in song["ai"]:
                     song["ai"] = {k: v for k, v in song["ai"].items() if k != "raw"}   # AI 원본은 서버에만 (다시 다듬을 때 씀)
                 song.pop("onsets", None)      # 소리 위치도 서버에서만 씀
+                if song.get("aiOff") and isinstance(song.get("ai"), dict):   # 호스트가 '모두 기존 채보로' 정한 곡
+                    song["ai"] = dict(song["ai"], fit=dict(song["ai"].get("fit") or {}, rec=False))
                 return song
             if method == "DELETE":
                 require_host(headers)
@@ -2237,6 +2239,11 @@ async def api(method, path, headers, body):
                     song["offset"] = round(max(-30.0, min(30.0, off)), 3)
                 if "title" in data and str(data["title"]).strip():
                     song["title"] = str(data["title"]).strip()[:200]
+                if "aiOff" in data:          # 이 곡은 모두 기존 채보가 기본 (AI가 안 맞는 곡) — 칩으로 각자 켤 수는 있음
+                    if data["aiOff"]:
+                        song["aiOff"] = True
+                    else:
+                        song.pop("aiOff", None)
                 if "noteShift" in data:      # 이 곡 노트 전체 타이밍 (ms, +면 늦게) — 호스트가 곡마다 미세 조정
                     try:
                         song["noteShift"] = int(max(-150, min(150, round(float(data["noteShift"])))))

@@ -1571,6 +1571,8 @@ $('#btnSongInfo').addEventListener('click', () => {
   $('#siArtist').value = s.artist || '';   // 통일된 이름 (저장하면 같은 가수 곡 전부 이 이름으로)
   $('#siArtist').placeholder = s.channel || '가수 이름';
   siShift = +s.noteShift || 0;
+  $('#siAiOff').checked = !!(s.ai && s.ai.off);
+  $('.si-aioff').classList.toggle('hidden', !s.ai);
   $('#siShift').textContent = `${siShift > 0 ? '+' : ''}${siShift}ms`;
   $('#siInfo').textContent = `업로드 채널: ${s.channel || '-'} · 가수 정보: ${ARTIST_SRC[s.artistSrc || ''] || '-'}${s.artistRaw && s.artistRaw !== s.artist ? ` · 원래 표기: ${s.artistRaw}` : ''} · 여기서 고친 가수 이름은 같은 가수의 다른 곡에도 똑같이 적용돼요.`;
   $('#songInfoDlg').showModal();
@@ -1597,7 +1599,8 @@ async function saveSongInfo(body) {
 $('#siSave').addEventListener('click', () => {
   const title = $('#siTitle').value.trim();
   if (!title) { toast('제목을 입력해 주세요.'); return; }
-  saveSongInfo({ title, artist: $('#siArtist').value.trim(), noteShift: siShift });
+  const s0 = songById(selId);
+  saveSongInfo({ title, artist: $('#siArtist').value.trim(), noteShift: siShift, ...(s0 && s0.ai ? { aiOff: $('#siAiOff').checked } : {}) });
 });
 $('#siAuto').addEventListener('click', () => saveSongInfo({ title: $('#siTitle').value.trim() || undefined, artist: '' }));
 $('#siArtist').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) $('#siSave').click(); });

@@ -456,6 +456,8 @@ dialog::backdrop { background: rgba(0, 0, 0, .65); backdrop-filter: blur(3px); }
 .ai-note { margin-top: 4px; color: #3ee6c1; font-weight: 700; }
 .ai-chip:disabled { cursor: default; }
 .ai-one { color: #3ee6c1; }
+.si-aioff { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.si-aioff.hidden { display: none; }
 .si-shift { display: flex; align-items: center; gap: 6px; }
 .si-shift > span { min-width: 64px; }
 .si-shift b { min-width: 52px; text-align: center; font-family: 'JetBrains Mono', monospace; }
