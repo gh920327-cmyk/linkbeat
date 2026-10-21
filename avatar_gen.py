@@ -175,7 +175,8 @@ def desc_to_tags(desc, comfy_root):
             proc.terminate()
 
 
-def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0, base=None, denoise=1.0, ref_end=1.0):
+def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0, base=None, denoise=1.0, ref_end=1.0,
+             face=None, face_w=0.0, face_end=0.6):
     wf = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": CKPT}},
         "2": {"class_type": "CLIPTextEncode", "inputs": {"text": pos, "clip": ["1", 1]}},
@@ -196,6 +197,16 @@ def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0, base=None, denoi
                                                                  "combine_embeds": "concat", "start_at": 0.0, "end_at": ref_end,
                                                                  "embeds_scaling": "V only"}}
         wf["5"]["inputs"]["model"] = ["11", 0]
+    if face and face_w > 0:     # 얼굴 고정: 일러스트 얼굴을 IP-Adapter 얼굴 전용(SDXL)으로 — 약하게·앞부분만 (꼬마 비율·표정은 주문대로)
+        if "10" not in wf:
+            wf["10"] = {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": CLIPV_FILE}}
+        wf["14"] = {"class_type": "LoadImage", "inputs": {"image": face}}
+        wf["15"] = {"class_type": "IPAdapterModelLoader", "inputs": {"ipadapter_file": IPA_FACE_FILE}}
+        wf["16"] = {"class_type": "IPAdapterAdvanced", "inputs": {"model": wf["5"]["inputs"]["model"], "ipadapter": ["15", 0],
+                                                                 "image": ["14", 0], "clip_vision": ["10", 0], "weight": face_w,
+                                                                 "weight_type": "linear", "combine_embeds": "concat",
+                                                                 "start_at": 0.0, "end_at": face_end, "embeds_scaling": "V only"}}
+        wf["5"]["inputs"]["model"] = ["16", 0]
     if base:                    # 동작 그림: 기본 자세 그림에서 출발 (같은 구도·같은 색)
         wf["12"] = {"class_type": "LoadImage", "inputs": {"image": base}}
         wf["13"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["12", 0], "vae": ["1", 2]}}
@@ -206,6 +217,8 @@ def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0, base=None, denoi
 
 
 IPA_FILE = "ip-adapter-plus_sdxl_vit-h.safetensors"
+IPA_FACE_FILE = "ip-adapter-plus-face_sdxl_vit-h.safetensors"   # 얼굴 전용 (애니 얼굴에도 잘 맞음)
+FACE_W = 0.4
 CLIPV_FILE = "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
 REF_WEIGHT = {"low": (0.45, 0.2), "mid": (0.65, 0.3), "high": (0.85, 0.4)}   # (일러스트, 꼬마 도트 — 사진 바탕색이 묻어나지 않게 약하게)
 
@@ -749,10 +762,15 @@ def main():
             crop = out / "illust_crop.png"
             im0.crop((int(W0 * 0.14), int(H0 * 0.04), int(W0 * 0.86), int(H0 * 0.74))).save(crop)
             ch_ref, ch_w8, ch_end = comfy.upload(crop, "linkbeat_ref_illust"), 0.5, 0.55
+            fcrop = out / "illust_face.png"      # 얼굴 부분만 (얼굴 고정용 — 기본 자세에만, 동작 그림은 기본 자세에서 이어짐)
+            im0.crop((int(W0 * 0.22), int(H0 * 0.06), int(W0 * 0.78), int(H0 * 0.52))).save(fcrop)
+            face_name = comfy.upload(fcrop, "linkbeat_ref_face")
         else:
             ch_ref, ch_w8 = ref_name, rw[1]
-        say("도트용 꼬마 캐릭터 그리는 중..." + (" (일러스트를 따라)" if il_file else ""))
-        ch = comfy.run(workflow(ch_p, ch_n, ch_w, ch_h, seed + 1, "linkbeat_avatar/chibi", ch_ref, ch_w8, ref_end=ch_end), "꼬마 캐릭터")
+            face_name = None
+        say("도트용 꼬마 캐릭터 그리는 중..." + (" (일러스트 얼굴을 따라)" if il_file else ""))
+        ch = comfy.run(workflow(ch_p, ch_n, ch_w, ch_h, seed + 1, "linkbeat_avatar/chibi", ch_ref, ch_w8, ref_end=ch_end,
+                                face=face_name, face_w=FACE_W), "꼬마 캐릭터")
         base_file = out / "chibi_base.png"
         base_file.write_bytes(ch)
         base_name = comfy.upload(base_file, "linkbeat_ref_base")
