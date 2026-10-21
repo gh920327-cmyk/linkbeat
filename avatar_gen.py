@@ -80,7 +80,7 @@ def prompts(a, desc="", use_look=True):
     key = key_color(who)
     chibi = (f"{g}, solo, chibi, super deformed, 2 heads tall, big head, large detailed eyes, clear facial features, expressive face, "
              f"cute, {who}, full body, standing, front view, arms at sides, "
-             f"game sprite, simple background, ({key} background:1.3), solid color background, flat background, thick outline, "
+             f"game sprite, simple background, ({key} background:1.45), solid color background, flat background, thick outline, "
              f"flat color, cel shading, safe, {QUALITY}")
     chibi_neg = NEG + (", shadow, drop shadow, ground, floor, white background, gradient background, detailed background, scenery, "
                        "border, frame, multiple views, character sheet, reference sheet, close-up, portrait, cropped feet, text")
@@ -175,7 +175,7 @@ def desc_to_tags(desc, comfy_root):
             proc.terminate()
 
 
-def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0, base=None, denoise=1.0):
+def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0, base=None, denoise=1.0, ref_end=1.0):
     wf = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": CKPT}},
         "2": {"class_type": "CLIPTextEncode", "inputs": {"text": pos, "clip": ["1", 1]}},
@@ -193,7 +193,7 @@ def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0, base=None, denoi
         wf["10"] = {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": CLIPV_FILE}}
         wf["11"] = {"class_type": "IPAdapterAdvanced", "inputs": {"model": ["1", 0], "ipadapter": ["9", 0], "image": ["8", 0],
                                                                  "clip_vision": ["10", 0], "weight": ref_w, "weight_type": "linear",
-                                                                 "combine_embeds": "concat", "start_at": 0.0, "end_at": 1.0,
+                                                                 "combine_embeds": "concat", "start_at": 0.0, "end_at": ref_end,
                                                                  "embeds_scaling": "V only"}}
         wf["5"]["inputs"]["model"] = ["11", 0]
     if base:                    # 동작 그림: 기본 자세 그림에서 출발 (같은 구도·같은 색)
@@ -442,7 +442,7 @@ def shrink_keep_lines(img, size):
     arr = np.asarray(img).astype(np.float32)
     lum = arr[:, :, 0] * 0.299 + arr[:, :, 1] * 0.587 + arr[:, :, 2] * 0.114
     edge = np.asarray(Image.fromarray(lum.astype("uint8")).filter(ImageFilter.FIND_EDGES)).astype(np.float32)
-    line = ((lum < 95) | ((edge > 55) & (lum < 170))).astype(np.float32)
+    line = ((lum < 80) | ((edge > 90) & (lum < 130))).astype(np.float32)   # 아주 진한 곳·확실한 경계만 (머리카락 잔결은 빼고)
     avg = np.asarray(img.resize(size, Image.BOX)).astype(np.float32)
     cov = np.asarray(Image.fromarray((line * 255).astype("uint8")).resize(size, Image.BOX)).astype(np.float32) / 255
     # 선 부분의 색: 선 픽셀 중 가장 어두운 쪽 평균 → 더 진하게
@@ -451,7 +451,11 @@ def shrink_keep_lines(img, size):
                      for c in range(3)], axis=2)
     dcol = dsum / np.maximum(cov[:, :, None], 1e-3)
     dcol = dcol * 0.72 + np.array([20, 14, 36], dtype=np.float32) * 0.28 * (cov[:, :, None] > 0)   # 외곽선 색 쪽으로
-    use = cov >= 0.13
+    use = cov >= 0.18
+    # 혼자 튀는 선 점은 지움 (주변 8칸에 선이 하나도 없으면 평균색으로)
+    pad = np.pad(use, 1)
+    nb = sum(pad[1 + dy:pad.shape[0] - 1 + dy, 1 + dx:pad.shape[1] - 1 + dx] for dy in (-1, 0, 1) for dx in (-1, 0, 1) if dy or dx)
+    use = use & (nb >= 1)
     out = np.where(use[:, :, None], dcol, avg)
     return Image.fromarray(np.clip(out, 0, 255).astype("uint8"))
 
@@ -581,12 +585,18 @@ def main():
         elif spec.get("illust") and Path(spec["illust"]).is_file():
             il_file = Path(spec["illust"])          # 도트만 다시: 지금 일러스트를 참고 그림으로
         # 꼬마 도트는 일러스트를 보고 그림 (머리·옷·색이 일러스트를 따라감). 일러스트가 없으면 참고 사진을 약하게
-        if il_file:
-            ch_ref, ch_w8 = comfy.upload(il_file, "linkbeat_ref_illust"), 0.7
+        ch_end = 1.0
+        if il_file:     # 일러스트의 캐릭터 부분만 잘라서, 그림 앞부분에만 약하게 (바탕·분위기까지 따라가지 않게)
+            from PIL import Image
+            im0 = Image.open(il_file).convert("RGB")
+            W0, H0 = im0.size
+            crop = out / "illust_crop.png"
+            im0.crop((int(W0 * 0.14), int(H0 * 0.04), int(W0 * 0.86), int(H0 * 0.74))).save(crop)
+            ch_ref, ch_w8, ch_end = comfy.upload(crop, "linkbeat_ref_illust"), 0.5, 0.55
         else:
             ch_ref, ch_w8 = ref_name, rw[1]
         say("도트용 꼬마 캐릭터 그리는 중..." + (" (일러스트를 따라)" if il_file else ""))
-        ch = comfy.run(workflow(ch_p, ch_n, ch_w, ch_h, seed + 1, "linkbeat_avatar/chibi", ch_ref, ch_w8), "꼬마 캐릭터")
+        ch = comfy.run(workflow(ch_p, ch_n, ch_w, ch_h, seed + 1, "linkbeat_avatar/chibi", ch_ref, ch_w8, ref_end=ch_end), "꼬마 캐릭터")
         base_file = out / "chibi_base.png"
         base_file.write_bytes(ch)
         base_name = comfy.upload(base_file, "linkbeat_ref_base")
