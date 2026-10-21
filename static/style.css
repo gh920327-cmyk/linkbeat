@@ -837,19 +837,19 @@ html[data-theme] .list-tabs .side-tg.on { background: color-mix(in srgb, var(--g
 html[data-theme] .panel, html[data-theme] .add-box { background: var(--panel); border-color: var(--line); }
 html[data-theme] dialog { background: var(--dlg); }
 html[data-theme] .r-counts div { background: var(--slot); }
-html[data-theme] .chip { background: var(--field); }
+html[data-theme] .chip:not(.on) { background: var(--field); }
 html[data-theme] .list-head h2 span { color: var(--blue); }
 html[data-theme] .empty { border-color: var(--line2); }
 
 /* 선샤인: 따뜻한 겨자·올리브 바탕, 밝은 카드, 주황 강조 */
 html[data-theme="sunshine"] {
-  --bg: #6e5a20; --bg-art: radial-gradient(900px 600px at 15% 0%, rgba(255, 224, 120, .45), transparent 60%), linear-gradient(160deg, #c8a646 0%, #9a7f2c 50%, #6a5520 100%);
+  --bg: #6e5a20; --bg-art: radial-gradient(900px 600px at 15% 0%, rgba(255, 224, 120, .25), transparent 60%), linear-gradient(160deg, #b39a55 0%, #8c7535 50%, #625024 100%);
   --panel: rgba(96, 79, 30, .92); --panel2: #6f5c25; --line: rgba(255, 232, 170, .22); --line2: rgba(255, 236, 180, .5);
   --text: #fffaf0; --muted: #ecdfb6; --blue: #f07a2a; --cyan: #ffab3d; --gold: #ffd54a; --on-accent: #fff;
   --surf: rgba(104, 86, 33, .92); --surf-h: #7c6830; --field: rgba(70, 57, 21, .9); --slot: rgba(0, 0, 0, .16);
   --sel-bg: linear-gradient(90deg, #ef7f33, #f59a45); --sel-ink: #fff; --sel-glow: rgba(240, 122, 42, .45);
   --top-bg: rgba(66, 53, 19, .72); --tabs-bg: rgba(66, 53, 19, .75); --tab-on: #8f9298; --dlg: #5e4d1d;
-  --card-bg: #f4efe3; --card-ink: #2c2414; --card-muted: #7d7157; --card-surf: #e9e2d2; --card-line: #d7ccb3;
+  --card-bg: #efe9dc; --card-ink: #2c2414; --card-muted: #7d7157; --card-surf: #e5ddcc; --card-line: #d3c7ad;
 }
 /* 민트: 밝은 하늘·민트 */
 html[data-theme="mint"] {
@@ -930,3 +930,68 @@ html[data-theme] #screen-game, html[data-theme] #screen-calib { background: #040
 .mc-tag span { font-size: 11px; color: var(--muted); }
 .mc-hint { position: absolute; left: 10px; right: 10px; bottom: 8px; font-size: 11px; color: var(--muted); text-align: center; pointer-events: none; }
 @media (max-width: 820px) { .my-char { min-height: 200px; flex: none; } }
+
+/* 칩(미러·랜덤·하이라이트·AI 채보·고스트): 켜짐은 꽉 찬 색 + ✓, 꺼짐은 테두리만 — 모든 테마 같은 규칙 */
+.chip:not(.on) { background: transparent; border: 1px solid var(--line2); color: var(--muted); box-shadow: none; opacity: .85; }
+.chip.on { border: 1px solid transparent; font-weight: 900; }
+.chip.on::before { content: '✓'; margin-right: 5px; font-family: 'Noto Sans KR', sans-serif; font-weight: 900; }
+html[data-theme] .chip.on { box-shadow: 0 2px 8px rgba(0, 0, 0, .18); }
+
+/* 눈이 편한 테마: 채도를 낮추고 밝기 차이도 적당히 */
+/* 세이지: 차분한 쑥색 (어두운 편) */
+html[data-theme="sage"] {
+  --bg: #1f2620; --bg-art: radial-gradient(900px 600px at 0% 0%, rgba(150, 175, 130, .16), transparent 60%), linear-gradient(160deg, #283128 0%, #1c221d 100%);
+  --panel: rgba(44, 54, 45, .92); --panel2: #313c32; --line: rgba(190, 210, 175, .16); --line2: rgba(200, 220, 185, .34);
+  --text: #e3e8dc; --muted: #a3ae99; --blue: #8fae7a; --cyan: #b7c98f; --gold: #d9c27a; --red: #d98a7a; --green: #9cc98a; --purple: #b3a6cf; --on-accent: #1c221d;
+  --surf: rgba(48, 59, 49, .95); --surf-h: #3a473b; --field: #283128; --slot: rgba(0, 0, 0, .18);
+  --sel-bg: linear-gradient(90deg, #6f8f5e, #87a46f); --sel-ink: #f4f7ef; --sel-glow: rgba(111, 143, 94, .3);
+  --top-bg: rgba(28, 34, 29, .8); --tabs-bg: rgba(28, 34, 29, .7); --tab-on: #7f9c6c; --dlg: #263027;
+  --card-bg: #2c362d; --card-ink: #e3e8dc; --card-muted: #a3ae99; --card-surf: #343f35; --card-line: #44513f;
+}
+/* 슬레이트: 회색빛 남색 (어두운 편, 밤에) */
+html[data-theme="slate"] {
+  --bg: #1b2029; --bg-art: radial-gradient(900px 600px at 0% 0%, rgba(120, 140, 180, .14), transparent 60%), linear-gradient(160deg, #232a36 0%, #181c24 100%);
+  --panel: rgba(38, 45, 58, .92); --panel2: #2b3342; --line: rgba(170, 185, 215, .15); --line2: rgba(180, 195, 225, .32);
+  --text: #dde3ee; --muted: #98a3b8; --blue: #7d96c4; --cyan: #93b4cf; --gold: #d6bf86; --red: #d48a92; --green: #8fc2a6; --purple: #ad9fd4; --on-accent: #161a22;
+  --surf: rgba(41, 49, 63, .95); --surf-h: #333c4d; --field: #222935; --slot: rgba(0, 0, 0, .2);
+  --sel-bg: linear-gradient(90deg, #56709e, #6a86b3); --sel-ink: #f1f4fa; --sel-glow: rgba(86, 112, 158, .3);
+  --top-bg: rgba(24, 28, 36, .82); --tabs-bg: rgba(24, 28, 36, .7); --tab-on: #6a83b0; --dlg: #232a36;
+  --card-bg: #262d3a; --card-ink: #dde3ee; --card-muted: #98a3b8; --card-surf: #2e3644; --card-line: #3c4658;
+}
+/* 라떼: 따뜻한 크림·갈색 (밝은 편, 종이 같은) */
+html[data-theme="latte"] {
+  --bg: #ece3d6; --bg-art: radial-gradient(900px 600px at 0% 0%, rgba(214, 190, 160, .4), transparent 60%), linear-gradient(160deg, #efe6da 0%, #e2d6c5 100%);
+  --panel: rgba(246, 240, 231, .94); --panel2: #f3ece2; --line: rgba(120, 90, 60, .16); --line2: rgba(120, 90, 60, .32);
+  --text: #4a3c2f; --muted: #8a7965; --blue: #a9805a; --cyan: #c29a6b; --gold: #b8892f; --red: #b8574c; --green: #6f9460; --purple: #8a6fa8; --on-accent: #fffaf2;
+  --surf: #f5efe6; --surf-h: #ede4d8; --field: #f7f2ea; --slot: #ebe2d5;
+  --sel-bg: linear-gradient(90deg, #a9805a, #bd946a); --sel-ink: #fffaf2; --sel-glow: rgba(169, 128, 90, .25);
+  --top-bg: rgba(242, 235, 225, .85); --tabs-bg: #e6dccd; --tab-on: #a9805a; --dlg: #f4eee5;
+  --card-bg: #f6f0e7; --card-ink: #4a3c2f; --card-muted: #8a7965; --card-surf: #eee6da; --card-line: #ddd0bd;
+}
+/* 라벤더: 연보라 회색 (밝은 편) */
+html[data-theme="lavender"] {
+  --bg: #e7e5ee; --bg-art: radial-gradient(900px 600px at 100% 0%, rgba(185, 170, 215, .35), transparent 60%), linear-gradient(160deg, #ebe9f1 0%, #dcd8e6 100%);
+  --panel: rgba(244, 243, 248, .94); --panel2: #f1eff6; --line: rgba(90, 75, 130, .15); --line2: rgba(90, 75, 130, .3);
+  --text: #3d3850; --muted: #7d7792; --blue: #8b7ab8; --cyan: #9d93c4; --gold: #b38a3a; --red: #b9586a; --green: #5f9478; --purple: #8a6fc0; --on-accent: #fbfaff;
+  --surf: #f3f2f8; --surf-h: #e9e6f1; --field: #f6f5fa; --slot: #e6e3ee;
+  --sel-bg: linear-gradient(90deg, #8b7ab8, #a194c8); --sel-ink: #fbfaff; --sel-glow: rgba(139, 122, 184, .25);
+  --top-bg: rgba(240, 238, 246, .85); --tabs-bg: #e1ddea; --tab-on: #8b7ab8; --dlg: #f2f0f7;
+  --card-bg: #f4f3f8; --card-ink: #3d3850; --card-muted: #7d7792; --card-surf: #ebe8f2; --card-line: #d8d3e4;
+}
+/* 밝은 테마(라떼·라벤더)는 별·등급 색을 진하게, 어두운 차분한 테마(세이지·슬레이트)는 부드럽게 */
+html[data-theme="latte"], html[data-theme="lavender"] { --s1: #3f8f5a; --s2: #3d7fa8; --s3: #a87a12; --s4: #b9622e; --s5: #b03a6a; --s6: #7353b0; }
+html[data-theme="sage"], html[data-theme="slate"] { --s1: #9ccf96; --s2: #8fbad6; --s3: #dcc37f; --s4: #e0a074; --s5: #dc8fae; --s6: #b9a6e0; }
+html[data-theme="latte"] .s1, html[data-theme="lavender"] .s1, html[data-theme="sage"] .s1, html[data-theme="slate"] .s1 { --sc: var(--s1); }
+html[data-theme="latte"] .s2, html[data-theme="lavender"] .s2, html[data-theme="sage"] .s2, html[data-theme="slate"] .s2 { --sc: var(--s2); }
+html[data-theme="latte"] .s3, html[data-theme="lavender"] .s3, html[data-theme="sage"] .s3, html[data-theme="slate"] .s3 { --sc: var(--s3); }
+html[data-theme="latte"] .s4, html[data-theme="lavender"] .s4, html[data-theme="sage"] .s4, html[data-theme="slate"] .s4 { --sc: var(--s4); }
+html[data-theme="latte"] .s5, html[data-theme="lavender"] .s5, html[data-theme="sage"] .s5, html[data-theme="slate"] .s5 { --sc: var(--s5); }
+html[data-theme="latte"] .s6, html[data-theme="lavender"] .s6, html[data-theme="sage"] .s6, html[data-theme="slate"] .s6 { --sc: var(--s6); }
+html[data-theme="latte"] .rank-SS, html[data-theme="latte"] .rank-S, html[data-theme="lavender"] .rank-SS, html[data-theme="lavender"] .rank-S { color: #a87a12; }
+html[data-theme="sage"] .detail-col, html[data-theme="slate"] .detail-col { --s1: #9ccf96; --s2: #8fbad6; --s3: #dcc37f; --s4: #e0a074; --s5: #dc8fae; --s6: #b9a6e0; }
+html[data-theme="sage"] .detail-col .rank-SS, html[data-theme="sage"] .detail-col .rank-S, html[data-theme="slate"] .detail-col .rank-SS, html[data-theme="slate"] .detail-col .rank-S { color: var(--gold); }
+/* 차분한 테마에서는 칩 켜짐도 테마 색으로 (형광 대신) */
+html[data-theme="sage"] .chip.on, html[data-theme="slate"] .chip.on, html[data-theme="latte"] .chip.on, html[data-theme="lavender"] .chip.on,
+html[data-theme="sage"] .chip.on:hover:not(:disabled), html[data-theme="slate"] .chip.on:hover:not(:disabled),
+html[data-theme="latte"] .chip.on:hover:not(:disabled), html[data-theme="lavender"] .chip.on:hover:not(:disabled) { background: linear-gradient(135deg, var(--blue), var(--cyan)); color: var(--on-accent); box-shadow: none; }
+html[data-theme="sage"] .row-thumb, html[data-theme="slate"] .row-thumb { filter: saturate(.85); }

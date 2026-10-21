@@ -3023,6 +3023,8 @@ def handle_msg(c, m):
             room.diff = m["diff"]
         if m.get("keys") in (4, 6):
             room.keys = m["keys"]
+        if "ai" in m:                      # 방장이 그 곡에서 고른 AI 채보 사용 여부 (곡마다)
+            room.ai = bool(m.get("ai"))
         room.push()
         return
     if t == "aimode" and room.leader == c.id and room.phase == "lobby":

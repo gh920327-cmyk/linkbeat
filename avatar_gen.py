@@ -387,7 +387,7 @@ def _despill(arr, key, edge):
     hsv = np.asarray(Image.fromarray(arr).convert("HSV")).astype(np.float32)
     hue = hsv[:, :, 0] * 360 / 255
     dh = np.abs((hue - KEY_HUE[key] + 180) % 360 - 180)
-    spill = edge & (dh < 40) & (hsv[:, :, 1] > 50)
+    spill = edge & (dh < 45) & (hsv[:, :, 1] > 35)
     if spill.any():
         g = arr.astype(np.float32).mean(axis=2, keepdims=True)
         arr = np.where(spill[:, :, None], (arr * 0.35 + g * 0.65), arr).astype("uint8")
@@ -433,20 +433,25 @@ def _fg_mask(im, S=256):
 
 
 def shrink_keep_lines(img, size):
-    """작게 줄이기: 보통은 평균색, 눈동자·입·외곽선 같은 진한 선이 칸의 1/4 이상이면 그 진한 색 그대로
-    (평균으로 줄이면 얼굴의 작은 선이 흐려져서 표정이 안 보임) — 줄이기 전에 살짝 선명하게"""
+    """작게 줄이기: 보통은 평균색, 선(진한 곳·색이 확 바뀌는 경계)이 칸의 1/5 이상이면 그 선 색을 더 진하게
+    (평균으로 줄이면 눈 테두리·입·얼굴 경계가 흐려져서 표정이 안 보임) — 줄이기 전에 대비를 살짝 올리고 선명하게"""
     import numpy as np
-    from PIL import Image, ImageFilter
+    from PIL import Image, ImageEnhance, ImageFilter
+    img = ImageEnhance.Contrast(img).enhance(1.12)
     img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=110, threshold=2))
     arr = np.asarray(img).astype(np.float32)
     lum = arr[:, :, 0] * 0.299 + arr[:, :, 1] * 0.587 + arr[:, :, 2] * 0.114
-    dark = (lum < 80).astype(np.float32)
+    edge = np.asarray(Image.fromarray(lum.astype("uint8")).filter(ImageFilter.FIND_EDGES)).astype(np.float32)
+    line = ((lum < 95) | ((edge > 55) & (lum < 170))).astype(np.float32)
     avg = np.asarray(img.resize(size, Image.BOX)).astype(np.float32)
-    cov = np.asarray(Image.fromarray((dark * 255).astype("uint8")).resize(size, Image.BOX)).astype(np.float32) / 255
-    dsum = np.stack([np.asarray(Image.fromarray((arr[:, :, c] * dark).astype("uint8")).resize(size, Image.BOX)).astype(np.float32)
+    cov = np.asarray(Image.fromarray((line * 255).astype("uint8")).resize(size, Image.BOX)).astype(np.float32) / 255
+    # 선 부분의 색: 선 픽셀 중 가장 어두운 쪽 평균 → 더 진하게
+    dark_arr = arr * line[:, :, None]
+    dsum = np.stack([np.asarray(Image.fromarray(dark_arr[:, :, c].astype("uint8")).resize(size, Image.BOX)).astype(np.float32)
                      for c in range(3)], axis=2)
     dcol = dsum / np.maximum(cov[:, :, None], 1e-3)
-    use = cov >= 0.25
+    dcol = dcol * 0.72 + np.array([20, 14, 36], dtype=np.float32) * 0.28 * (cov[:, :, None] > 0)   # 외곽선 색 쪽으로
+    use = cov >= 0.13
     out = np.where(use[:, :, None], dcol, avg)
     return Image.fromarray(np.clip(out, 0, 255).astype("uint8"))
 
@@ -489,7 +494,7 @@ def pixel_sheet(pngs, height=96, colors=32, key=None):
         ca = np.asarray(crop).copy()
         cm = np.asarray(mask) > 0
         if key in KEY_HUE:
-            near_edge = cm & ~np.asarray(Image.fromarray((cm * 255).astype("uint8")).filter(__import__("PIL.ImageFilter", fromlist=["x"]).MinFilter(9))).astype(bool)
+            near_edge = cm & ~np.asarray(Image.fromarray((cm * 255).astype("uint8")).filter(__import__("PIL.ImageFilter", fromlist=["x"]).MinFilter(17))).astype(bool)
             ca = _despill(ca, key, near_edge)
         if cm.any():
             ca[~cm] = ca[cm].mean(axis=0).astype("uint8")   # 줄일 때 흰 바탕이 가장자리에 번지지 않게
@@ -514,7 +519,7 @@ def pixel_sheet(pngs, height=96, colors=32, key=None):
         edge[:, 1:] |= a[:, :-1]
         edge[:, :-1] |= a[:, 1:]
         edge &= ~a
-        out[edge] = (27, 20, 48, 255)               # 외곽선 (기존 도트 캐릭터와 같은 색)
+        out[edge] = (18, 12, 32, 255)               # 바깥 외곽선 (진한 남색)
         frames.append(Image.fromarray(out, "RGBA"))
     base = frames[0]
     hit = frames[1] if len(frames) > 1 else base

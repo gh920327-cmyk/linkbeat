@@ -38,9 +38,18 @@ function aiRec(s) {
   return ai.rec !== false;                       // 곡 목록 요약
 }
 let sideOpen = '';   // 곡 선택 화면 오른쪽 칸: '' | multi | req | help
+/* 호스트가 '이 곡은 모두 기존 채보로' 정한 곡 (목록 요약은 ai.off, 곡 전체 정보는 aiOff) */
+const aiHostOff = (s) => !!(s && (s.aiOff || (s.ai && s.ai.off)));
+/* 혼자 할 때 이 곡을 AI 채보로 할지: 곡마다 고른 칩 → 없으면 기본(설정 + 자동 검사) */
+function soloPick(s) {
+  if (!s) return false;
+  const o = (settings.aiPick || {})[s.id];
+  if (typeof o === 'boolean') return o;
+  return settings.aiChart !== false && aiRec(s);
+}
 function songPick(s) {
   if (!s) return false;
-  if (net.room) return net.room.ai !== false && aiRec(s);
+  if (net.room) return net.room.ai !== false && !!s.ai && !aiHostOff(s);   // 방: 방장이 고른 대로 (방장의 곡별 칩)
   const o = (settings.aiPick || {})[s.id];
   if (typeof o === 'boolean') return o;
   return settings.aiChart !== false && aiRec(s);
@@ -213,8 +222,13 @@ $('#modRandom').addEventListener('click', () => { settings.random = !settings.ra
 $('#modGhost').addEventListener('click', () => { settings.ghost = settings.ghost === false; saveSettings(); renderMods(); });
 $('#modAi').addEventListener('click', () => {
   if (net.room) {
-    if (net.isLeader()) net.send({ type: 'aimode', on: net.room.ai === false });
-    else toast('AI 채보 사용은 방장이 정해요.');
+    if (net.isLeader()) {
+      const on = net.room.ai === false;
+      const rs = songById(net.room.songId);
+      if (rs) settings.aiPick = Object.assign({}, settings.aiPick || {}, { [rs.id]: on });   // 방장의 곡별 선택으로도 기억
+      saveSettings();
+      net.send({ type: 'aimode', on });
+    } else toast('AI 채보 사용은 방장이 곡마다 정해요.');
     return;
   }
   const s = songById(selId);
@@ -331,7 +345,7 @@ function playSelected() {
   const s = songById(selId);
   if (!s) return;
   if (net.room) {
-    if (net.isLeader()) net.send({ type: 'select', songId: s.id, diff: settings.diff, keys: settings.mode });
+    if (net.isLeader()) net.send({ type: 'select', songId: s.id, diff: settings.diff, keys: settings.mode, ai: soloPick(s) });   // 방장의 곡별 AI 채보 선택
     else toast('방장만 곡을 고를 수 있어요.');
     return;
   }
@@ -1057,7 +1071,7 @@ function renderRoom() {
     paintMinis($('#roomPlayers'));
     $('#roomSong').textContent = r.songId ? r.songTitle : '방장이 곡을 고르는 중...';
     $('#roomDiff').innerHTML = (r.songId ? `난이도·키는 각자 골라요 · 내 선택 <span class="tag">${settings.mode}KEY</span> ${DIFF_EN[settings.diff]} ${s ? starHtml(starOf(s, settings.mode, settings.diff)) : ''}` : '')
-      + (r.ai === false ? '<div class="ai-note">기존 채보로 플레이 (방장이 AI 채보를 껐어요)</div>' : '')
+      + (r.ai === false ? '<div class="ai-note">기존 채보로 플레이 (방장이 이 곡은 기존 채보로 골랐어요)</div>' : '')
       + (r.hl ? `<div class="hl-note">★ 하이라이트 모드 — 후렴만 플레이${s && s.hl ? ` (${fmtTime(s.hl.from)}~${fmtTime(s.hl.end)})` : ''}</div>` : '');
     // 방장이 곡을 바꾸면 내 목록에서도 그 곡을 골라 별점을 바로 보여줌
     if (r.songId && r.songId !== lastRoomSong && !net.isLeader() && songById(r.songId) && currentScreen === 'lobby') {
@@ -1145,7 +1159,7 @@ net.on('prepare', async (m) => {
   }
   if (token !== prepareSeq || !net.room) return;   // 그사이 새 판이 시작됐거나 방을 나갔으면 버림
   if (game) game.destroy();
-  const mAi = m.ai !== false && aiRec(song) ? aiChartOf(song, m.diff, m.keys || 4) : null;   // 방: 방장 설정 + AI가 잘 맞는 곡만
+  const mAi = m.ai !== false && !aiHostOff(song) ? aiChartOf(song, m.diff, m.keys || 4) : null;   // 방: 방장이 곡마다 고른 대로
   const g = new Game({ song, diff: m.diff, keys: m.keys || 4, notes: mAi, multi: true, gameNo: m.game, onExit: backFromGame, practice: hlPractice(m.hl) });
   g.ai = !!mAi;
   game = g;
