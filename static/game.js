@@ -1501,15 +1501,6 @@ class Game {
 
     const cx = x0 + fieldW / 2;
     if (this.stage) this.stage.draw({ beat: Math.max(0, Math.floor((gt - off) / bl)), fever: inFever && settings.skin.fever, label: settings.nick || '', cxr: this.ilOn ? 0.3 : 0.5 });
-    if (this.ilOn && this.stage) {       // 일러스트: 박자마다 들썩, 점프 때 같이 튀고, 미스 때 색 빠짐, 피버 때 금빛
-      const ph = (((gt - off) / bl) % 1 + 1) % 1;
-      const el = this.ilEl;
-      el.style.setProperty('--pulse', Math.max(0, 1 - ph * 3.5).toFixed(3));
-      const fv = !!(inFever && settings.skin.fever), ms = now - this.stage.missAt < 450, jp = now - this.stage.jumpAt < 520;
-      if (fv !== el._fv) { el.classList.toggle('fever', fv); el._fv = fv; }
-      if (ms !== el._ms) { el.classList.toggle('miss', ms); el._ms = ms; }
-      if (jp !== el._jp) { el.classList.toggle('jump', jp); el._jp = jp; }
-    }
     drawCombo(L, this.fcAt ? 0 : this.combo, this.comboPop, now);   // 풀콤보 글자가 뜨면 콤보 숫자는 숨김 (글자 아래에 콤보 수 표시)
     drawMilestone(L, this.fx, now);
     this.drawChorus(L, judgeY, gt, now);

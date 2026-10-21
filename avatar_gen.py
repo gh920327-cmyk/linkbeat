@@ -467,7 +467,9 @@ def pixel_sheet(pngs, height=96, colors=32, key=None):
     masks = None
     if key in KEY_HUE:          # 크로마키 바탕으로 그렸으면 그 색만 지움 — 이상하면(캐릭터가 조각나면) 예전 방식
         km = [_key_mask(im, key, S) for im in ims]
-        if km[0].sum() > S * S * 0.04 and _solid(km[0]):
+        border = np.concatenate([km[0][0], km[0][-1], km[0][:, 0], km[0][:, -1]])
+        # 바탕이 정말 그 색으로 칠해졌을 때만 (AI가 흰 바탕으로 그려 버리면 테두리가 바탕으로 안 잡힘 → 예전 방식)
+        if border.mean() < 0.3 and km[0].sum() > S * S * 0.04 and _solid(km[0]):
             masks = km
     if masks is None:
         masks = [_fg_mask(im, S) for im in ims]
