@@ -99,8 +99,9 @@
         <span class="speed-show">SPEED <b id="speedShow"></b><small id="speedKeys"></small></span>
       </div>
       <div class="d-records">
-        <div class="rec"><span>친구 1위</span><b id="dTop">-</b></div>
-        <div class="rec"><span>내 기록</span><b id="dMine">-</b></div>
+        <div class="rec rec-hi"><span>HIGH SCORE</span><b id="dMine">-</b></div>
+        <div class="rec rec-rate"><span>MAX RATE</span><b id="dRate">-</b></div>
+        <div class="rec rec-top"><span>친구 1위</span><b id="dTop">-</b></div>
       </div>
       <div class="d-actions">
         <button id="btnPlay" class="play-btn">PLAY<small>Enter</small></button>
@@ -156,13 +157,23 @@
         </select>
         <input id="search" placeholder="곡·가수 검색" autocomplete="off">
       </div>
+      <div class="list-tabs" id="listTabs">
+        <button data-tab="all">전체</button>
+        <button data-tab="fav">★ 즐겨찾기</button>
+        <button data-tab="unplayed">안 해본 곡</button>
+        <button data-tab="ai">AI 채보</button>
+        <span class="lt-gap"></span>
+        <button class="side-tg" data-side="multi" title="친구와 같이 하기">👥 멀티<span id="roomDot" class="lt-dot hidden"></span></button>
+        <button class="side-tg" data-side="req" title="곡 신청함">📨 신청함<span id="reqCount2" class="badge hidden"></span></button>
+        <button class="side-tg" data-side="help" title="조작법 · 키 바꾸기">❔ 조작법</button>
+      </div>
       <div id="songList" class="song-list"></div>
       <div class="list-keys muted small">↑↓ 곡 · ←→ 난이도 · Tab 4키/6키 · Enter 시작</div>
     </main>
 
     <!-- 멀티 / 도움말 -->
-    <aside class="side-col">
-      <div class="panel" id="multiPanel">
+    <aside class="side-col" id="sideCol">
+      <div class="panel" id="multiPanel" data-panel="multi">
         <div id="multiOut">
           <h3>MULTI<small>친구와 함께</small></h3>
           <p class="muted small">방을 만들고 코드를 친구에게 알려주세요.</p>
@@ -195,12 +206,12 @@
         </div>
       </div>
 
-      <div class="panel" id="reqPanel">
+      <div class="panel" id="reqPanel" data-panel="req">
         <h3>REQUEST<small>곡 신청함</small><span id="reqCount" class="badge hidden"></span></h3>
         <ul id="reqList" class="req-list"></ul>
       </div>
 
-      <div class="panel help">
+      <div class="panel help" data-panel="help">
         <h3>HOW TO<small>조작법</small></h3>
         <div class="keys-row"><div class="keys-help" id="keysHelp" title="눌러서 키 바꾸기"></div><button id="btnKeyEdit" class="ghost small-btn">키 바꾸기</button></div>
         <ul class="small muted">
