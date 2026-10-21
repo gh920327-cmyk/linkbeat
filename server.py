@@ -377,6 +377,15 @@ def _submit_score(sid, diff, keys, name, data):
         "rank": str(data.get("rank", ""))[:3], "fc": bool(data.get("fc")),
         "maxCombo": max(0, int(data.get("maxCombo", 0))), "at": time.time(),
     }
+    cnt = data.get("counts")                     # 판정 개수 (결과 화면에서 최고 기록과 비교)
+    if isinstance(cnt, dict):
+        c2 = {}
+        for k in ("perfect", "great", "good", "miss"):
+            v = cnt.get(k)
+            if isinstance(v, (int, float)) and math.isfinite(v):
+                c2[k] = max(0, min(100000, int(v)))
+        if len(c2) == 4:
+            entry["counts"] = c2
     # 고스트 대결용: 노트 5%마다의 점수 (21칸)
     g = data.get("g")
     if isinstance(g, list) and 2 <= len(g) <= 21 and all(isinstance(x, (int, float)) and math.isfinite(x) for x in g):

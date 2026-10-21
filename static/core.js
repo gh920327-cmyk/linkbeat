@@ -593,7 +593,11 @@ function getBest(id, diff, nl = 4, hl = false, ai = false) { return store.get(be
 function setBest(id, diff, nl, r, hl = false, ai = false) {
   const b = getBest(id, diff, nl, hl, ai);
   if (!b || r.score > b.score) {
-    store.set(bestKey(id, diff, nl, hl, ai), { score: r.score, acc: r.acc, rank: r.rank, fc: r.fc, ...(Array.isArray(r.g) ? { g: r.g } : {}) });
+    store.set(bestKey(id, diff, nl, hl, ai), {
+      score: r.score, acc: r.acc, rank: r.rank, fc: r.fc, maxCombo: r.maxCombo,
+      ...(r.counts ? { counts: { perfect: r.counts.perfect, great: r.counts.great, good: r.counts.good, miss: r.counts.miss } } : {}),
+      ...(Array.isArray(r.g) ? { g: r.g } : {}),
+    });
     if (typeof profileSync === 'function') profileSync();
     return true;
   }

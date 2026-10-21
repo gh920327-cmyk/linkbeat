@@ -697,7 +697,29 @@ function prevBestOf(g) {
   if (!cands.length) return null;
   const best = cands.reduce((a, b) => (b.score > a.score ? b : a));
   const bestRank = cands.map((c) => c.rank).filter((k) => rankIdx(k) >= 0).sort((a, b) => rankIdx(b) - rankIdx(a))[0] || best.rank;
-  return { score: best.score || 0, rank: bestRank };
+  const same = cands.filter((c) => c.score === best.score);      // 같은 기록이 서버·이 브라우저에 있으면 빠진 칸을 서로 채움
+  const pick = (k) => { const c = same.find((x) => x[k] != null); return c ? c[k] : null; };
+  return { score: best.score || 0, rank: bestRank, acc: pick('acc'), maxCombo: pick('maxCombo'), counts: pick('counts') };
+}
+/* 판정 개수·정확도·최대 콤보를 최고 기록과 비교 (예전 기록이라 판정 개수가 없으면 그 칸은 안 보임) */
+function renderStatDelta(prev, r, show) {
+  const put = (id, d, goodUp, fmt) => {
+    const el = $(id);
+    if (!el) return;
+    if (d == null || !isFinite(d)) { el.textContent = ''; el.className = 'sd'; return; }
+    const better = goodUp ? d > 0 : d < 0;
+    el.className = 'sd ' + (d === 0 ? 'same' : better ? 'up' : 'down');
+    el.textContent = d === 0 ? '±0' : (d > 0 ? '▲' : '▼') + fmt(Math.abs(d));
+  };
+  const on = show && prev && !r.incomplete;
+  const c = on && prev.counts;
+  const n = (x) => x.toLocaleString();
+  put('#dPerfect', c ? r.counts.perfect - c.perfect : null, true, n);
+  put('#dGreat', c ? r.counts.great - c.great : null, false, n);
+  put('#dGood', c ? r.counts.good - c.good : null, false, n);
+  put('#dMiss', c ? r.counts.miss - c.miss : null, false, n);
+  put('#dAcc', on && prev.acc != null ? Math.round((r.acc - prev.acc) * 100) / 100 : null, true, (x) => x.toFixed(2) + '%');
+  put('#dCombo', on && prev.maxCombo != null ? r.maxCombo - prev.maxCombo : null, true, n);
 }
 /* 점수가 얼마나 올랐는지 · 등급이 몇에서 몇으로 올랐는지 */
 function renderBestDelta(prev, r, show) {
@@ -729,6 +751,7 @@ function showResult(g, r) {
   const prevBest = isTest ? null : prevBestOf(g);      // 기록을 저장하기 전에 읽어 둠
   const newLocal = !isTest && setBest(g.song.id, g.diff, g.nl, r, g.hl, !!g.ai);
   renderBestDelta(prevBest, r, !isTest);
+  renderStatDelta(prevBest, r, !isTest);
   const mods = (g.ai ? ' <span class="tag ai-tag">AI 채보</span>' : '') + (g.hl ? ' <span class="tag hl-tag">HIGHLIGHT</span>' : '') + (g.modNames.length ? ` <span class="warn">${g.modNames.join(' · ')}</span>` : '');
   $('#rSong').innerHTML = `${esc(g.song.title)} <span class="tag">${g.nl}KEY</span> ${DIFF_EN[g.diff]} ${starHtml(g.stars)}${mods}`;
   $('#rRank').textContent = r.rank;
