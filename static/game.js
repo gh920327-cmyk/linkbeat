@@ -823,6 +823,15 @@ class Game {
     this.pressed = new Array(this.nl).fill(false);
     this.fx = fxNew(this.nl);
     this.stage = typeof AvatarStage !== 'undefined' ? new AvatarStage($('#avatarStage')) : null;   // 내 캐릭터
+    // AI 일러스트가 있으면 캐릭터 칸 오른쪽에 크게 (도트는 왼쪽 앞)
+    const ilUrl = typeof aiIllustUrl === 'function' ? aiIllustUrl(settings.avatar) : '';
+    this.ilEl = $('#stageIl');
+    this.ilOn = !!ilUrl && !!this.ilEl;
+    if (this.ilEl) {
+      this.ilEl.classList.toggle('hidden', !this.ilOn);
+      this.ilEl.className = 'stage-il' + (this.ilOn ? '' : ' hidden');
+      if (this.ilOn && $('#stageIlImg').getAttribute('src') !== ilUrl) $('#stageIlImg').src = ilUrl;
+    }
     this.popup = null;
     this.comboPop = 0;
     this.clock = new SongClock();
@@ -1491,7 +1500,7 @@ class Game {
     if (this.ghost && settings.ghost !== false && this.phase !== 'loading' && this.phase !== 'ready') this.drawGhost(ctx, sx, outside ? 74 : 62, outside, roomR || !outside);
 
     const cx = x0 + fieldW / 2;
-    if (this.stage) this.stage.draw({ beat: Math.max(0, Math.floor((gt - off) / bl)), fever: inFever && settings.skin.fever, label: settings.nick || '' });
+    if (this.stage) this.stage.draw({ beat: Math.max(0, Math.floor((gt - off) / bl)), fever: inFever && settings.skin.fever, label: settings.nick || '', cxr: this.ilOn ? 0.3 : 0.5 });
     drawCombo(L, this.fcAt ? 0 : this.combo, this.comboPop, now);   // 풀콤보 글자가 뜨면 콤보 숫자는 숨김 (글자 아래에 콤보 수 표시)
     drawMilestone(L, this.fx, now);
     this.drawChorus(L, judgeY, gt, now);

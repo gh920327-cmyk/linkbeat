@@ -995,3 +995,10 @@ html[data-theme="sage"] .chip.on, html[data-theme="slate"] .chip.on, html[data-t
 html[data-theme="sage"] .chip.on:hover:not(:disabled), html[data-theme="slate"] .chip.on:hover:not(:disabled),
 html[data-theme="latte"] .chip.on:hover:not(:disabled), html[data-theme="lavender"] .chip.on:hover:not(:disabled) { background: linear-gradient(135deg, var(--blue), var(--cyan)); color: var(--on-accent); box-shadow: none; }
 html[data-theme="sage"] .row-thumb, html[data-theme="slate"] .row-thumb { filter: saturate(.85); }
+
+/* 플레이 화면 캐릭터 칸: AI 일러스트(오른쪽에 가만히, 왼쪽으로 사라짐 — 플레이에 방해되지 않게 움직이지 않음) + 도트(왼쪽 앞) */
+.stage-panel { position: relative; overflow: hidden; }
+.stage-panel #avatarStage { position: relative; z-index: 1; }
+.stage-il { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.stage-il img { position: absolute; right: 0; bottom: 0; height: 100%; max-width: 72%; object-fit: cover; object-position: top center; opacity: .9;
+  -webkit-mask-image: linear-gradient(to left, #000 60%, transparent 100%); mask-image: linear-gradient(to left, #000 60%, transparent 100%); }

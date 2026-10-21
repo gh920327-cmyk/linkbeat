@@ -80,7 +80,7 @@ def prompts(a, desc="", use_look=True):
     key = key_color(who)
     chibi = (f"{g}, solo, chibi, super deformed, 2 heads tall, big head, large detailed eyes, clear facial features, expressive face, "
              f"cute, {who}, full body, standing, front view, arms at sides, "
-             f"game sprite, simple background, ({key} background:1.3), solid color background, flat background, thick outline, "
+             f"game sprite, simple background, ({key} background:1.45), solid color background, flat background, thick outline, "
              f"flat color, cel shading, safe, {QUALITY}")
     chibi_neg = NEG + (", shadow, drop shadow, ground, floor, white background, gradient background, detailed background, scenery, "
                        "border, frame, multiple views, character sheet, reference sheet, close-up, portrait, cropped feet, text")
@@ -175,7 +175,7 @@ def desc_to_tags(desc, comfy_root):
             proc.terminate()
 
 
-def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0, base=None, denoise=1.0):
+def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0, base=None, denoise=1.0, ref_end=1.0):
     wf = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": CKPT}},
         "2": {"class_type": "CLIPTextEncode", "inputs": {"text": pos, "clip": ["1", 1]}},
@@ -193,7 +193,7 @@ def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0, base=None, denoi
         wf["10"] = {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": CLIPV_FILE}}
         wf["11"] = {"class_type": "IPAdapterAdvanced", "inputs": {"model": ["1", 0], "ipadapter": ["9", 0], "image": ["8", 0],
                                                                  "clip_vision": ["10", 0], "weight": ref_w, "weight_type": "linear",
-                                                                 "combine_embeds": "concat", "start_at": 0.0, "end_at": 1.0,
+                                                                 "combine_embeds": "concat", "start_at": 0.0, "end_at": ref_end,
                                                                  "embeds_scaling": "V only"}}
         wf["5"]["inputs"]["model"] = ["11", 0]
     if base:                    # 동작 그림: 기본 자세 그림에서 출발 (같은 구도·같은 색)
@@ -404,6 +404,61 @@ def _solid(fg):
     return fg.sum() / box > 0.35
 
 
+_ORT = {}
+
+
+def ai_mask(im, model, S=256):
+    """배경 제거 AI(isnet-anime, onnx): 캐릭터 부분 마스크 (S×S, True=캐릭터)"""
+    import numpy as np
+    import onnxruntime as ort
+    from PIL import Image
+    sess = _ORT.get(model)
+    if sess is None:
+        sess = _ORT[model] = ort.InferenceSession(str(model), providers=["CPUExecutionProvider"])
+    x = np.asarray(im.convert("RGB").resize((1024, 1024), Image.LANCZOS)).astype(np.float32)
+    x = x / max(float(x.max()), 1e-6)
+    x = (x - np.array([0.485, 0.456, 0.406], dtype=np.float32)) / 1.0
+    x = x.transpose(2, 0, 1)[None].astype(np.float32)
+    pred = sess.run(None, {sess.get_inputs()[0].name: x})[0][:, 0, :, :]
+    pred = (pred - pred.min()) / max(float(pred.max() - pred.min()), 1e-6)
+    m = Image.fromarray((np.squeeze(pred) * 255).astype("uint8"), "L").resize((S, S), Image.LANCZOS)
+    return np.asarray(m) > 127
+
+
+ISNET_URL = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-anime.onnx"
+
+
+def ensure_isnet(path):
+    """배경 제거 AI 모델: 없으면 한 번만 받음 (rembg 공식 배포, 약 170MB) — 실패하면 None"""
+    if not path:
+        return None
+    p = Path(path)
+    if p.is_file() and p.stat().st_size > 100_000_000:
+        return p
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".part")
+        say("배경 제거 AI 받는 중... (처음 한 번만, 약 170MB)")
+        with urllib.request.urlopen(ISNET_URL, timeout=60) as r, open(tmp, "wb") as f:
+            got, last = 0, 0
+            while True:
+                b = r.read(1 << 20)
+                if not b:
+                    break
+                f.write(b)
+                got += len(b)
+                if got - last > 20 << 20:
+                    last = got
+                    say(f"배경 제거 AI 받는 중... {got >> 20}MB")
+        if tmp.stat().st_size < 100_000_000:
+            raise RuntimeError("받은 파일이 너무 작아요.")
+        tmp.replace(p)
+        return p
+    except Exception as e:
+        say(f"배경 제거 AI를 받지 못했어요 ({str(e)[:80]}) — 다른 방법으로 지워요")
+        return None
+
+
 def _fg_mask(im, S=256):
     """캐릭터 부분 찾기: 테두리에서 바탕 색을 알아내고, 테두리와 이어진 '바탕 색에 가깝고 매끈한' 곳을 모두 지움
     (흰 바탕이 아니어도·연한 그라데이션이어도 지워지고, 외곽선 안쪽 같은 색 옷은 남음) + 작은 부스러기 지움"""
@@ -432,7 +487,7 @@ def _fg_mask(im, S=256):
     return _keep_big(~bg)
 
 
-def shrink_keep_lines(img, size):
+def shrink_keep_lines(img, size, eye_band=None):
     """작게 줄이기: 보통은 평균색, 선(진한 곳·색이 확 바뀌는 경계)이 칸의 1/5 이상이면 그 선 색을 더 진하게
     (평균으로 줄이면 눈 테두리·입·얼굴 경계가 흐려져서 표정이 안 보임) — 줄이기 전에 대비를 살짝 올리고 선명하게"""
     import numpy as np
@@ -442,7 +497,17 @@ def shrink_keep_lines(img, size):
     arr = np.asarray(img).astype(np.float32)
     lum = arr[:, :, 0] * 0.299 + arr[:, :, 1] * 0.587 + arr[:, :, 2] * 0.114
     edge = np.asarray(Image.fromarray(lum.astype("uint8")).filter(ImageFilter.FIND_EDGES)).astype(np.float32)
-    line = ((lum < 95) | ((edge > 55) & (lum < 170))).astype(np.float32)
+    line = (lum < 80) | ((edge > 90) & (lum < 130))   # 아주 진한 곳·확실한 경계만 (머리카락 잔결은 빼고)
+    if eye_band:            # 눈 높이(얼굴 가운데)에서는 경계를 더 예민하게 → 눈동자·흰자·피부 사이에 테두리
+        H, W = lum.shape
+        y0, y1 = int(H * eye_band[0]), int(H * eye_band[1])
+        x0, x1 = int(W * eye_band[2]), int(W * eye_band[3])
+        band = np.zeros_like(line)
+        band[y0:y1, x0:x1] = True
+        el = band & (edge > 50) & (lum < 175)
+        el = np.asarray(Image.fromarray((el * 255).astype("uint8")).filter(ImageFilter.MaxFilter(5))) > 0   # 얇은 경계를 굵게 (줄여도 남게)
+        line |= el & band
+    line = line.astype(np.float32)
     avg = np.asarray(img.resize(size, Image.BOX)).astype(np.float32)
     cov = np.asarray(Image.fromarray((line * 255).astype("uint8")).resize(size, Image.BOX)).astype(np.float32) / 255
     # 선 부분의 색: 선 픽셀 중 가장 어두운 쪽 평균 → 더 진하게
@@ -451,12 +516,27 @@ def shrink_keep_lines(img, size):
                      for c in range(3)], axis=2)
     dcol = dsum / np.maximum(cov[:, :, None], 1e-3)
     dcol = dcol * 0.72 + np.array([20, 14, 36], dtype=np.float32) * 0.28 * (cov[:, :, None] > 0)   # 외곽선 색 쪽으로
-    use = cov >= 0.13
+    use = cov >= 0.18
+    if eye_band:
+        h2, w2 = use.shape
+        ebm = np.zeros_like(use)
+        ebm[int(h2 * eye_band[0]):int(h2 * eye_band[1]) + 1, int(w2 * eye_band[2]):int(w2 * eye_band[3]) + 1] = True
+        use |= ebm & (cov >= 0.12)
+    # 혼자 튀는 선 점은 지움 (주변 8칸에 선이 하나도 없으면 평균색으로)
+    pad = np.pad(use, 1)
+    nb = sum(pad[1 + dy:pad.shape[0] - 1 + dy, 1 + dx:pad.shape[1] - 1 + dx] for dy in (-1, 0, 1) for dx in (-1, 0, 1) if dy or dx)
+    use = use & (nb >= 1)
+    if eye_band:            # 눈 높이의 선은 더 진하게 (눈동자 테두리가 또렷하게)
+        h2, w2 = use.shape
+        eb = np.zeros_like(use)
+        eb[int(h2 * eye_band[0]):int(h2 * eye_band[1]) + 1, int(w2 * eye_band[2]):int(w2 * eye_band[3]) + 1] = True
+        dark = dcol * 0.5 + np.array([20, 14, 36], dtype=np.float32) * 0.5
+        dcol = np.where((eb & use)[:, :, None], dark, dcol)
     out = np.where(use[:, :, None], dcol, avg)
     return Image.fromarray(np.clip(out, 0, 255).astype("uint8"))
 
 
-def pixel_sheet(pngs, height=96, colors=32, key=None):
+def pixel_sheet(pngs, height=96, colors=32, key=None, ai_model=None):
     """꼬마 그림 여러 장(기본·치기·점프·슬픔) → 같은 크기·같은 발 위치·같은 색 팔레트의 도트 동작 그림들
     → (기본 한 장 PNG, 동작 줄 PNG [기본·치기 왼·치기 오른(뒤집기)·점프·슬픔])"""
     import numpy as np
@@ -465,9 +545,20 @@ def pixel_sheet(pngs, height=96, colors=32, key=None):
     W0, H0 = ims[0].size
     S = 256
     masks = None
-    if key in KEY_HUE:          # 크로마키 바탕으로 그렸으면 그 색만 지움 — 이상하면(캐릭터가 조각나면) 예전 방식
+    if ai_model:                # 1) 배경 제거 AI (캐릭터 모양을 알아보고 잘라냄) — 결과가 이상하면 다음 방법
+        try:
+            am = [ai_mask(im, ai_model, S) for im in ims]
+            border = np.concatenate([am[0][0], am[0][-1], am[0][:, 0], am[0][:, -1]])
+            frac = am[0].mean()
+            if border.mean() < 0.25 and 0.03 < frac < 0.8:
+                masks = [_keep_big(m) for m in am]
+        except Exception as e:
+            say(f"배경 제거 AI를 못 써서 다른 방법으로 지워요 ({str(e)[:80]})")
+    if masks is None and key in KEY_HUE:          # 크로마키 바탕으로 그렸으면 그 색만 지움 — 이상하면(캐릭터가 조각나면) 예전 방식
         km = [_key_mask(im, key, S) for im in ims]
-        if km[0].sum() > S * S * 0.04 and _solid(km[0]):
+        border = np.concatenate([km[0][0], km[0][-1], km[0][:, 0], km[0][:, -1]])
+        # 바탕이 정말 그 색으로 칠해졌을 때만 (AI가 흰 바탕으로 그려 버리면 테두리가 바탕으로 안 잡힘 → 예전 방식)
+        if border.mean() < 0.3 and km[0].sum() > S * S * 0.04 and _solid(km[0]):
             masks = km
     if masks is None:
         masks = [_fg_mask(im, S) for im in ims]
@@ -482,6 +573,16 @@ def pixel_sheet(pngs, height=96, colors=32, key=None):
     sx, sy = W0 / S, H0 / S
     box = (int(x0 * sx), int(y0 * sy), int(x1 * sx), int(y1 * sy))
     cw, ch = box[2] - box[0], box[3] - box[1]
+    # 눈 높이: 기본 자세 캐릭터의 위에서 26~46% (2등신이라 머리가 위쪽 절반), 가운데 70%
+    ys0, xs0 = np.where(masks[0][y0:y1, x0:x1])
+    if len(ys0):
+        hh, ww = (y1 - y0), (x1 - x0)
+        top, bot = ys0.min() / hh, ys0.max() / hh
+        lft, rgt = xs0.min() / ww, xs0.max() / ww
+        span, wspan = bot - top, rgt - lft
+        eye_band = (top + span * 0.26, top + span * 0.46, lft + wspan * 0.15, rgt - wspan * 0.15)
+    else:
+        eye_band = None
     h = height
     w = max(8, round(h * cw / ch))
     if w > height * 1.3:
@@ -498,7 +599,7 @@ def pixel_sheet(pngs, height=96, colors=32, key=None):
             ca = _despill(ca, key, near_edge)
         if cm.any():
             ca[~cm] = ca[cm].mean(axis=0).astype("uint8")   # 줄일 때 흰 바탕이 가장자리에 번지지 않게
-        rgb = shrink_keep_lines(Image.fromarray(ca), (w, h))
+        rgb = shrink_keep_lines(Image.fromarray(ca), (w, h), eye_band)
         alpha = np.asarray(mask.resize((w, h), Image.BOX)) > 110
         arr = np.asarray(rgb).copy()
         if alpha.any():
@@ -579,12 +680,18 @@ def main():
         elif spec.get("illust") and Path(spec["illust"]).is_file():
             il_file = Path(spec["illust"])          # 도트만 다시: 지금 일러스트를 참고 그림으로
         # 꼬마 도트는 일러스트를 보고 그림 (머리·옷·색이 일러스트를 따라감). 일러스트가 없으면 참고 사진을 약하게
-        if il_file:
-            ch_ref, ch_w8 = comfy.upload(il_file, "linkbeat_ref_illust"), 0.7
+        ch_end = 1.0
+        if il_file:     # 일러스트의 캐릭터 부분만 잘라서, 그림 앞부분에만 약하게 (바탕·분위기까지 따라가지 않게)
+            from PIL import Image
+            im0 = Image.open(il_file).convert("RGB")
+            W0, H0 = im0.size
+            crop = out / "illust_crop.png"
+            im0.crop((int(W0 * 0.14), int(H0 * 0.04), int(W0 * 0.86), int(H0 * 0.74))).save(crop)
+            ch_ref, ch_w8, ch_end = comfy.upload(crop, "linkbeat_ref_illust"), 0.5, 0.55
         else:
             ch_ref, ch_w8 = ref_name, rw[1]
         say("도트용 꼬마 캐릭터 그리는 중..." + (" (일러스트를 따라)" if il_file else ""))
-        ch = comfy.run(workflow(ch_p, ch_n, ch_w, ch_h, seed + 1, "linkbeat_avatar/chibi", ch_ref, ch_w8), "꼬마 캐릭터")
+        ch = comfy.run(workflow(ch_p, ch_n, ch_w, ch_h, seed + 1, "linkbeat_avatar/chibi", ch_ref, ch_w8, ref_end=ch_end), "꼬마 캐릭터")
         base_file = out / "chibi_base.png"
         base_file.write_bytes(ch)
         base_name = comfy.upload(base_file, "linkbeat_ref_base")
@@ -598,7 +705,7 @@ def main():
             except Exception as e:
                 say(f"동작 하나를 못 그렸어요 ({str(e)[:60]}) — 기본 자세로 대신해요")
                 poses.append(ch)
-        one, sheet = pixel_sheet([ch] + poses, key=key)
+        one, sheet = pixel_sheet([ch] + poses, key=key, ai_model=ensure_isnet(spec.get("isnet")))
         (out / "pixel.png").write_bytes(one)
         (out / "sheet.png").write_bytes(sheet)
         say("완성!")
