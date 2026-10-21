@@ -809,7 +809,8 @@ def finish_pc_job(job, meta, res):
 
 
 ACC_WIN = 0.05   # 기존 채보의 드럼 강타 시각과 이만큼(초) 가까운 AI 노트를 강타로
-AI_FIX = 12       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
+AI_OWN_GAIN = 0.03   # 난이도별 박자 밀기는 곡 전체 값보다 노트 3% 이상 더 맞을 때만
+AI_FIX = 13       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
 HOLD_GAP = 0.1   # 롱노트 끝과 같은 줄 다음 노트 사이 최소 간격
 MAX_HOLDS = 1    # 동시에 누르고 있는 롱노트 최대 개수 (롱노트는 최소한으로)
 HOLD_MIN = 0.6   # 이보다 짧은 롱노트는 일반 노트로
@@ -1269,7 +1270,7 @@ def _best_shift(times, onsets):
 
 def ai_fit(song, charts):
     """AI 채보가 음원보다 얼마나 일찍/늦게 나오는지 재기 (실제 39곡: 15~60ms 일찍, 곡마다 다름)
-    AI 후보마다 박 위치가 조금씩 달라서(같은 곡도 최대 30ms) 난이도마다 따로 잼
+    AI 후보마다 박 위치가 조금씩 달라서(같은 곡도 최대 30ms) 난이도마다도 재 보고, 확실히 더 맞을 때만 그 값을 씀
     → ({난이도: 밀 시간 초}, 맞는 비율, 소리 없는 곳 비율)"""
     onsets = basic_onsets(song)
     sound = sound_onsets(song)
@@ -1280,7 +1281,11 @@ def ai_fit(song, charts):
     shifts, hit, hit60, tot = {}, 0.0, 0.0, 0
     for d, v in charts.items():
         times = sorted({round(float(n["t"]), 3) for n in v})
-        sh = _best_shift(times, onsets) if len(times) >= 30 else common
+        sh = common
+        if len(times) >= 30:                         # 그 난이도만 따로 잰 값이 확실히 더 잘 맞을 때만 따로 밈 (아니면 곡 전체 값)
+            own = _best_shift(times, onsets)
+            if own != common and _match_rate(times, onsets, own, 0.025) >= _match_rate(times, onsets, common, 0.025) + AI_OWN_GAIN:
+                sh = own
         shifts[d] = sh
         hit += _match_rate(times, onsets, sh, 0.025) * len(times)
         hit60 += _match_rate(times, sound, sh, 0.06 if sound is onsets else 0.075) * len(times)

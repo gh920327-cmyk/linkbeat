@@ -242,8 +242,41 @@ def stream_ratio(notes):
     return k / max(1, len(ts))
 
 
-def pick_for_diffs(cands, targets):
-    """cands: [(★, notes, 이름)], targets: {diff: 기본 채보 ★}. 난이도 순서가 뒤집히지 않게 가장 가까운 것 고르기."""
+def _secs(notes):
+    return {int(n["t"]) for n in notes}
+
+
+def active_secs(cands, duration):
+    """원곡 후보 절반 이상이 노트를 찍은 초 = 곡에서 '쳐야 할 소리가 있는' 곳"""
+    sets = [_secs(c[1]) for c in cands]
+    if not sets:
+        return set()
+    need = max(1, (len(sets) + 1) // 2)
+    out = set()
+    for s in range(int(duration) + 2):
+        if sum(1 for x in sets if s - 1 in x or s in x or s + 1 in x) >= need:
+            out.add(s)
+    return out
+
+
+def coverage(notes, active):
+    """쳐야 할 곳 중 이 후보가 노트를 찍은 비율 (AI가 통째로 비운 후보 걸러내기)"""
+    if not active:
+        return 1.0
+    x = _secs(notes)
+    return sum(1 for s in active if s - 1 in x or s in x or s + 1 in x) / len(active)
+
+
+MIN_COVER = 0.85   # 곡에서 쳐야 할 곳의 85% 이상을 찍은 후보만 고름
+
+
+def pick_for_diffs(cands, targets, active=None):
+    """cands: [(★, notes, 이름)], targets: {diff: 기본 채보 ★}. 난이도 순서가 뒤집히지 않게 가장 가까운 것 고르기.
+    active가 있으면 곡 대부분을 비운 후보는 뺌 (남는 게 없으면 그대로)"""
+    if active:
+        good = [c for c in cands if coverage(c[1], active) >= MIN_COVER]
+        if len(good) >= min(len(targets), len(cands)):
+            cands = good
     cands = sorted(cands, key=lambda c: c[0])
     chosen = {}
     lo = -1.0
@@ -451,11 +484,12 @@ def cmd_make(link):
     return r
 
 
-INST_GAP = 3.0   # 원곡 후보가 이만큼(초) 넘게 비운 곳만 반주 후보로 채움
+GAP_MIN = 3.0    # 본 채보가 이만큼(초) 넘게 비운 곳만 채움
+INST_MIN = 4.0   # 반주 후보로는 이만큼 넘게 빈 전주·간주만
 
 
 def _align(src, ref):
-    """반주 후보(src) 박 위치를 본 채보(ref)에 맞출 만큼(초): 두 후보 모두 박자 칸에 고르게 찍혀 있어서 겹치는 노트가 가장 많은 위치"""
+    """다른 후보(src) 박 위치를 본 채보(ref)에 맞출 만큼(초): 두 후보 모두 박자 칸에 고르게 찍혀 있어서 겹치는 노트가 가장 많은 위치"""
     import bisect
     rt = sorted({n["t"] for n in ref})
     st = sorted({n["t"] for n in src})
@@ -475,44 +509,104 @@ def _align(src, ref):
     return best[1]
 
 
-def fill_gaps_from(main, inst, duration):
-    """본 채보(원곡 후보)가 통째로 비운 구간(전주·간주)만 반주 후보 노트로 채움 → (채보, 채운 초)"""
+def fill_gaps(main, others, insts, duration):
+    """본 채보가 통째로 비운 구간 채우기 → (채보, [(채운 후보 이름, 초)])
+    - 다른 원곡 후보 절반 이상이 거기 노트를 찍었으면 → AI가 그 후보에서만 빠뜨린 것: 별이 가장 비슷한 원곡 후보로 (같은 느낌)
+    - 원곡 후보는 다 비웠는데 반주 후보는 찍었으면 → 보컬 없는 전주·간주: 4초 넘을 때만 반주 후보로
+    - 둘 다 비웠으면 → 진짜 쉬는 곳이라 그대로 둠
+    채우는 노트는 본 채보 밀도에 맞춰 고르게 솎고, 박 위치는 본 채보에 맞춤"""
     import bisect
-    if not main or not inst:
-        return main, 0.0
-    sh = _align(inst, main)
-    ins = sorted((dict(n, t=round(n["t"] + sh, 3)) for n in inst), key=lambda n: n["t"])
-    its = [n["t"] for n in ins]
-    times = [-0.5] + sorted(n["t"] for n in main) + [duration + 0.5]
-    gaps = [(a, b) for a, b in zip(times, times[1:]) if b - a >= INST_GAP]
-    # 본 채보가 노트를 찍은 구간의 밀도에 맞춰 반주 노트를 솎음 (쉬움에 반주 후보가 빽빽하게 들어가지 않게)
+    star, notes, name = main
+    if not notes:
+        return notes, []
+    times = [-0.5] + sorted(n["t"] for n in notes) + [duration + 0.5]
+    gaps = [(a, b) for a, b in zip(times, times[1:]) if b - a >= GAP_MIN]
+    if not gaps:
+        return notes, []
     covered = max(1.0, duration - sum(b - a for a, b in gaps))
-    target = len({n["t"] for n in main}) / covered
-    add, filled = [], 0.0
+    target = len({n["t"] for n in notes}) / covered
+    others = [c for c in others if c[2] != name]
+    aligned = {}
+
+    def inside(c, lo, hi):
+        return [n for n in c[1] if lo < n["t"] < hi]
+
+    def shifted(c):
+        if c[2] not in aligned:
+            sh = _align(c[1], notes)
+            aligned[c[2]] = sorted((dict(n, t=round(n["t"] + sh, 3)) for n in c[1]), key=lambda n: n["t"])
+        return aligned[c[2]]
+
+    add, used = [], []
     for a, b in gaps:
         lo, hi = a + 0.3, b - 0.3
-        i = bisect.bisect_left(its, lo)
+        need = max(3, int(0.8 * (hi - lo)))
+        has_o = [c for c in others if len(inside(c, lo, hi)) >= need]
+        has_i = [c for c in insts if len(inside(c, lo, hi)) >= need]
+        if others and len(has_o) * 2 >= len(others):
+            src = min(has_o, key=lambda c: abs(c[0] - star))
+        elif b - a >= INST_MIN and insts and len(has_i) * 2 >= len(insts):
+            src = min(has_i, key=lambda c: abs(c[0] - star))
+        else:
+            continue
+        src_notes = shifted(src)
+        i = bisect.bisect_left([n["t"] for n in src_notes], lo)
         part = []
-        while i < len(ins) and ins[i]["t"] < hi:
-            n = ins[i]
+        while i < len(src_notes) and src_notes[i]["t"] < hi:
+            n = src_notes[i]
             if n["t"] + float(n.get("d", 0) or 0) < b - 0.2:
                 part.append(n)
             i += 1
-        if part:
-            groups = sorted({n["t"] for n in part})
-            dens = len(groups) / max(0.5, hi - lo)
-            if dens > target * 1.15:
-                k = dens / max(0.3, target)
-                keep, acc = set(), 0.0
-                for t in groups:                  # 고르게 솎기 (k개 중 하나)
-                    acc += 1
-                    if acc >= k:
-                        keep.add(t)
-                        acc -= k
-                part = [n for n in part if n["t"] in keep]
-            add += part
-            filled += hi - lo
-    return sorted(main + add, key=lambda n: (n["t"], n["l"])), round(filled, 1)
+        if not part:
+            continue
+        groups = sorted({n["t"] for n in part})
+        dens = len(groups) / max(0.5, hi - lo)
+        if dens > target * 1.15:
+            k = dens / max(0.3, target)
+            keep, acc = set(), 0.0
+            for t in groups:                  # 고르게 솎기 (k개 중 하나)
+                acc += 1
+                if acc >= k:
+                    keep.add(t)
+                    acc -= k
+            part = [n for n in part if n["t"] in keep]
+        add += part
+        used.append((src[2], round(hi - lo, 1)))
+    return sorted(notes + add, key=lambda n: (n["t"], n["l"])), used
+
+
+def choose(cands, targets, duration):
+    """후보들 → 난이도마다 채보 하나 {diff: (★, notes, 설명)}
+    본 채보는 원곡 후보(a·s)에서만, 곡 대부분을 비운 후보는 빼고 고름 → 빈 곳만 채움"""
+    import chartgen
+    main_c = [c for c in cands if not c[2].endswith("_i")] or cands
+    inst_c = [c for c in cands if c[2].endswith("_i") and len(c[1]) >= 50]
+    active = active_secs(main_c, duration)
+    chosen = pick_for_diffs(main_c, relative_targets(targets), active)
+    for d, c in list(chosen.items()):
+        notes, used = fill_gaps(c, main_c, inst_c, duration)
+        if used:
+            tag = "+".join(f"{n}({s:.0f}초)" for n, s in used[:4]) + ("…" if len(used) > 4 else "")
+            chosen[d] = (chartgen.star_rating(notes, 4), notes, f"{c[2]}+{tag}")
+    return chosen
+
+
+def load_cands(odir, duration):
+    import chartgen
+    cands = []
+    for path in sorted(odir.glob("sr*.osu")):
+        notes = [n for n in osu_to_notes(path) if n["t"] <= duration + 1]
+        if len(notes) < 20:
+            continue
+        cands.append((chartgen.star_rating(notes, 4), notes, path.stem))
+    return cands
+
+
+def write_summary(odir, vid, title, seed, model, targets, chosen, cands):
+    summary = {"vid": vid, "title": title, "at": time.time(), "seed": seed, "model": model, "targets": targets,
+               "chosen": {d: {"file": c[2], "stars": c[0], "notes": len(c[1])} for d, c in chosen.items()},
+               "candidates": [{"file": c[2], "stars": c[0], "notes": len(c[1])} for c in sorted(cands, key=lambda c: c[0])]}
+    (odir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 def demucs_ok():
@@ -599,33 +693,16 @@ def make_charts(vid, wav, targets, title, artist, duration):
         variants.append((sep["inst"], {}, "i"))
         onsets = sep["onsets"]
     made = mug.generate(variants, odir, SR_PROMPTS, seed=seed, title=title, artist=artist)
-    cands = []
-    for path, sr in made:
-        notes = [n for n in osu_to_notes(path) if n["t"] <= duration + 1]
-        if len(notes) < 20:
-            continue
-        cands.append((chartgen.star_rating(notes, 4), notes, path.stem))
+    cands = load_cands(odir, duration)
     if not cands:
         raise RuntimeError("AI가 채보를 제대로 만들지 못했어요.")
-    # 본 채보는 원곡 후보에서만 (원곡 노래에 맞춰 치는 느낌), 반주 후보는 원곡 후보가 비운 전주·간주만 채움
-    main_c = [c for c in cands if not c[2].endswith("_i")] or cands
-    inst_c = [c for c in cands if c[2].endswith("_i") and len(c[1]) >= 50]
-    chosen = pick_for_diffs(main_c, relative_targets(targets))
-    if inst_c:
-        for d, c in list(chosen.items()):
-            src = min(inst_c, key=lambda x: abs(x[0] - c[0]))
-            notes, filled = fill_gaps_from(c[1], src[1], duration)
-            if filled:
-                chosen[d] = (chartgen.star_rating(notes, 4), notes, f"{c[2]}+{src[2]}({filled:.0f}초)")
+    chosen = choose(cands, targets, duration)
     say(f"  {len(cands)}개 만들었어요 ({time.time() - t0:.0f}초)")
     body = {"charts": {d: c[1] for d, c in chosen.items()}, "by": f"MuG Diffusion v{mug.version}", "style": "rc"}
     if onsets:
-        body["onsets"] = onsets      # 소리 분리로 찾은 진짜 소리 위치 → 서버가 박자 맞추기·'소리 없는 곳' 판단에 씀
+        body["onsets"] = onsets      # 소리 분리로 찾은 진짜 소리 위치 → 서버가 '소리 없는 곳' 판단에 씀
     (odir / "upload.json").write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
-    summary = {"vid": vid, "title": title, "at": time.time(), "seed": seed, "model": body["by"],
-               "chosen": {d: {"file": c[2], "stars": c[0], "notes": len(c[1])} for d, c in chosen.items()},
-               "candidates": [{"file": c[2], "stars": c[0], "notes": len(c[1])} for c in sorted(cands, key=lambda c: c[0])]}
-    (odir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+    write_summary(odir, vid, title, seed, body["by"], targets, chosen, cands)
     return body, chosen
 
 
@@ -693,8 +770,59 @@ def cmd_export():
     say(f"\n만들었어요: {dst}\n이 파일을 채팅에 올려 주세요. ({dst.stat().st_size // 1024} KB)")
 
 
+def rebuild(srv, vid):
+    """out\\<곡ID>\\ 에 남은 후보로 빈칸 채우기를 새 규칙으로 다시 (그래픽카드 안 씀)
+    난이도마다 예전에 고른 후보는 그대로 두고, 곡 대부분을 비운 후보만 다시 고름 → 바뀐 upload.json (없으면 None)"""
+    import chartgen
+    odir = OUT / vid
+    sp, up = odir / "summary.json", odir / "upload.json"
+    if not sp.exists() or not up.exists() or not any(odir.glob("sr*_i.osu")):
+        return None                        # 소리 분리 전에 만든 곡은 그대로 보냄
+    summary = json.loads(sp.read_text(encoding="utf-8"))
+    old = json.loads(up.read_text(encoding="utf-8"))
+    song = srv.call("GET", f"songs/{vid}")
+    duration = float(song.get("duration") or 900)
+    cands = load_cands(odir, duration)
+    byname = {c[2]: c for c in cands}
+    main_c = [c for c in cands if not c[2].endswith("_i")] or cands
+    inst_c = [c for c in cands if c[2].endswith("_i") and len(c[1]) >= 50]
+    active = active_secs(main_c, duration)
+    keep, redo = {}, []
+    for d, info in (summary.get("chosen") or {}).items():
+        c = byname.get(str(info.get("file", "")).split("+")[0])
+        if c and coverage(c[1], active) >= MIN_COVER:
+            keep[d] = c
+        else:
+            redo.append(d)
+    if redo:
+        basic = song.get("charts") or {}
+        targets = summary.get("targets") or {d: chartgen.star_rating(basic[d], 4) for d in DIFF_ORDER if basic.get(d)} or \
+            {d: float(v.get("stars", 0)) for d, v in summary["chosen"].items()}
+        again = pick_for_diffs(main_c, relative_targets(targets), active)
+        for d in redo:
+            c = again.get(d) or byname.get(str(summary["chosen"][d].get("file", "")).split("+")[0])
+            if c:
+                keep[d] = c
+    chosen = {}
+    for d in DIFF_ORDER:
+        if d not in keep:
+            continue
+        c = keep[d]
+        notes, used = fill_gaps(c, main_c, inst_c, duration)
+        tag = ("+" + "+".join(f"{n}({s:.0f}초)" for n, s in used[:4])) if used else ""
+        chosen[d] = (chartgen.star_rating(notes, 4), notes, c[2] + tag)
+    if not chosen:
+        return None
+    body = dict(old, charts={d: c[1] for d, c in chosen.items()})
+    up.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+    write_summary(odir, vid, summary.get("title", ""), summary.get("seed"), summary.get("model", ""),
+                  summary.get("targets"), chosen, cands)
+    return body
+
+
 def cmd_resend_all():
-    """out 폴더에 남아 있는 AI 원본 채보를 전부 서버에 다시 보냄 (서버가 새 방식으로 다시 다듬음, 그래픽카드 안 씀)"""
+    """out 폴더에 남아 있는 AI 원본 채보를 전부 서버에 다시 보냄 (서버가 새 방식으로 다시 다듬음, 그래픽카드 안 씀)
+    소리 분리로 만든 곡은 남은 후보로 빈칸 채우기를 새 규칙으로 다시 한 다음 보냄"""
     srv = get_server(need_key=True)
     files = sorted(OUT.glob("*/upload.json")) if OUT.exists() else []
     if not files:
@@ -704,9 +832,18 @@ def cmd_resend_all():
     for i, p in enumerate(files):
         vid = p.parent.name
         try:
-            r = upload(srv, vid, json.loads(p.read_text(encoding="utf-8")))
+            note = ""
+            try:
+                body = rebuild(srv, vid)
+                if body:
+                    note = " (빈칸 다시 채움)"
+            except Exception as e:
+                body = None
+                note = f" (다시 채우기 건너뜀: {e})"
+            body = body or json.loads(p.read_text(encoding="utf-8"))
+            r = upload(srv, vid, body)
             ok += 1
-            say(f"  {i + 1}/{len(files)} 보냄: {vid} {r.get('stars', '')}")
+            say(f"  {i + 1}/{len(files)} 보냄: {vid} {r.get('stars', '')}{note}")
         except SystemExit:
             raise
         except Exception as e:
