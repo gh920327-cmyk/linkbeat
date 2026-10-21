@@ -360,7 +360,8 @@ $('#avRandom').addEventListener('click', () => {
 renderTopAvatar();
 
 /* ---------------- AI 캐릭터 (호스트 PC의 ComfyUI가 지금 캐릭터 설정으로 일러스트·도트를 그림) */
-let aiAv = { job: null, worker: null, timer: 0, busy: false };
+let aiAv = { job: null, worker: null, timer: 0, busy: false, ref: '' };
+const aiOpt = () => (settings.avatarAi = Object.assign({ desc: '', strength: 'mid', useLook: true }, settings.avatarAi || {}));
 async function aiAvFetch() {
   if (!profile.tok) return;
   try {
@@ -393,6 +394,14 @@ function renderAiAvatar() {
   $('#avAiUse').innerHTML = a.aiUse === 'off' ? 'AI 그림 쓰기<small>꺼짐</small>' : 'AI 그림 쓰기<small>켜짐</small>';
   const msg = $('#avAiMsg'), go = $('#avAiGo');
   const j = aiAv.job, w = aiAv.worker;
+  const o = aiOpt();
+  if (document.activeElement !== $('#avAiDesc')) $('#avAiDesc').value = o.desc;
+  $$('#avAiStr button').forEach((b) => b.classList.toggle('on', b.dataset.s === o.strength));
+  $('#avAiStr').closest('.av-ai-opts').querySelector('span').classList.toggle('dim', !aiAv.ref);
+  $('#avAiLook').checked = o.useLook !== false;
+  $('#avAiRefImg').classList.toggle('hidden', !aiAv.ref);
+  $('#avAiRefDel').classList.toggle('hidden', !aiAv.ref);
+  if (aiAv.ref && $('#avAiRefImg').getAttribute('src') !== aiAv.ref) $('#avAiRefImg').src = aiAv.ref;
   go.disabled = !profile.tok || aiAv.busy;
   go.textContent = a.ai ? '✦ 다시 그리기' : '✦ AI로 그리기';
   if (!profile.tok) msg.textContent = '프로필에 로그인해야 그릴 수 있어요.';
@@ -408,7 +417,11 @@ $('#avAiGo').addEventListener('click', async () => {
   const go = $('#avAiGo');
   go.disabled = true;
   try {
-    const r = await fetch('/api/avatar/ai', { method: 'POST', headers: profile.headers(), body: JSON.stringify({ avatar: settings.avatar }) });
+    const o = aiOpt();
+    const r = await fetch('/api/avatar/ai', {
+      method: 'POST', headers: profile.headers(),
+      body: JSON.stringify({ avatar: settings.avatar, desc: o.desc, strength: o.strength, useLook: o.useLook !== false, ref: aiAv.ref || undefined }),
+    });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || r.status);
     aiAv.job = j; aiAv.busy = true;
@@ -422,3 +435,26 @@ $('#avAiUse').addEventListener('click', () => {
 $('#btnAvatar').addEventListener('click', aiAvFetch);
 if (typeof net !== 'undefined' && net.on) net.on('avjobs', () => { if (aiAv.busy) aiAvFetch(); });
 setTimeout(aiAvFetch, 1500);   // 다른 기기에서 그린 그림도 가져오기
+/* 원하는 모습 · 참고 사진 · 옵션 */
+$('#avAiDesc').addEventListener('input', (e) => { aiOpt().desc = e.target.value.slice(0, 200); saveSettings(); });
+$('#avAiStr').addEventListener('click', (e) => { const b = e.target.closest('[data-s]'); if (b) { aiOpt().strength = b.dataset.s; saveSettings(); renderAiAvatar(); } });
+$('#avAiLook').addEventListener('change', (e) => { aiOpt().useLook = e.target.checked; saveSettings(); });
+$('#avAiRefDel').addEventListener('click', () => { aiAv.ref = ''; $('#avAiFile').value = ''; renderAiAvatar(); });
+$('#avAiFile').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const img = new Image();
+  img.onload = () => {             // 긴 쪽 768px로 줄여서 jpg로 (서버에는 그림이 끝날 때까지만 남음)
+    const k = Math.min(1, 768 / Math.max(img.width, img.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    aiAv.ref = c.toDataURL('image/jpeg', 0.88);
+    URL.revokeObjectURL(img.src);
+    renderAiAvatar();
+  };
+  img.onerror = () => toast('사진을 열 수 없어요.');
+  img.src = URL.createObjectURL(f);
+});

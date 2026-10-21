@@ -54,18 +54,112 @@ def tags(a):
     return g, ", ".join(p for p in parts if p)
 
 
-def prompts(a):
+BANNED = ("nsfw", "nude", "naked", "sex", "nipple", "breast", "cleavage", "underwear", "panties", "lingerie", "bikini",
+          "erotic", "hentai", "gore", "blood", "loli", "shota", "child", "explicit", "questionable", "sensitive")
+
+
+def clean_tags(text, limit=30):
+    """영어 태그만 남김 (이상한 글자·성인 태그는 뺌)"""
+    import re
+    out = []
+    for t in re.split(r"[,\n]+", str(text).lower()):
+        t = re.sub(r"[^a-z0-9 _()'\-:.]", "", t).strip(" .")
+        if not t or len(t) > 40 or any(b in t for b in BANNED):
+            continue
+        if t not in out:
+            out.append(t)
+    return ", ".join(out[:limit])
+
+
+def prompts(a, desc="", use_look=True):
     g, look = tags(a)
-    illust = (f"{g}, solo, {look}, upper body, looking at viewer, smile, music, rhythm game, dynamic pose, "
-              f"colorful, vibrant, neon lights, gradient background, {QUALITY}")
-    chibi = (f"{g}, solo, chibi, super deformed, 2.5 heads tall, cute, {look}, full body, standing, front view, arms at sides, "
-             f"game sprite, simple background, white background, thick outline, flat color, cel shading, {QUALITY}")
+    parts = [p for p in (f"({desc}:1.15)" if desc else "", look if use_look or not desc else "") if p]
+    who = ", ".join(parts)
+    illust = (f"{g}, solo, {who}, upper body, looking at viewer, music, rhythm game, dynamic pose, "
+              f"colorful, vibrant, gradient background, safe, {QUALITY}")
+    chibi = (f"{g}, solo, chibi, super deformed, 2.5 heads tall, cute, {who}, full body, standing, front view, arms at sides, "
+             f"game sprite, simple background, white background, thick outline, flat color, cel shading, safe, {QUALITY}")
     chibi_neg = NEG + ", shadow, gradient background, scenery, multiple views, character sheet, reference sheet, close-up, portrait, cropped feet"
     return (illust, NEG, 896, 1152), (chibi, chibi_neg, 1024, 1024)
 
 
-def workflow(pos, neg, w, h, seed, prefix):
-    return {
+# ------------------------------------------------------------------ 글 → 영어 태그 (PC의 Ollama)
+OLLAMA = "http://127.0.0.1:11434"
+TAG_SYSTEM = ("You turn a character description (often Korean) into English Danbooru-style tags for an anime image model. "
+              "Output ONLY lowercase comma-separated tags, at most 25: hair, eyes, face, expression, clothing, colors, accessories, "
+              "props, mood. No sentences, no explanations, no real person names, no sexual content.")
+
+
+def _ollama(path, body=None, timeout=10):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(OLLAMA + path, data=data, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8") or "{}")
+
+
+def start_ollama(comfy_root):
+    """꺼져 있으면 켜기: LB_OLLAMA_EXE → ComfyUI가 있는 드라이브의 Ollama\\ollama.exe → 기본 설치 위치"""
+    try:
+        _ollama("/api/tags", timeout=3)
+        return None
+    except Exception:
+        pass
+    drive = Path(comfy_root).anchor or ""
+    cands = [os.environ.get("LB_OLLAMA_EXE", ""), str(Path(drive) / "Ollama" / "ollama.exe"),
+             os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe")]
+    exe = next((c for c in cands if c and Path(c).is_file()), None)
+    if not exe:
+        return None
+    env = dict(os.environ)
+    models = Path(exe).parent / "models"
+    if models.is_dir() and not env.get("OLLAMA_MODELS"):
+        env["OLLAMA_MODELS"] = str(models)
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    proc = subprocess.Popen([exe, "serve"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
+    for _ in range(30):
+        time.sleep(1)
+        try:
+            _ollama("/api/tags", timeout=3)
+            return proc
+        except Exception:
+            pass
+    proc.terminate()
+    return None
+
+
+def desc_to_tags(desc, comfy_root):
+    """원하는 모습(글) → 영어 태그. 영어로 쓴 건 그대로, 한글은 Ollama로 바꿈 (끝나면 모델을 메모리에서 내림)"""
+    desc = str(desc or "").strip()[:200]
+    if not desc:
+        return ""
+    if all(ord(c) < 128 for c in desc):
+        return clean_tags(desc)
+    proc = start_ollama(comfy_root)
+    try:
+        names = [m.get("name", "") for m in _ollama("/api/tags").get("models", [])]
+        if not names:
+            raise RuntimeError("Ollama에 모델이 없어요.")
+        model = next((n for n in names if n.startswith("qwen")), names[0])
+        say("원하는 모습을 그림용 말로 바꾸는 중...")
+        r = _ollama("/api/chat", {"model": model, "stream": False, "think": False, "keep_alive": 0,
+                                  "options": {"temperature": 0.2},
+                                  "messages": [{"role": "system", "content": TAG_SYSTEM}, {"role": "user", "content": desc}]}, timeout=180)
+        text = (r.get("message") or {}).get("content", "")
+        import re
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
+        tags_ = clean_tags(text)
+        say(f"그림 설명: {tags_[:120]}")
+        return tags_
+    except Exception as e:
+        say(f"원하는 모습을 바꾸지 못해서 캐릭터 설정으로만 그려요 ({str(e)[:80]})")
+        return ""
+    finally:
+        if proc:
+            proc.terminate()
+
+
+def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0):
+    wf = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": CKPT}},
         "2": {"class_type": "CLIPTextEncode", "inputs": {"text": pos, "clip": ["1", 1]}},
         "3": {"class_type": "CLIPTextEncode", "inputs": {"text": neg, "clip": ["1", 1]}},
@@ -76,6 +170,21 @@ def workflow(pos, neg, w, h, seed, prefix):
         "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
         "7": {"class_type": "SaveImage", "inputs": {"images": ["6", 0], "filename_prefix": prefix}},
     }
+    if ref and ref_w > 0:       # 참고 사진: IP-Adapter(SDXL)로 분위기·생김새를 따라감
+        wf["8"] = {"class_type": "LoadImage", "inputs": {"image": ref}}
+        wf["9"] = {"class_type": "IPAdapterModelLoader", "inputs": {"ipadapter_file": IPA_FILE}}
+        wf["10"] = {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": CLIPV_FILE}}
+        wf["11"] = {"class_type": "IPAdapterAdvanced", "inputs": {"model": ["1", 0], "ipadapter": ["9", 0], "image": ["8", 0],
+                                                                 "clip_vision": ["10", 0], "weight": ref_w, "weight_type": "linear",
+                                                                 "combine_embeds": "concat", "start_at": 0.0, "end_at": 1.0,
+                                                                 "embeds_scaling": "V only"}}
+        wf["5"]["inputs"]["model"] = ["11", 0]
+    return wf
+
+
+IPA_FILE = "ip-adapter-plus_sdxl_vit-h.safetensors"
+CLIPV_FILE = "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
+REF_WEIGHT = {"low": (0.45, 0.3), "mid": (0.65, 0.45), "high": (0.85, 0.6)}   # (일러스트, 꼬마 도트)
 
 
 # ------------------------------------------------------------------ ComfyUI
@@ -133,6 +242,28 @@ class Comfy:
         req = urllib.request.Request(self.base + path, data=data, headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8") or "{}")
+
+    def upload(self, path):
+        """참고 사진을 ComfyUI input 폴더에 올림 → LoadImage에 넣을 이름"""
+        boundary = uuid.uuid4().hex
+        name = f"linkbeat_ref_{uuid.uuid4().hex[:8]}{Path(path).suffix or '.jpg'}"
+        body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{name}\"\r\n"
+                f"Content-Type: application/octet-stream\r\n\r\n").encode() + Path(path).read_bytes() + \
+            f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\ntrue\r\n--{boundary}--\r\n".encode()
+        req = urllib.request.Request(self.base + "/upload/image", data=body,
+                                     headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            d = json.loads(r.read().decode("utf-8"))
+        self.uploaded = getattr(self, "uploaded", []) + [self.root / "ComfyUI" / "input" / d.get("subfolder", "") / d["name"]]
+        return f"{d['subfolder']}/{d['name']}" if d.get("subfolder") else d["name"]
+
+    def cleanup(self):
+        for f in getattr(self, "uploaded", []):
+            try:
+                if "linkbeat_ref_" in f.name:
+                    f.unlink()
+            except OSError:
+                pass
 
     def run(self, wf, label):
         """워크플로 하나 실행 → PNG 바이트 (ComfyUI output 폴더에 남은 파일은 지움)"""
@@ -246,19 +377,24 @@ def main():
     av = spec.get("avatar") or {}
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    (il_p, il_n, il_w, il_h), (ch_p, ch_n, ch_w, ch_h) = prompts(av)
+    desc = desc_to_tags(spec.get("desc", ""), a.comfy)          # ComfyUI보다 먼저 (그래픽카드 메모리가 겹치지 않게)
+    (il_p, il_n, il_w, il_h), (ch_p, ch_n, ch_w, ch_h) = prompts(av, desc, spec.get("useLook", True) is not False)
+    ref = spec.get("ref") if spec.get("ref") and Path(spec["ref"]).is_file() else None
+    rw = REF_WEIGHT.get(spec.get("strength"), REF_WEIGHT["mid"])
     comfy = Comfy(a.comfy)
     try:
         comfy.start()
+        ref_name = comfy.upload(ref) if ref else None
         seed = random.randint(1, 2 ** 31)
-        say("일러스트 그리는 중...")
-        il = comfy.run(workflow(il_p, il_n, il_w, il_h, seed, "linkbeat_avatar/illust"), "일러스트")
+        say("일러스트 그리는 중..." + (" (참고 사진 반영)" if ref_name else ""))
+        il = comfy.run(workflow(il_p, il_n, il_w, il_h, seed, "linkbeat_avatar/illust", ref_name, rw[0]), "일러스트")
         (out / "illust.webp").write_bytes(to_webp(il))
         say("도트용 꼬마 캐릭터 그리는 중...")
-        ch = comfy.run(workflow(ch_p, ch_n, ch_w, ch_h, seed + 1, "linkbeat_avatar/chibi"), "꼬마 캐릭터")
+        ch = comfy.run(workflow(ch_p, ch_n, ch_w, ch_h, seed + 1, "linkbeat_avatar/chibi", ref_name, rw[1]), "꼬마 캐릭터")
         (out / "pixel.png").write_bytes(pixelize(ch))
         say("완성!")
     finally:
+        comfy.cleanup()
         comfy.stop()
 
 

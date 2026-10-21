@@ -794,10 +794,27 @@ def av_request(headers, data):
     av = clean_avatar(data.get("avatar"))
     if not av:
         raise HttpError(400, "캐릭터 설정이 없어요.")
+    extra = {"desc": str(data.get("desc") or "").strip()[:200],
+             "strength": data.get("strength") if data.get("strength") in ("low", "mid", "high") else "mid",
+             "useLook": data.get("useLook") is not False}
+    ref = None
+    if data.get("ref"):                    # 참고 사진 (브라우저에서 작게 줄여 보냄) — 그림이 끝나면 지움
+        try:
+            ref = base64.b64decode(str(data["ref"]).split(",")[-1], validate=True)
+        except (ValueError, TypeError):
+            raise HttpError(400, "참고 사진을 읽을 수 없어요.")
+        kind = "jpg" if ref[:3] == b"\xff\xd8\xff" else "png" if ref[:8] == b"\x89PNG\r\n\x1a\n" else \
+            "webp" if ref[:4] == b"RIFF" and ref[8:12] == b"WEBP" else None
+        if not kind or len(ref) > 1_500_000:
+            raise HttpError(400, "참고 사진은 jpg·png·webp, 1.5MB 이하만 돼요.")
     for j in AVJOBS.values():
         if j["pid"] == key and j["stage"] in AV_PENDING:
             if j["stage"] == "waitpc":
                 j["avatar"] = av            # 아직 안 그렸으면 바뀐 설정으로
+                j.update(extra)
+                if ref:
+                    av_drop_ref(j)
+                    j["ref"] = av_save_ref(j["id"], ref, kind)
             return av_job_public(j)
     if sum(1 for j in AVJOBS.values() if j["stage"] in AV_PENDING) >= 40:
         raise HttpError(429, "그림 요청이 너무 많이 밀려 있어요. 조금 뒤에 다시 해 주세요.")
@@ -806,12 +823,40 @@ def av_request(headers, data):
         raise HttpError(429, "방금 그렸어요. 30초 뒤에 다시 해 주세요.")
     jid = secrets.token_hex(6)
     j = {"id": jid, "pid": key, "name": pr.get("id", key), "avatar": av, "stage": "waitpc",
-         "msg": "호스트 PC를 기다리는 중...", "created": time.time(), "claimedAt": 0}
+         "msg": "호스트 PC를 기다리는 중...", "created": time.time(), "claimedAt": 0, **extra}
+    if ref:
+        j["ref"] = av_save_ref(jid, ref, kind)
     AVJOBS[jid] = j
     save_avqueue()
     notify_all({"type": "avjobs"})
     log("AI 캐릭터 요청:", j["name"])
     return av_job_public(j)
+
+
+def av_save_ref(jid, data, kind):
+    AVATARS.mkdir(parents=True, exist_ok=True)
+    name = f"ref_{jid}.{kind}"
+    (AVATARS / name).write_bytes(data)
+    return name
+
+
+def av_drop_ref(j):
+    name = j.pop("ref", None)
+    if name and re.match(r"^ref_[0-9a-f]{12}\.(jpg|png|webp)$", name):
+        try:
+            (AVATARS / name).unlink()
+        except OSError:
+            pass
+
+
+def av_ref_b64(j):
+    name = j.get("ref")
+    if not name:
+        return None
+    try:
+        return base64.b64encode((AVATARS / name).read_bytes()).decode()
+    except OSError:
+        return None
 
 
 def av_status(headers):
@@ -852,6 +897,7 @@ def av_finish(j, images):
             raise ValueError("도트 그림 형식이 이상해요.")
     except (ValueError, TypeError) as e:
         j.update(stage="error", msg=str(e)[:200], finished=time.time())
+        av_drop_ref(j)
         save_avqueue()
         notify_all({"type": "avjobs"})
         return
@@ -880,6 +926,7 @@ def av_finish(j, images):
                     src.rename(AVATARS / f"{old}_old_{suf}")
         except OSError:
             pass
+    av_drop_ref(j)
     j.update(stage="done", msg="완성!", token=tok, finished=time.time())
     save_avqueue()
     notify_all({"type": "avjobs"})
@@ -2157,7 +2204,10 @@ async def api(method, path, headers, body):
             if not j and data.get("avatar"):         # 곡 작업이 없을 때만 캐릭터 그림 (그림 도구가 있는 엔진만)
                 a = av_claim()
                 if a:
-                    return {"job": {"id": a["id"], "kind": "avatar", "avatar": a["avatar"], "title": f"캐릭터: {a['name']}"}}
+                    return {"job": {"id": a["id"], "kind": "avatar", "avatar": a["avatar"], "title": f"캐릭터: {a['name']}",
+                                    "desc": a.get("desc", ""), "strength": a.get("strength", "mid"),
+                                    "useLook": a.get("useLook", True), "ref": av_ref_b64(a),
+                                    "refExt": (a.get("ref") or ".jpg").rsplit(".", 1)[-1]}}
             return {"job": {"id": j["id"], "vid": j["vid"], "title": j["title"], "keepEdited": j["keepEdited"],
                             "keepTitle": j["keepTitle"], "aiOnly": bool(j.get("aiOnly"))} if j else None}
         aj = AVJOBS.get(str(data.get("jobId", "")))
@@ -2170,6 +2220,7 @@ async def api(method, path, headers, body):
             if parts == ["worker", "fail"] and method == "POST":
                 if aj["stage"] in AV_PENDING:
                     aj.update(stage="error", msg=str(data.get("msg", "실패"))[:300], finished=time.time())
+                    av_drop_ref(aj)
                     save_avqueue()
                     notify_all({"type": "avjobs"})
                     log("AI 캐릭터 실패:", aj["name"], aj["msg"])
