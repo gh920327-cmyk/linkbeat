@@ -609,7 +609,7 @@ def shrink_keep_lines(img, size, eye_band=None):
     return Image.fromarray(np.clip(out, 0, 255).astype("uint8"))
 
 
-def pixel_sheet(pngs, height=96, colors=32, key=None, ai_model=None):
+def pixel_sheet(pngs, height=128, colors=32, key=None, ai_model=None):
     """꼬마 그림 여러 장(기본·치기·점프·슬픔) → 같은 크기·같은 발 위치·같은 색 팔레트의 도트 동작 그림들
     → (기본 한 장 PNG, 동작 줄 PNG [기본·치기 왼·치기 오른(뒤집기)·점프·슬픔])"""
     import numpy as np
@@ -713,7 +713,7 @@ def pixel_sheet(pngs, height=96, colors=32, key=None, ai_model=None):
     return png(base), png(sheet)
 
 
-def pixelize(png, height=96, colors=32):
+def pixelize(png, height=128, colors=32):
     """꼬마 전신 그림 한 장 → 도트 한 장 (예전 방식, 시험용)"""
     return pixel_sheet([png], height, colors)[0]
 
