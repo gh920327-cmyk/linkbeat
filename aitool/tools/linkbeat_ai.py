@@ -417,6 +417,16 @@ class Mug:
         return results
 
 
+_MUG = []
+
+
+def get_mug():
+    """AI 모델은 한 번만 불러서 계속 씀 (여러 곡을 연달아 만들 때 그래픽카드 메모리가 쌓이지 않게)"""
+    if not _MUG:
+        _MUG.append(Mug())
+    return _MUG[0]
+
+
 # ------------------------------------------------------------------ 명령
 def cmd_check():
     ok = True
@@ -954,7 +964,7 @@ def make_charts(vid, wav, targets, title, artist, duration, mode=""):
     out\\<곡ID>\\ 에 후보 .osu · summary.json · upload.json 보관"""
     import chartgen
     t0 = time.time()
-    mug = Mug()
+    mug = get_mug()
     odir = OUT / vid
     if odir.exists():
         shutil.rmtree(odir, ignore_errors=True)
@@ -1190,29 +1200,95 @@ def cmd_consist(ids):
     say("마음에 안 들면 7_일관성시험되돌리기.bat 을 실행하면 시험 전 AI 채보로 돌아가요.")
 
 
-def cmd_restore_test():
-    """일관성 시험 되돌리기: backup 에 보관한 AI 채보를 out 폴더로 되돌리고 서버에 다시 보냄"""
+RUN_FILE = BACKUP / "_last_run.json"     # 전체 새로 만들기 진행 상황 (중간에 꺼져도 이어서)
+
+
+def cmd_remake_all(skip):
+    """서버의 곡 전부를 일관성 방식으로 새로 만들기 (skip 곡 빼고). 곡마다 지금 AI 채보를 backup 에 보관, 끝난 곡은 다시 실행해도 건너뜀"""
     srv = get_server(need_key=True)
-    dirs = sorted(d for d in BACKUP.iterdir() if d.is_dir()) if BACKUP.exists() else []
-    if not dirs:
-        say("되돌릴 게 없어요 (보관한 AI 채보가 없어요).")
-        return
-    for d in dirs:
-        vid = d.name
+    skip = {parse_vid(x) or x for x in skip}
+    run = {}
+    if RUN_FILE.exists():
+        try:
+            run = json.loads(RUN_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            run = {}
+    if not run or run.get("finished"):
+        lst = srv.call("GET", "songs").get("songs", [])
+        run = {"ids": [s0["id"] for s0 in lst if s0.get("id") not in skip], "done": [], "failed": {}, "at": time.time()}
+    else:
+        say("지난번에 하다 만 게 있어서 이어서 해요.")
+    BACKUP.mkdir(parents=True, exist_ok=True)
+
+    def save():
+        RUN_FILE.write_text(json.dumps(run, ensure_ascii=False, indent=1), encoding="utf-8")
+    save()
+    todo = [v for v in run["ids"] if v not in run["done"] and v not in run["failed"]]
+    say(f"새로 만들 곡: {len(todo)}곡 (전체 {len(run['ids'])}곡, 곡마다 3~5분) — 중간에 창을 닫아도 다시 실행하면 이어서 해요")
+    t0 = time.time()
+    for k, vid in enumerate(todo):
+        say(f"\n========== {k + 1}/{len(todo)}: {vid} ==========")
+        src = OUT / vid
+        if src.exists() and not (BACKUP / vid).exists():
+            shutil.copytree(src, BACKUP / vid)
+        try:
+            cmd_make(vid, mode="consist", srv=srv)
+            run["done"].append(vid)
+        except SystemExit as e:
+            run["failed"][vid] = str(e)[:200]
+            say(f"  건너뜀: {e}")
+        except Exception as e:
+            traceback.print_exc()
+            run["failed"][vid] = str(e)[:200]
+            say(f"  건너뜀: {e}")
+        save()
+        left = len(todo) - k - 1
+        if left:
+            say(f"  남은 곡 {left}개 · 예상 {int((time.time() - t0) / (k + 1) * left / 60) + 1}분")
+    run["finished"] = True
+    save()
+    say(f"\n끝! {len(run['done'])}곡을 새로 만들었어요. 게임을 새로고침하면 반영돼요.")
+    if run["failed"]:
+        say(f"못 만든 곡 {len(run['failed'])}개:")
+        for v, e in run["failed"].items():
+            say(f"  {v}: {e[:100]}")
+    say("마음에 안 드는 곡은 7_일관성시험되돌리기.bat 으로 곡별로 되돌릴 수 있어요.")
+
+
+def cmd_restore_test(ids=None):
+    """되돌리기: backup 에 보관한 AI 채보를 out 폴더로 되돌리고 서버에 다시 보냄
+    ids 가 없으면 '전체 새로 만들기'로 만든 곡만 (그 전에 시험한 곡은 링크/ID를 넣어야 되돌림)"""
+    srv = get_server(need_key=True)
+    if not ids:
+        run = json.loads(RUN_FILE.read_text(encoding="utf-8")) if RUN_FILE.exists() else {}
+        ids = run.get("done") or []
+        if not ids:
+            say("되돌릴 곡이 없어요. 되돌릴 곡의 링크나 ID를 넣어 주세요.")
+            return
+        say(f"'전체 새로 만들기'로 만든 {len(ids)}곡을 되돌려요.")
+    n = 0
+    for vid in ids:
+        d = BACKUP / vid
+        if not d.is_dir():
+            say(f"  보관한 게 없어요: {vid}")
+            continue
         dst = OUT / vid
         if dst.exists():
             shutil.rmtree(dst)
         shutil.copytree(d, dst)
         r = upload(srv, vid, json.loads((dst / "upload.json").read_text(encoding="utf-8"))) if (dst / "upload.json").exists() else {}
         shutil.rmtree(d)
+        n += 1
         say(f"  되돌렸어요: {vid} {r.get('stars', '')}")
-    say("\n시험 전 AI 채보로 돌아갔어요. 게임을 새로고침하면 반영돼요.")
+    say(f"\n{n}곡을 예전 AI 채보로 되돌렸어요. 게임을 새로고침하면 반영돼요.")
 
 
 def main():
     ap = argparse.ArgumentParser(description="링크비트 AI 채보 도구")
     ap.add_argument("--consist", nargs="+", default=None, help="일관성 방식으로 다시 만들기 (곡 ID 여러 개)")
-    ap.add_argument("--restore-test", action="store_true", help="일관성 시험 되돌리기")
+    ap.add_argument("--restore-test", nargs="*", default=None, help="되돌리기 (곡 링크/ID, 없으면 전체 새로 만들기로 만든 곡)")
+    ap.add_argument("--remake-all", action="store_true", help="곡 전부 새로 만들기 (--skip 곡 빼고)")
+    ap.add_argument("--skip", nargs="*", default=[])
     ap.add_argument("link", nargs="?", default="")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--undo", action="store_true")
@@ -1243,8 +1319,12 @@ def main():
         if a.consist:
             cmd_consist(a.consist)
             return
-        if a.restore_test:
-            cmd_restore_test()
+        if a.restore_test is not None:
+            ids = [parse_vid(x) or x for x in " ".join(a.restore_test).split() if x.strip()]
+            cmd_restore_test(ids)
+            return
+        if a.remake_all:
+            cmd_remake_all(a.skip)
             return
         if a.resend_all:
             cmd_resend_all()
