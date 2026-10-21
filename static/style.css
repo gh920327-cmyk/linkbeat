@@ -995,3 +995,19 @@ html[data-theme="sage"] .chip.on, html[data-theme="slate"] .chip.on, html[data-t
 html[data-theme="sage"] .chip.on:hover:not(:disabled), html[data-theme="slate"] .chip.on:hover:not(:disabled),
 html[data-theme="latte"] .chip.on:hover:not(:disabled), html[data-theme="lavender"] .chip.on:hover:not(:disabled) { background: linear-gradient(135deg, var(--blue), var(--cyan)); color: var(--on-accent); box-shadow: none; }
 html[data-theme="sage"] .row-thumb, html[data-theme="slate"] .row-thumb { filter: saturate(.85); }
+
+/* 플레이 화면 캐릭터 칸: AI 일러스트(오른쪽, 왼쪽으로 사라짐) + 도트(왼쪽 앞) */
+.stage-panel { position: relative; overflow: hidden; }
+.stage-panel #avatarStage { position: relative; z-index: 1; }
+.stage-il { position: absolute; inset: 0; z-index: 0; pointer-events: none; --pulse: 0;
+  background: radial-gradient(60% 80% at 75% 70%, rgba(77, 225, 255, .16), transparent 70%); }
+.stage-il img { position: absolute; right: 0; bottom: 0; height: 100%; max-width: 72%; object-fit: cover; object-position: top center;
+  -webkit-mask-image: linear-gradient(to left, #000 62%, transparent 100%), linear-gradient(to top, transparent 0, #000 16%);
+  -webkit-mask-composite: source-in; mask-image: linear-gradient(to left, #000 62%, transparent 100%), linear-gradient(to top, transparent 0, #000 16%); mask-composite: intersect;
+  transform-origin: 70% 100%; transform: translateY(calc(var(--pulse) * -3px)) scale(calc(1 + var(--pulse) * .015));
+  transition: filter .18s ease-out; filter: drop-shadow(0 0 0 transparent); }
+.stage-il.jump img { animation: ilJump .52s ease-out; }
+@keyframes ilJump { 0% { translate: 0 0; } 35% { translate: 0 -14px; } 100% { translate: 0 0; } }
+.stage-il.miss img { filter: saturate(.25) brightness(.75); }
+.stage-il.fever { background: radial-gradient(60% 80% at 75% 70%, rgba(255, 200, 61, .28), transparent 70%); }
+.stage-il.fever img { filter: drop-shadow(0 0 14px rgba(255, 200, 61, .55)) saturate(1.15); }

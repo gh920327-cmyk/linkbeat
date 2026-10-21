@@ -263,7 +263,7 @@ class AvatarStage {
     if (combo > 0 && combo % 50 === 0) this.jumpAt = performance.now();
   }
   onMiss() { this.missAt = performance.now(); }
-  draw({ beat = 0, fever = false, a = settings.avatar, label = '', force = null, bounce = false } = {}) {
+  draw({ beat = 0, fever = false, a = settings.avatar, label = '', force = null, bounce = false, cxr = 0.5 } = {}) {
     const cv = this.cv;
     if (!cv || !cv.offsetParent) return;
     const dpr = window.devicePixelRatio || 1;
@@ -275,7 +275,7 @@ class AvatarStage {
     ctx.clearRect(0, 0, w, h);
     const now = performance.now();
     const scale = Math.max(2, Math.min(7, Math.floor((h - 34) / AV_H)));
-    const cx = w / 2, floor = h - 18;
+    const cx = Math.round(w * cxr), floor = h - 18;
     // 바닥 무대
     const fg = ctx.createRadialGradient(cx, floor, 4, cx, floor, AV_W * scale * 0.9);
     fg.addColorStop(0, fever ? 'rgba(255,190,60,0.55)' : 'rgba(77,225,255,0.35)'); fg.addColorStop(1, 'rgba(0,0,0,0)');
