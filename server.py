@@ -863,6 +863,19 @@ def av_ref_b64(j):
         return None
 
 
+def av_cur_illust(j):
+    """도트만 다시 그릴 때 참고할 지금 일러스트 (base64)"""
+    with FILE_LOCK:
+        pr = load_profiles().get(j["pid"]) or {}
+    t0 = (pr.get("aiAvatar") or {}).get("token") if isinstance(pr.get("aiAvatar"), dict) else None
+    try:
+        if t0 and AV_TOKEN_RE.match(t0):
+            return base64.b64encode((AVATARS / f"{t0}_i.webp").read_bytes()).decode()
+    except OSError:
+        pass
+    return None
+
+
 def av_status(headers):
     with FILE_LOCK:
         profiles = load_profiles()
@@ -2222,7 +2235,8 @@ async def api(method, path, headers, body):
                     return {"job": {"id": a["id"], "kind": "avatar", "avatar": a["avatar"], "title": f"캐릭터: {a['name']}",
                                     "desc": a.get("desc", ""), "strength": a.get("strength", "mid"),
                                     "useLook": a.get("useLook", True), "ref": av_ref_b64(a),
-                                    "refExt": (a.get("ref") or ".jpg").rsplit(".", 1)[-1], "mode": a.get("mode", "all")}}
+                                    "refExt": (a.get("ref") or ".jpg").rsplit(".", 1)[-1], "mode": a.get("mode", "all"),
+                                    "illust": av_cur_illust(a) if a.get("mode") == "pixel" else None}}
             return {"job": {"id": j["id"], "vid": j["vid"], "title": j["title"], "keepEdited": j["keepEdited"],
                             "keepTitle": j["keepTitle"], "aiOnly": bool(j.get("aiOnly"))} if j else None}
         aj = AVJOBS.get(str(data.get("jobId", "")))
