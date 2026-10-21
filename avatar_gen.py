@@ -73,8 +73,8 @@ def clean_tags(text, limit=30):
 
 def prompts(a, desc="", use_look=True):
     g, look = tags(a)
-    parts = [p for p in (f"({desc}:1.15)" if desc else "", look if use_look or not desc else "") if p]
-    who = ", ".join(parts)
+    parts = [p for p in (f"({desc}:1.15)" if desc else "", look if use_look else "") if p]   # 설정 반영을 끄면 예전 캐릭터 칸은 안 씀
+    who = ", ".join(parts) or "original character"
     illust = (f"{g}, solo, {who}, upper body, looking at viewer, music, rhythm game, dynamic pose, "
               f"colorful, vibrant, gradient background, safe, {QUALITY}")
     key = key_color(who)
@@ -569,21 +569,31 @@ def main():
         comfy.start()
         ref_name = comfy.upload(ref) if ref else None
         seed = random.randint(1, 2 ** 31)
+        il_file = None
         if spec.get("mode") != "pixel":           # pixel: 일러스트는 그대로 두고 도트만
             say("일러스트 그리는 중..." + (" (참고 사진 반영)" if ref_name else ""))
             il = comfy.run(workflow(il_p, il_n, il_w, il_h, seed, "linkbeat_avatar/illust", ref_name, rw[0]), "일러스트")
             (out / "illust.webp").write_bytes(to_webp(il))
-        say("도트용 꼬마 캐릭터 그리는 중...")
-        ch = comfy.run(workflow(ch_p, ch_n, ch_w, ch_h, seed + 1, "linkbeat_avatar/chibi", ref_name, rw[1]), "꼬마 캐릭터")
+            il_file = out / "illust_ref.png"
+            il_file.write_bytes(il)
+        elif spec.get("illust") and Path(spec["illust"]).is_file():
+            il_file = Path(spec["illust"])          # 도트만 다시: 지금 일러스트를 참고 그림으로
+        # 꼬마 도트는 일러스트를 보고 그림 (머리·옷·색이 일러스트를 따라감). 일러스트가 없으면 참고 사진을 약하게
+        if il_file:
+            ch_ref, ch_w8 = comfy.upload(il_file, "linkbeat_ref_illust"), 0.7
+        else:
+            ch_ref, ch_w8 = ref_name, rw[1]
+        say("도트용 꼬마 캐릭터 그리는 중..." + (" (일러스트를 따라)" if il_file else ""))
+        ch = comfy.run(workflow(ch_p, ch_n, ch_w, ch_h, seed + 1, "linkbeat_avatar/chibi", ch_ref, ch_w8), "꼬마 캐릭터")
         base_file = out / "chibi_base.png"
         base_file.write_bytes(ch)
         base_name = comfy.upload(base_file, "linkbeat_ref_base")
         poses = []
-        for k, (key, (pose, dn)) in enumerate(POSES.items()):     # 같은 캐릭터로 동작만 바꿔 그림 (생김새는 IP-Adapter로 붙잡음)
+        for k, (pkey, (pose, dn)) in enumerate(POSES.items()):     # 같은 캐릭터로 동작만 바꿔 그림 (생김새는 IP-Adapter로 붙잡음)
             say(f"동작 그리는 중... ({k + 1}/{len(POSES)})")
             pp = ch_p.replace("full body, standing, front view, arms at sides", "full body, " + pose)
             try:
-                poses.append(comfy.run(workflow(pp, ch_n, ch_w, ch_h, seed + 1, f"linkbeat_avatar/pose_{key}",
+                poses.append(comfy.run(workflow(pp, ch_n, ch_w, ch_h, seed + 1, f"linkbeat_avatar/pose_{pkey}",
                                                 base_name, 0.8, base=base_name, denoise=dn), "동작"))
             except Exception as e:
                 say(f"동작 하나를 못 그렸어요 ({str(e)[:60]}) — 기본 자세로 대신해요")

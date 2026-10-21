@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.2.6"
+VERSION = "1.2.7"
 
 # 가상환경의 실행 파일 폴더(deno 등)를 PATH 앞에 → yt-dlp가 JS 런타임을 찾을 수 있게
 os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
@@ -263,7 +263,12 @@ def run_avatar_job(api, job):
                 ext = job.get("refExt") if job.get("refExt") in ("jpg", "png", "webp") else "jpg"
                 ref = Path(td) / f"ref.{ext}"
                 ref.write_bytes(base64.b64decode(job["ref"]))
+            illust = None
+            if job.get("illust"):                   # 도트만 다시: 지금 일러스트 (도트가 이걸 따라 그림)
+                illust = Path(td) / "cur_illust.webp"
+                illust.write_bytes(base64.b64decode(job["illust"]))
             spec.write_text(json.dumps({"avatar": job.get("avatar") or {}, "desc": job.get("desc", ""), "mode": job.get("mode", "all"),
+                                        "illust": str(illust) if illust else "",
                                         "strength": job.get("strength", "mid"), "useLook": job.get("useLook", True),
                                         "ref": str(ref) if ref else ""}, ensure_ascii=False), encoding="utf-8")
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
