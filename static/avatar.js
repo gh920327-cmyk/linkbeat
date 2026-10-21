@@ -209,7 +209,9 @@ function drawAvatar(ctx, a, st, cx, footY, scale) {
   const sheet = aiSheet(a);
   if (sheet) {          // 동작마다 따로 그린 그림
     const fw = Math.round(sheet.width / 5), fh = sheet.height;
-    const s2 = Math.max(1, Math.round(AV_H * scale / fh));
+    let s2 = Math.max(1, Math.round(AV_H * scale / fh));
+    const roomH = ctx.canvas.height / (window.devicePixelRatio || 1) - 22;      // 칸보다 커서 머리가 잘리지 않게
+    while (s2 > 1 && fh * s2 > roomH) s2--;
     const f = AV_FRAMES[(st && st.pose) || 'idle'] || 0;
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(sheet, f * fw, 0, fw, fh, Math.round(cx - fw * s2 / 2), Math.round(footY - fh * s2), fw * s2, fh * s2);
@@ -217,7 +219,9 @@ function drawAvatar(ctx, a, st, cx, footY, scale) {
   }
   const ai = aiPixel(a);
   if (ai) {
-    const s2 = Math.max(1, Math.round(AV_H * scale / ai.height));
+    let s2 = Math.max(1, Math.round(AV_H * scale / ai.height));
+    const roomH = ctx.canvas.height / (window.devicePixelRatio || 1) - 22;
+    while (s2 > 1 && ai.height * s2 > roomH) s2--;
     const w = ai.width * s2, h = ai.height * s2;
     const dx = st && st.pose === 'left' ? -s2 * 2 : st && st.pose === 'right' ? s2 * 2 : 0;
     ctx.imageSmoothingEnabled = false;
