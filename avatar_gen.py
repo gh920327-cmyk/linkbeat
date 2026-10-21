@@ -422,7 +422,7 @@ def ai_mask(im, model, S=256):
     pred = sess.run(None, {sess.get_inputs()[0].name: x})[0][:, 0, :, :]
     pred = (pred - pred.min()) / max(float(pred.max() - pred.min()), 1e-6)
     m = Image.fromarray((np.squeeze(pred) * 255).astype("uint8"), "L").resize((S, S), Image.LANCZOS)
-    return np.asarray(m) > 127
+    return np.asarray(m) > 80          # 밝은 머리·피부처럼 애매하게 잡히는 곳도 캐릭터로
 
 
 ISNET_URL = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-anime.onnx"
@@ -457,6 +457,66 @@ def ensure_isnet(path):
     except Exception as e:
         say(f"배경 제거 AI를 받지 못했어요 ({str(e)[:80]}) — 다른 방법으로 지워요")
         return None
+
+
+def _shift_or(m, r):
+    """r칸 안의 이웃 중 하나라도 True면 True (팽창)"""
+    import numpy as np
+    out = m.copy()
+    for dy in range(-r, r + 1):
+        for dx in range(-r, r + 1):
+            if dy * dy + dx * dx > r * r:
+                continue
+            sh = np.zeros_like(m)
+            ys, ye = max(0, dy), m.shape[0] + min(0, dy)
+            xs, xe = max(0, dx), m.shape[1] + min(0, dx)
+            sh[ys:ye, xs:xe] = m[ys - dy:ye - dy, xs - dx:xe - dx]
+            out |= sh
+    return out
+
+
+def fill_holes(fg, r=3):
+    """캐릭터 안쪽 구멍 메우기: 작은 틈을 막은(닫기) 모양으로 바깥 바탕을 찾고, 바깥과 이어지지 않은 투명한 곳은 캐릭터로"""
+    import numpy as np
+    closed = ~_shift_or(~_shift_or(fg, r), r)          # 닫기 = 팽창 후 침식 (외곽선이 살짝 끊긴 틈을 막음)
+    outside = np.zeros_like(fg)
+    free = ~closed
+    outside[0, :], outside[-1, :], outside[:, 0], outside[:, -1] = free[0, :], free[-1, :], free[:, 0], free[:, -1]
+    for _ in range(fg.shape[0] * 3):
+        grow = outside.copy()
+        grow[1:, :] |= outside[:-1, :]
+        grow[:-1, :] |= outside[1:, :]
+        grow[:, 1:] |= outside[:, :-1]
+        grow[:, :-1] |= outside[:, 1:]
+        grow &= free
+        if (grow == outside).all():
+            break
+        outside = grow
+    cand = ~outside & ~fg
+    # 덩어리마다: 바깥 바탕에 길게 붙은 얇은 조각(닫기로 테두리가 불어난 곳)은 빼고, 안쪽 구멍만 메움
+    near_out = _shift_or(outside, 1)
+    lab = np.zeros(fg.shape, dtype=np.int32)
+    keep = np.zeros(fg.shape, dtype=bool)
+    H, W = fg.shape
+    n = 0
+    for y0 in range(H):
+        for x0 in range(W):
+            if cand[y0, x0] and not lab[y0, x0]:
+                n += 1
+                stack, pts = [(y0, x0)], []
+                lab[y0, x0] = n
+                while stack:
+                    y, x = stack.pop()
+                    pts.append((y, x))
+                    for yy, xx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                        if 0 <= yy < H and 0 <= xx < W and cand[yy, xx] and not lab[yy, xx]:
+                            lab[yy, xx] = n
+                            stack.append((yy, xx))
+                touch = sum(1 for y, x in pts if near_out[y, x])
+                if touch / len(pts) < 0.35:
+                    for y, x in pts:
+                        keep[y, x] = True
+    return fg | keep
 
 
 def _fg_mask(im, S=256):
@@ -562,6 +622,7 @@ def pixel_sheet(pngs, height=96, colors=32, key=None, ai_model=None):
             masks = km
     if masks is None:
         masks = [_fg_mask(im, S) for im in ims]
+    masks = [fill_holes(m) for m in masks]     # 캐릭터 안쪽에 생긴 구멍(밝은 머리·얼굴이 바탕으로 잘못 잡힌 곳)은 메움
     if masks[0].sum() < 200:
         raise RuntimeError("캐릭터를 찾지 못했어요 (바탕만 그려졌어요).")
     for i in range(1, len(masks)):              # 동작 그림이 망가졌으면(캐릭터가 없거나 너무 다르면) 기본 자세로
