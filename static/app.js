@@ -37,6 +37,7 @@ function aiRec(s) {
   if (ai.fit) return ai.fit.rec !== false;      // 전체 곡 정보
   return ai.rec !== false;                       // 곡 목록 요약
 }
+let sideOpen = '';   // 곡 선택 화면 오른쪽 칸: '' | multi | req | help
 function songPick(s) {
   if (!s) return false;
   if (net.room) return net.room.ai !== false && aiRec(s);
@@ -69,7 +70,13 @@ function artistOf(s) { return (s && (s.artist || s.channel)) || ''; }
 
 function computeView() {
   const q = $('#search').value.trim().toLowerCase();
-  const list = songs.filter((s) => !q || [s.title, artistOf(s), s.artistRaw, s.channel].some((x) => (x || '').toLowerCase().includes(q)));
+  const tab = settings.listTab || 'all';
+  const fav = settings.fav || {};
+  const inTab = (s) => tab === 'fav' ? !!fav[s.id]
+    : tab === 'unplayed' ? !DIFFS.some((d) => myRecord(s, settings.mode, d))
+      : tab === 'ai' ? !!(s.ai && settings.mode === 4)
+        : true;
+  const list = songs.filter((s) => inTab(s) && (!q || [s.title, artistOf(s), s.artistRaw, s.channel].some((x) => (x || '').toLowerCase().includes(q))));
   const sorters = {
     new: (a, b) => b.created - a.created,
     title: (a, b) => a.title.localeCompare(b.title, 'ko'),
@@ -89,23 +96,29 @@ function renderSongs() {
   $('#songCount').textContent = songs.length ? songs.length : '';
   if (!view.find((s) => s.id === selId)) selId = view.length ? view[0].id : null;
   const nl = settings.mode;
+  $$('#listTabs [data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === (settings.listTab || 'all')));
+  const tabEmpty = { fav: '즐겨찾기한 곡이 없어요.<br>곡 줄 왼쪽의 ☆를 눌러 즐겨찾기에 넣어 보세요.', unplayed: '안 해본 곡이 없어요. 전부 해 봤어요!', ai: 'AI 채보가 있는 곡이 없어요.' };
   if (!view.length) {
-    $('#songList').innerHTML = `<div class="empty">${songs.length ? '검색 결과가 없어요.' : isHost
+    $('#songList').innerHTML = `<div class="empty">${songs.length ? ($('#search').value.trim() ? '검색 결과가 없어요.' : tabEmpty[settings.listTab] || '곡이 없어요.') : isHost
       ? '아직 곡이 없어요.<br>위에 유튜브 링크를 붙여넣어 첫 곡을 만들어 보세요!'
       : '아직 곡이 없어요. 호스트가 곡을 추가하면 여기에 나타나요.'}</div>`;
   } else {
+    const fav = settings.fav || {};
     $('#songList').innerHTML = view.map((s) => {
-      const rec = myRecord(s, nl, settings.diff);
-      const pips = DIFFS.map((d) => {
+      const slots = DIFFS.map((d) => {
         const v = starOf(s, nl, d);
-        return `<span class="mini ${starClass(v)} ${d === settings.diff ? 'on' : ''}" title="${DIFF_NAME[d]} ★${v.toFixed(1)}">${v.toFixed(1)}</span>`;
+        const r = myRecord(s, nl, d);
+        const ap = r && r.counts && r.fc && !r.counts.great && !r.counts.good && !r.counts.miss;
+        const mark = r ? `<b class="rk rank-${esc(r.rank)}">${esc(r.rank)}</b>` : '<i class="nodot"></i>';
+        const tip = `${DIFF_NAME[d]} ★${v.toFixed(1)}${r ? ` · ${r.rank} ${r.score.toLocaleString()}${ap ? ' · ALL PERFECT' : r.fc ? ' · FULL COMBO' : ''}` : ' · 아직 안 해봤어요'}`;
+        return `<span class="dslot ${starClass(v)}${d === settings.diff ? ' on' : ''}${ap ? ' ap' : r && r.fc ? ' fc' : ''}" title="${esc(tip)}">${mark}<em>${v.toFixed(1)}</em></span>`;
       }).join('');
       const roomSel = net.room && net.room.songId === s.id ? ' roomsel' : '';
       return `<div class="row${s.id === selId ? ' sel' : ''}${roomSel}" data-id="${s.id}">
-        <img class="row-thumb" src="https://i.ytimg.com/vi/${s.id}/default.jpg" alt="" loading="lazy">
+        <button class="fav${fav[s.id] ? ' on' : ''}" type="button" title="${fav[s.id] ? '즐겨찾기에서 빼기' : '즐겨찾기'}">${fav[s.id] ? '★' : '☆'}</button>
+        <img class="row-thumb" src="https://i.ytimg.com/vi/${s.id}/mqdefault.jpg" alt="" loading="lazy">
         <div class="row-info"><div class="row-title">${s.ai && songPick(s) ? '<span class="ai-badge" title="이 곡은 AI 채보로 플레이 (곡 화면의 AI 채보 칩으로 바꿀 수 있어요)">AI</span>' : ''}${esc(s.title)}</div><div class="row-artist">${esc(artistOf(s))}</div></div>
-        <div class="row-stars">${pips}</div>
-        <div class="row-rank">${rec ? `<b class="rank-${esc(rec.rank)}">${esc(rec.rank)}</b>` : ''}</div>
+        <div class="row-slots">${slots}</div>
       </div>`;
     }).join('');
   }
@@ -127,7 +140,7 @@ function renderDetail() {
     $('#dTitle').textContent = songs.length ? '곡을 선택하세요' : '곡을 추가해 주세요';
     $('#dArtist').textContent = '';
     $('#btnSongInfo').classList.add('hidden');
-    ['#dBpm', '#dTime', '#dPlays', '#dTop', '#dMine'].forEach((k) => { $(k).textContent = '-'; });
+    ['#dBpm', '#dTime', '#dPlays', '#dTop', '#dMine', '#dRate'].forEach((k) => { $(k).textContent = '-'; });
     $('#dHlRange').textContent = '';
     $('#modHl').classList.toggle('on', hlActive());
     $$('#diffBoxes .dbox').forEach((b) => { b.disabled = true; });
@@ -157,7 +170,8 @@ function renderDetail() {
   const top = boardOf(s, nl, settings.diff)[0];
   $('#dTop').innerHTML = top ? `${esc(top.name)} <em>${top.score.toLocaleString()}</em>` : '-';
   const mine = myRecord(s, nl, settings.diff);
-  $('#dMine').innerHTML = mine ? `<span class="rank-${esc(mine.rank)}">${esc(mine.rank)}</span> <em>${mine.score.toLocaleString()}</em>${mine.fc ? ' <span class="fc">FC</span>' : ''}` : '-';
+  $('#dMine').innerHTML = mine ? `<span class="rank-${esc(mine.rank)}">${esc(mine.rank)}</span> <em>${mine.score.toLocaleString()}</em>` : '-';
+  $('#dRate').innerHTML = mine && mine.acc != null ? `<em>${(+mine.acc).toFixed(2)}%</em>${mine.fc ? ' <span class="fc">FC</span>' : ''}` : '-';
   const pb = $('#btnPlay');
   const hlOn = hlActive();
   if (inRoom) {
@@ -260,6 +274,7 @@ function setMode(nl) {
 // 누르는 순간 선택 (클릭 도중 목록이 다시 그려져도 선택이 사라지지 않게)
 $('#songList').addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
+  if (e.target.closest('.fav')) return;
   const r = e.target.closest('.row');
   if (!r) return;
   select(r.dataset.id);
@@ -277,6 +292,38 @@ $('#modeTabs').addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (b) setMode(+b.dataset.mode);
 });
+/* 즐겨찾기 ★ */
+$('#songList').addEventListener('click', (e) => {
+  const f = e.target.closest('.fav');
+  if (!f) return;
+  e.stopPropagation();
+  const id = f.closest('.row').dataset.id;
+  const fav = Object.assign({}, settings.fav || {});
+  if (fav[id]) delete fav[id]; else fav[id] = 1;
+  settings.fav = fav;
+  saveSettings();
+  renderSongs();
+});
+/* 목록 분류 탭 · 오른쪽 칸(멀티·신청함·조작법) 열고 닫기 */
+$('#listTabs').addEventListener('click', (e) => {
+  const t = e.target.closest('[data-tab]');
+  if (t) { settings.listTab = t.dataset.tab; saveSettings(); renderSongs(); return; }
+  const sd = e.target.closest('[data-side]');
+  if (sd) {
+    sideOpen = sideOpen === sd.dataset.side && !(net.room && sd.dataset.side === 'multi') ? '' : sd.dataset.side;
+    renderSide();
+    if (sideOpen && window.innerWidth <= 1280) $('#sideCol').scrollIntoView({ behavior: 'smooth', block: 'start' });   // 좁은 화면은 목록 아래에 열려서 그쪽으로
+  }
+});
+function renderSide() {
+  const want = sideOpen || (net.room ? 'multi' : '');
+  const grid = $('.select-grid');
+  grid.classList.toggle('side-on', !!want);
+  $$('#sideCol [data-panel]').forEach((p) => p.classList.toggle('hidden', p.dataset.panel !== want));
+  $$('#listTabs [data-side]').forEach((b) => b.classList.toggle('on', b.dataset.side === want));
+  $('#roomDot').classList.toggle('hidden', !net.room);
+}
+renderSide();
 $('#search').addEventListener('input', renderSongs);
 $('#sortSel').addEventListener('change', (e) => { settings.sort = e.target.value; saveSettings(); renderSongs(); });
 
@@ -552,6 +599,8 @@ function renderRequests() {
   const n = requests.length;
   $('#reqCount').textContent = n;
   $('#reqCount').classList.toggle('hidden', !n);
+  $('#reqCount2').textContent = n;
+  $('#reqCount2').classList.toggle('hidden', !n);
   if (!n) { $('#reqList').innerHTML = `<li class="empty-req">${isHost ? '신청된 곡이 없어요.' : '신청된 곡이 없어요. 위에서 곡을 신청해 보세요!'}</li>`; return; }
   $('#reqList').innerHTML = requests.map((r) => `<li data-id="${esc(r.id)}" data-vid="${esc(r.vid)}">
       <img src="https://i.ytimg.com/vi/${esc(r.vid)}/default.jpg" alt="" loading="lazy">
@@ -697,7 +746,29 @@ function prevBestOf(g) {
   if (!cands.length) return null;
   const best = cands.reduce((a, b) => (b.score > a.score ? b : a));
   const bestRank = cands.map((c) => c.rank).filter((k) => rankIdx(k) >= 0).sort((a, b) => rankIdx(b) - rankIdx(a))[0] || best.rank;
-  return { score: best.score || 0, rank: bestRank };
+  const same = cands.filter((c) => c.score === best.score);      // 같은 기록이 서버·이 브라우저에 있으면 빠진 칸을 서로 채움
+  const pick = (k) => { const c = same.find((x) => x[k] != null); return c ? c[k] : null; };
+  return { score: best.score || 0, rank: bestRank, acc: pick('acc'), maxCombo: pick('maxCombo'), counts: pick('counts') };
+}
+/* 판정 개수·정확도·최대 콤보를 최고 기록과 비교 (예전 기록이라 판정 개수가 없으면 그 칸은 안 보임) */
+function renderStatDelta(prev, r, show) {
+  const put = (id, d, goodUp, fmt) => {
+    const el = $(id);
+    if (!el) return;
+    if (d == null || !isFinite(d)) { el.textContent = ''; el.className = 'sd'; return; }
+    const better = goodUp ? d > 0 : d < 0;
+    el.className = 'sd ' + (d === 0 ? 'same' : better ? 'up' : 'down');
+    el.textContent = d === 0 ? '±0' : (d > 0 ? '▲' : '▼') + fmt(Math.abs(d));
+  };
+  const on = show && prev && !r.incomplete;
+  const c = on && prev.counts;
+  const n = (x) => x.toLocaleString();
+  put('#dPerfect', c ? r.counts.perfect - c.perfect : null, true, n);
+  put('#dGreat', c ? r.counts.great - c.great : null, false, n);
+  put('#dGood', c ? r.counts.good - c.good : null, false, n);
+  put('#dMiss', c ? r.counts.miss - c.miss : null, false, n);
+  put('#dAcc', on && prev.acc != null ? Math.round((r.acc - prev.acc) * 100) / 100 : null, true, (x) => x.toFixed(2) + '%');
+  put('#dCombo', on && prev.maxCombo != null ? r.maxCombo - prev.maxCombo : null, true, n);
 }
 /* 점수가 얼마나 올랐는지 · 등급이 몇에서 몇으로 올랐는지 */
 function renderBestDelta(prev, r, show) {
@@ -729,6 +800,7 @@ function showResult(g, r) {
   const prevBest = isTest ? null : prevBestOf(g);      // 기록을 저장하기 전에 읽어 둠
   const newLocal = !isTest && setBest(g.song.id, g.diff, g.nl, r, g.hl, !!g.ai);
   renderBestDelta(prevBest, r, !isTest);
+  renderStatDelta(prevBest, r, !isTest);
   const mods = (g.ai ? ' <span class="tag ai-tag">AI 채보</span>' : '') + (g.hl ? ' <span class="tag hl-tag">HIGHLIGHT</span>' : '') + (g.modNames.length ? ` <span class="warn">${g.modNames.join(' · ')}</span>` : '');
   $('#rSong').innerHTML = `${esc(g.song.title)} <span class="tag">${g.nl}KEY</span> ${DIFF_EN[g.diff]} ${starHtml(g.stars)}${mods}`;
   $('#rRank').textContent = r.rank;
@@ -826,6 +898,15 @@ function startResultAvatar(r) {
   const stage = new AvatarStage($('#rAvatar'));
   const good = !r.incomplete && (r.rank === 'SS' || r.rank === 'S');
   const bad = r.incomplete || r.rank === 'C' || r.rank === 'D';
+  const url = typeof aiIllustUrl === 'function' ? aiIllustUrl(settings.avatar) : '';   // AI 일러스트가 있으면 그걸 크게
+  const il = $('#rIllust');
+  il.classList.toggle('hidden', !url);
+  $('#rAvatar').classList.toggle('hidden', !!url);
+  if (url) {
+    if (il.getAttribute('src') !== url) il.src = url;
+    il.className = 'r-illust ' + (good ? 'good' : bad ? 'bad' : '');
+    return;
+  }
   const force = good ? { pose: 'up', eyes: 'happy', mouth: 'open' }
     : bad ? { pose: 'sad', eyes: 'closed', mouth: 'sad', sweat: true }
     : { pose: 'right', mouth: 'smile' };
@@ -961,6 +1042,7 @@ function renderRoom() {
   const r = net.room;
   $('#multiOut').classList.toggle('hidden', !!r);
   $('#multiIn').classList.toggle('hidden', !r);
+  if (typeof renderSide === 'function') renderSide();
   if (r) {
     $('#roomCode').textContent = r.code;
     const stateName = { idle: '', loading: '로딩', loaded: '준비', playing: '플레이 중', done: '완료', error: '오류' };
@@ -1604,3 +1686,25 @@ $('#siSave').addEventListener('click', () => {
 });
 $('#siAuto').addEventListener('click', () => saveSongInfo({ title: $('#siTitle').value.trim() || undefined, artist: '' }));
 $('#siArtist').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) $('#siSave').click(); });
+
+/* ============================================================ 화면 테마 */
+function renderThemeRow() {
+  const cur = settings.uiTheme || 'neon';
+  $('#themeRow').innerHTML = UI_THEMES.map((t) => `<button type="button" data-t="${t.id}" class="${t.id === cur ? 'on' : ''}"><i style="background:${t.sw}"></i>${t.name}</button>`).join('');
+  const t = UI_THEMES.find((x) => x.id === cur) || UI_THEMES[0];
+  $('#btnTheme').title = `화면 테마: ${t.name} (누를 때마다 다음 테마)`;
+}
+function setUiTheme(id) {
+  settings.uiTheme = id;
+  saveSettings();
+  applyUiTheme();
+  renderThemeRow();
+}
+$('#themeRow').addEventListener('click', (e) => { const b = e.target.closest('[data-t]'); if (b) setUiTheme(b.dataset.t); });
+$('#btnTheme').addEventListener('click', () => {
+  const i = UI_THEMES.findIndex((x) => x.id === (settings.uiTheme || 'neon'));
+  const t = UI_THEMES[(i + 1) % UI_THEMES.length];
+  setUiTheme(t.id);
+  if (typeof toast === 'function') toast(`화면 테마: ${t.name}`);
+});
+renderThemeRow();

@@ -51,6 +51,7 @@
       <span id="myTitle" class="ptitle my-title hidden" title="내 칭호"></span>
       <button id="btnAch" class="ghost ach-btn" type="button" title="업적 · 칭호">🏆<span>업적</span></button>
       <button id="btnAvatar" class="ghost av-btn"><canvas id="topAvatar" width="28" height="28"></canvas>내 캐릭터</button>
+      <button id="btnTheme" class="ghost" type="button" title="화면 테마 바꾸기 (누를 때마다 다음 테마)">🎨 테마</button>
       <button id="btnSkin" class="ghost">꾸미기</button>
       <button id="btnSettings" class="ghost">설정</button>
     </div>
@@ -99,8 +100,9 @@
         <span class="speed-show">SPEED <b id="speedShow"></b><small id="speedKeys"></small></span>
       </div>
       <div class="d-records">
-        <div class="rec"><span>친구 1위</span><b id="dTop">-</b></div>
-        <div class="rec"><span>내 기록</span><b id="dMine">-</b></div>
+        <div class="rec rec-hi"><span>HIGH SCORE</span><b id="dMine">-</b></div>
+        <div class="rec rec-rate"><span>MAX RATE</span><b id="dRate">-</b></div>
+        <div class="rec rec-top"><span>친구 1위</span><b id="dTop">-</b></div>
       </div>
       <div class="d-actions">
         <button id="btnPlay" class="play-btn">PLAY<small>Enter</small></button>
@@ -156,13 +158,23 @@
         </select>
         <input id="search" placeholder="곡·가수 검색" autocomplete="off">
       </div>
+      <div class="list-tabs" id="listTabs">
+        <button data-tab="all">전체</button>
+        <button data-tab="fav">★ 즐겨찾기</button>
+        <button data-tab="unplayed">안 해본 곡</button>
+        <button data-tab="ai">AI 채보</button>
+        <span class="lt-gap"></span>
+        <button class="side-tg" data-side="multi" title="친구와 같이 하기">👥 멀티<span id="roomDot" class="lt-dot hidden"></span></button>
+        <button class="side-tg" data-side="req" title="곡 신청함">📨 신청함<span id="reqCount2" class="badge hidden"></span></button>
+        <button class="side-tg" data-side="help" title="조작법 · 키 바꾸기">❔ 조작법</button>
+      </div>
       <div id="songList" class="song-list"></div>
       <div class="list-keys muted small">↑↓ 곡 · ←→ 난이도 · Tab 4키/6키 · Enter 시작</div>
     </main>
 
     <!-- 멀티 / 도움말 -->
-    <aside class="side-col">
-      <div class="panel" id="multiPanel">
+    <aside class="side-col" id="sideCol">
+      <div class="panel" id="multiPanel" data-panel="multi">
         <div id="multiOut">
           <h3>MULTI<small>친구와 함께</small></h3>
           <p class="muted small">방을 만들고 코드를 친구에게 알려주세요.</p>
@@ -195,12 +207,12 @@
         </div>
       </div>
 
-      <div class="panel" id="reqPanel">
+      <div class="panel" id="reqPanel" data-panel="req">
         <h3>REQUEST<small>곡 신청함</small><span id="reqCount" class="badge hidden"></span></h3>
         <ul id="reqList" class="req-list"></ul>
       </div>
 
-      <div class="panel help">
+      <div class="panel help" data-panel="help">
         <h3>HOW TO<small>조작법</small></h3>
         <div class="keys-row"><div class="keys-help" id="keysHelp" title="눌러서 키 바꾸기"></div><button id="btnKeyEdit" class="ghost small-btn">키 바꾸기</button></div>
         <ul class="small muted">
@@ -256,22 +268,22 @@
     <div class="result-main panel">
       <div id="rSong" class="r-song"></div>
       <div class="r-top">
-        <div class="r-left"><div id="rRank" class="r-rank">S</div><div id="rRankUp" class="r-rankup hidden"></div><canvas id="rAvatar" class="r-avatar"></canvas></div>
+        <div class="r-left"><div id="rRank" class="r-rank">S</div><div id="rRankUp" class="r-rankup hidden"></div><canvas id="rAvatar" class="r-avatar"></canvas><img id="rIllust" class="r-illust hidden" alt=""></div>
         <div>
           <div id="rScore" class="r-score">0</div>
           <div id="rDelta" class="r-delta hidden"></div>
           <div id="rBadge" class="r-badge"></div>
           <div class="r-stats">
-            <div><span>정확도</span><b id="rAcc"></b></div>
-            <div><span>최대 콤보</span><b id="rCombo"></b></div>
+            <div><span>정확도</span><b id="rAcc"></b><i id="dAcc" class="sd"></i></div>
+            <div><span>최대 콤보</span><b id="rCombo"></b><i id="dCombo" class="sd"></i></div>
           </div>
         </div>
       </div>
       <div class="r-counts">
-        <div class="c-perfect"><span>PERFECT</span><b id="rPerfect"></b></div>
-        <div class="c-great"><span>GREAT</span><b id="rGreat"></b></div>
-        <div class="c-good"><span>GOOD</span><b id="rGood"></b></div>
-        <div class="c-miss"><span>MISS</span><b id="rMiss"></b></div>
+        <div class="c-perfect"><span>PERFECT</span><b id="rPerfect"></b><i id="dPerfect" class="sd"></i></div>
+        <div class="c-great"><span>GREAT</span><b id="rGreat"></b><i id="dGreat" class="sd"></i></div>
+        <div class="c-good"><span>GOOD</span><b id="rGood"></b><i id="dGood" class="sd"></i></div>
+        <div class="c-miss"><span>MISS</span><b id="rMiss"></b><i id="dMiss" class="sd"></i></div>
       </div>
       <div class="r-timing">
         <div class="rt-head"><span>TIMING</span><span id="rtStats" class="muted small"></span></div>
@@ -407,6 +419,7 @@
         <button type="button" id="btnKeyReset" class="ghost small-btn">키 기본값으로</button>
       </div>
     </div>
+    <div class="set-row"><span class="nowrap">화면 테마</span><div class="theme-row" id="themeRow"></div></div>
     <div class="set-row"><span>노트 속도 <b id="speedVal"></b></span><input id="setSpeed" type="range" min="1" max="10" step="0.5"></div>
     <div class="set-row"><span>싱크 (ms) <b id="offsetVal"></b></span><input id="setOffset" type="range" min="-300" max="300" step="5"></div>
     <p class="small muted">노트보다 소리가 늦게 들리면 + 쪽으로, 빨리 들리면 - 쪽으로 옮기세요.</p>
@@ -500,12 +513,19 @@
         <button id="avRandom" class="primary skew">🎲 랜덤</button>
       </div>
       <div class="skin-controls av-controls">
+        <section id="avAi" class="av-ai">
+          <h4>✦ AI 캐릭터</h4>
+          <div class="av-ai-row"><img id="avAiIllust" class="av-ai-illust hidden" alt=""><img id="avAiPixel" class="av-ai-pixel hidden" alt=""></div>
+          <div class="av-ai-btns"><button id="avAiGo" class="primary skew" type="button">✦ AI로 그리기</button><button id="avAiUse" class="chip hidden" type="button">AI 그림 쓰기</button></div>
+          <div id="avAiMsg" class="small muted"></div>
+        </section>
         <section><h4>피부</h4><div class="av-sws" id="avSkin"></div></section>
         <section><h4>머리 모양</h4><div class="opt-row" id="avHair"></div></section>
         <section><h4>머리 색</h4><div class="av-sws" id="avHairColor"></div></section>
         <section><h4>눈</h4><div class="opt-row" id="avEyes"></div></section>
         <section><h4>옷</h4><div class="opt-row" id="avOutfit"></div><div class="av-sws" id="avOutfitColor"></div></section>
         <section><h4>액세서리</h4><div class="opt-row" id="avAcc"></div></section>
+        <section><h4>느낌 <small class="muted">AI 그림용</small></h4><div class="opt-row" id="avGender"></div></section>
         <p class="small muted">플레이 중에는 오른쪽 칸에서 박자에 맞춰 까딱이고, 콤보 50마다 점프, 피버 때 춤춰요. 멀티에서는 친구들에게도 보여요.</p>
       </div>
     </div>

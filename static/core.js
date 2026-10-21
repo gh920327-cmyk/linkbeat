@@ -80,6 +80,19 @@ function themeColors() {
   return sk.theme === 'custom' || !THEMES[sk.theme] ? sk.colors : THEMES[sk.theme];
 }
 if (!Array.isArray(settings.keys6) || settings.keys6.length !== 6) settings.keys6 = [...DEFAULT_KEYS6];
+/* 화면 테마 (곡 선택·결과·창): neon(기본) · sunshine · mint · cherry */
+const UI_THEMES = [
+  { id: 'neon', name: '네온', sw: 'linear-gradient(135deg,#04060d,#3f8cff)' },
+  { id: 'sunshine', name: '선샤인', sw: 'linear-gradient(135deg,#c8a646,#f07a2a)' },
+  { id: 'mint', name: '민트', sw: 'linear-gradient(135deg,#eefbf9,#1c94d0)' },
+  { id: 'cherry', name: '체리', sw: 'linear-gradient(135deg,#fff0f5,#f0457f)' },
+];
+function applyUiTheme() {
+  const t = UI_THEMES.find((x) => x.id === settings.uiTheme) ? settings.uiTheme : 'neon';
+  if (t === 'neon') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+}
+applyUiTheme();
 function saveSettings() {
   if (window.__lbReloading) return;   // 프로필을 불러와 새로고침하는 중엔 덮어쓰지 않음
   store.set('settings', settings);
@@ -593,7 +606,11 @@ function getBest(id, diff, nl = 4, hl = false, ai = false) { return store.get(be
 function setBest(id, diff, nl, r, hl = false, ai = false) {
   const b = getBest(id, diff, nl, hl, ai);
   if (!b || r.score > b.score) {
-    store.set(bestKey(id, diff, nl, hl, ai), { score: r.score, acc: r.acc, rank: r.rank, fc: r.fc, ...(Array.isArray(r.g) ? { g: r.g } : {}) });
+    store.set(bestKey(id, diff, nl, hl, ai), {
+      score: r.score, acc: r.acc, rank: r.rank, fc: r.fc, maxCombo: r.maxCombo,
+      ...(r.counts ? { counts: { perfect: r.counts.perfect, great: r.counts.great, good: r.counts.good, miss: r.counts.miss } } : {}),
+      ...(Array.isArray(r.g) ? { g: r.g } : {}),
+    });
     if (typeof profileSync === 'function') profileSync();
     return true;
   }
