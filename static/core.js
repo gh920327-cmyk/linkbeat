@@ -80,12 +80,16 @@ function themeColors() {
   return sk.theme === 'custom' || !THEMES[sk.theme] ? sk.colors : THEMES[sk.theme];
 }
 if (!Array.isArray(settings.keys6) || settings.keys6.length !== 6) settings.keys6 = [...DEFAULT_KEYS6];
-/* 화면 테마 (곡 선택·결과·창): neon(기본) · sunshine · mint · cherry */
+/* 화면 테마 (곡 선택·결과·창): neon(기본) · sunshine · mint · cherry · sage · slate · latte · lavender */
 const UI_THEMES = [
   { id: 'neon', name: '네온', sw: 'linear-gradient(135deg,#04060d,#3f8cff)' },
   { id: 'sunshine', name: '선샤인', sw: 'linear-gradient(135deg,#c8a646,#f07a2a)' },
   { id: 'mint', name: '민트', sw: 'linear-gradient(135deg,#eefbf9,#1c94d0)' },
   { id: 'cherry', name: '체리', sw: 'linear-gradient(135deg,#fff0f5,#f0457f)' },
+  { id: 'sage', name: '세이지', sw: 'linear-gradient(135deg,#283128,#8fae7a)' },
+  { id: 'slate', name: '슬레이트', sw: 'linear-gradient(135deg,#232a36,#7d96c4)' },
+  { id: 'latte', name: '라떼', sw: 'linear-gradient(135deg,#efe6da,#a9805a)' },
+  { id: 'lavender', name: '라벤더', sw: 'linear-gradient(135deg,#ebe9f1,#8b7ab8)' },
 ];
 function applyUiTheme() {
   const t = UI_THEMES.find((x) => x.id === settings.uiTheme) ? settings.uiTheme : 'neon';
