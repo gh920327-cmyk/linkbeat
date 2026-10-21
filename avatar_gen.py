@@ -78,8 +78,9 @@ def prompts(a, desc="", use_look=True):
     illust = (f"{g}, solo, {who}, upper body, looking at viewer, music, rhythm game, dynamic pose, "
               f"colorful, vibrant, gradient background, safe, {QUALITY}")
     chibi = (f"{g}, solo, chibi, super deformed, 2.5 heads tall, cute, {who}, full body, standing, front view, arms at sides, "
-             f"game sprite, simple background, white background, thick outline, flat color, cel shading, safe, {QUALITY}")
-    chibi_neg = NEG + ", shadow, gradient background, scenery, multiple views, character sheet, reference sheet, close-up, portrait, cropped feet"
+             f"game sprite, simple background, white background, plain white background, no background, thick outline, flat color, cel shading, safe, {QUALITY}")
+    chibi_neg = NEG + (", shadow, drop shadow, ground, floor, gradient background, colored background, scenery, border, frame, "
+                       "multiple views, character sheet, reference sheet, close-up, portrait, cropped feet, text")
     return (illust, NEG, 896, 1152), (chibi, chibi_neg, 1024, 1024)
 
 
@@ -314,14 +315,21 @@ POSES = {   # 기본 자세 그림에서 출발해 동작만 바꿈 (denoise가 
 
 
 def _fg_mask(im, S=256):
-    """흰 바탕에서 캐릭터 부분(가장자리와 이어진 흰 바탕만 지움)"""
+    """캐릭터 부분 찾기: 테두리에서 바탕 색을 알아내고, 테두리와 이어진 '바탕 색에 가깝고 매끈한' 곳을 모두 지움
+    (흰 바탕이 아니어도·연한 그라데이션이어도 지워지고, 외곽선 안쪽 같은 색 옷은 남음) + 작은 부스러기 지움"""
     import numpy as np
     from PIL import Image
-    small = np.asarray(im.resize((S, S), Image.LANCZOS)).astype(np.int16)
-    near = (small.min(axis=2) > 222) & ((small.max(axis=2) - small.min(axis=2)) < 28)
+    small = np.asarray(im.resize((S, S), Image.LANCZOS)).astype(np.float32)
+    border = np.concatenate([small[0], small[-1], small[:, 0], small[:, -1]])
+    bgc = np.median(border, axis=0)
+    dist = np.sqrt(((small - bgc) ** 2).sum(axis=2))
+    gy = np.abs(np.diff(small, axis=0, append=small[-1:])).sum(axis=2)
+    gx = np.abs(np.diff(small, axis=1, append=small[:, -1:])).sum(axis=2)
+    smooth = np.maximum(gx, gy) < 36
+    near = (dist < 34) | ((dist < 95) & smooth)
     bg = np.zeros_like(near)
     bg[0, :], bg[-1, :], bg[:, 0], bg[:, -1] = near[0, :], near[-1, :], near[:, 0], near[:, -1]
-    for _ in range(S * 2):
+    for _ in range(S * 3):
         grow = bg.copy()
         grow[1:, :] |= bg[:-1, :]
         grow[:-1, :] |= bg[1:, :]
@@ -331,7 +339,29 @@ def _fg_mask(im, S=256):
         if (grow == bg).all():
             break
         bg = grow
-    return ~bg
+    fg = ~bg
+    # 덩어리마다 크기를 재서, 가장 큰 덩어리의 3%보다 작은 부스러기(바탕 얼룩·글자)는 지움
+    lab = np.zeros((S, S), dtype=np.int32)
+    sizes = [0]
+    for y0 in range(S):
+        for x0 in range(S):
+            if fg[y0, x0] and not lab[y0, x0]:
+                n = len(sizes)
+                stack, cnt = [(y0, x0)], 0
+                lab[y0, x0] = n
+                while stack:
+                    y, x = stack.pop()
+                    cnt += 1
+                    for yy, xx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                        if 0 <= yy < S and 0 <= xx < S and fg[yy, xx] and not lab[yy, xx]:
+                            lab[yy, xx] = n
+                            stack.append((yy, xx))
+                sizes.append(cnt)
+    if len(sizes) > 1:
+        big = max(sizes)
+        keep = np.array([False] + [c >= big * 0.03 for c in sizes[1:]])
+        fg = keep[lab]
+    return fg
 
 
 def pixel_sheet(pngs, height=64, colors=24):
@@ -438,9 +468,10 @@ def main():
         comfy.start()
         ref_name = comfy.upload(ref) if ref else None
         seed = random.randint(1, 2 ** 31)
-        say("일러스트 그리는 중..." + (" (참고 사진 반영)" if ref_name else ""))
-        il = comfy.run(workflow(il_p, il_n, il_w, il_h, seed, "linkbeat_avatar/illust", ref_name, rw[0]), "일러스트")
-        (out / "illust.webp").write_bytes(to_webp(il))
+        if spec.get("mode") != "pixel":           # pixel: 일러스트는 그대로 두고 도트만
+            say("일러스트 그리는 중..." + (" (참고 사진 반영)" if ref_name else ""))
+            il = comfy.run(workflow(il_p, il_n, il_w, il_h, seed, "linkbeat_avatar/illust", ref_name, rw[0]), "일러스트")
+            (out / "illust.webp").write_bytes(to_webp(il))
         say("도트용 꼬마 캐릭터 그리는 중...")
         ch = comfy.run(workflow(ch_p, ch_n, ch_w, ch_h, seed + 1, "linkbeat_avatar/chibi", ref_name, rw[1]), "꼬마 캐릭터")
         base_file = out / "chibi_base.png"
