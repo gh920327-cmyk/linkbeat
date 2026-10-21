@@ -77,7 +77,8 @@ def prompts(a, desc="", use_look=True):
     who = ", ".join(parts)
     illust = (f"{g}, solo, {who}, upper body, looking at viewer, music, rhythm game, dynamic pose, "
               f"colorful, vibrant, gradient background, safe, {QUALITY}")
-    chibi = (f"{g}, solo, chibi, super deformed, 2.5 heads tall, cute, {who}, full body, standing, front view, arms at sides, "
+    chibi = (f"{g}, solo, chibi, super deformed, 2 heads tall, big head, large detailed eyes, clear facial features, expressive face, "
+             f"cute, {who}, full body, standing, front view, arms at sides, "
              f"game sprite, simple background, white background, plain white background, no background, thick outline, flat color, cel shading, safe, {QUALITY}")
     chibi_neg = NEG + (", shadow, drop shadow, ground, floor, gradient background, colored background, scenery, border, frame, "
                        "multiple views, character sheet, reference sheet, close-up, portrait, cropped feet, text")
@@ -364,7 +365,26 @@ def _fg_mask(im, S=256):
     return fg
 
 
-def pixel_sheet(pngs, height=64, colors=24):
+def shrink_keep_lines(img, size):
+    """작게 줄이기: 보통은 평균색, 눈동자·입·외곽선 같은 진한 선이 칸의 1/4 이상이면 그 진한 색 그대로
+    (평균으로 줄이면 얼굴의 작은 선이 흐려져서 표정이 안 보임) — 줄이기 전에 살짝 선명하게"""
+    import numpy as np
+    from PIL import Image, ImageFilter
+    img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=110, threshold=2))
+    arr = np.asarray(img).astype(np.float32)
+    lum = arr[:, :, 0] * 0.299 + arr[:, :, 1] * 0.587 + arr[:, :, 2] * 0.114
+    dark = (lum < 80).astype(np.float32)
+    avg = np.asarray(img.resize(size, Image.BOX)).astype(np.float32)
+    cov = np.asarray(Image.fromarray((dark * 255).astype("uint8")).resize(size, Image.BOX)).astype(np.float32) / 255
+    dsum = np.stack([np.asarray(Image.fromarray((arr[:, :, c] * dark).astype("uint8")).resize(size, Image.BOX)).astype(np.float32)
+                     for c in range(3)], axis=2)
+    dcol = dsum / np.maximum(cov[:, :, None], 1e-3)
+    use = cov >= 0.25
+    out = np.where(use[:, :, None], dcol, avg)
+    return Image.fromarray(np.clip(out, 0, 255).astype("uint8"))
+
+
+def pixel_sheet(pngs, height=96, colors=32):
     """꼬마 그림 여러 장(기본·치기·점프·슬픔) → 같은 크기·같은 발 위치·같은 색 팔레트의 도트 동작 그림들
     → (기본 한 장 PNG, 동작 줄 PNG [기본·치기 왼·치기 오른(뒤집기)·점프·슬픔])"""
     import numpy as np
@@ -397,7 +417,7 @@ def pixel_sheet(pngs, height=64, colors=24):
         cm = np.asarray(mask) > 0
         if cm.any():
             ca[~cm] = ca[cm].mean(axis=0).astype("uint8")   # 줄일 때 흰 바탕이 가장자리에 번지지 않게
-        rgb = Image.fromarray(ca).resize((w, h), Image.BOX)
+        rgb = shrink_keep_lines(Image.fromarray(ca), (w, h))
         alpha = np.asarray(mask.resize((w, h), Image.BOX)) > 110
         arr = np.asarray(rgb).copy()
         if alpha.any():
@@ -437,7 +457,7 @@ def pixel_sheet(pngs, height=64, colors=24):
     return png(base), png(sheet)
 
 
-def pixelize(png, height=64, colors=24):
+def pixelize(png, height=96, colors=32):
     """꼬마 전신 그림 한 장 → 도트 한 장 (예전 방식, 시험용)"""
     return pixel_sheet([png], height, colors)[0]
 
