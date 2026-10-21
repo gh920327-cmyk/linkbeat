@@ -77,12 +77,27 @@ def prompts(a, desc="", use_look=True):
     who = ", ".join(parts)
     illust = (f"{g}, solo, {who}, upper body, looking at viewer, music, rhythm game, dynamic pose, "
               f"colorful, vibrant, gradient background, safe, {QUALITY}")
+    key = key_color(who)
     chibi = (f"{g}, solo, chibi, super deformed, 2 heads tall, big head, large detailed eyes, clear facial features, expressive face, "
              f"cute, {who}, full body, standing, front view, arms at sides, "
-             f"game sprite, simple background, white background, plain white background, no background, thick outline, flat color, cel shading, safe, {QUALITY}")
-    chibi_neg = NEG + (", shadow, drop shadow, ground, floor, gradient background, colored background, scenery, border, frame, "
-                       "multiple views, character sheet, reference sheet, close-up, portrait, cropped feet, text")
-    return (illust, NEG, 896, 1152), (chibi, chibi_neg, 1024, 1024)
+             f"game sprite, simple background, ({key} background:1.3), solid color background, flat background, thick outline, "
+             f"flat color, cel shading, safe, {QUALITY}")
+    chibi_neg = NEG + (", shadow, drop shadow, ground, floor, white background, gradient background, detailed background, scenery, "
+                       "border, frame, multiple views, character sheet, reference sheet, close-up, portrait, cropped feet, text")
+    return (illust, NEG, 896, 1152), (chibi, chibi_neg, 1024, 1024), key
+
+
+KEY_HUE = {"green": 120, "blue": 220, "pink": 315}
+
+
+def key_color(who):
+    """꼬마 그림 바탕색 (크로마키): 캐릭터에 없는 진한 색 — 보통 초록, 캐릭터에 초록이 있으면 파랑, 둘 다 있으면 분홍"""
+    w = who.lower()
+    if not any(k in w for k in ("green", "mint", "emerald", "lime", "olive", "teal")):
+        return "green"
+    if not any(k in w for k in ("blue", "navy", "cyan", "teal", "aqua")):
+        return "blue"
+    return "pink"
 
 
 # ------------------------------------------------------------------ 글 → 영어 태그 (PC의 Ollama)
@@ -192,7 +207,7 @@ def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0, base=None, denoi
 
 IPA_FILE = "ip-adapter-plus_sdxl_vit-h.safetensors"
 CLIPV_FILE = "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
-REF_WEIGHT = {"low": (0.45, 0.3), "mid": (0.65, 0.45), "high": (0.85, 0.6)}   # (일러스트, 꼬마 도트)
+REF_WEIGHT = {"low": (0.45, 0.2), "mid": (0.65, 0.3), "high": (0.85, 0.4)}   # (일러스트, 꼬마 도트 — 사진 바탕색이 묻어나지 않게 약하게)
 
 
 # ------------------------------------------------------------------ ComfyUI
@@ -315,6 +330,80 @@ POSES = {   # 기본 자세 그림에서 출발해 동작만 바꿈 (denoise가 
 }
 
 
+def _key_mask(im, key, S=256):
+    """크로마키: 바탕색(진한 초록 등)과 색상이 같고 채도가 높은 곳 중 테두리와 이어진 곳만 바탕"""
+    import numpy as np
+    from PIL import Image
+    hsv = np.asarray(im.resize((S, S), Image.LANCZOS).convert("HSV")).astype(np.float32)
+    hue = hsv[:, :, 0] * 360 / 255
+    dh = np.abs((hue - KEY_HUE[key] + 180) % 360 - 180)
+    near = (dh < 32) & (hsv[:, :, 1] > 95) & (hsv[:, :, 2] > 55)
+    bg = np.zeros_like(near)
+    bg[0, :], bg[-1, :], bg[:, 0], bg[:, -1] = near[0, :], near[-1, :], near[:, 0], near[:, -1]
+    for _ in range(S * 3):
+        grow = bg.copy()
+        grow[1:, :] |= bg[:-1, :]
+        grow[:-1, :] |= bg[1:, :]
+        grow[:, 1:] |= bg[:, :-1]
+        grow[:, :-1] |= bg[:, 1:]
+        grow &= near
+        if (grow == bg).all():
+            break
+        bg = grow
+    return _keep_big(~bg)
+
+
+def _keep_big(fg):
+    """덩어리마다 크기를 재서, 가장 큰 덩어리의 3%보다 작은 부스러기(바탕 얼룩·글자)는 지움"""
+    import numpy as np
+    S0, S1 = fg.shape
+    lab = np.zeros(fg.shape, dtype=np.int32)
+    sizes = [0]
+    for y0 in range(S0):
+        for x0 in range(S1):
+            if fg[y0, x0] and not lab[y0, x0]:
+                n = len(sizes)
+                stack, cnt = [(y0, x0)], 0
+                lab[y0, x0] = n
+                while stack:
+                    y, x = stack.pop()
+                    cnt += 1
+                    for yy, xx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                        if 0 <= yy < S0 and 0 <= xx < S1 and fg[yy, xx] and not lab[yy, xx]:
+                            lab[yy, xx] = n
+                            stack.append((yy, xx))
+                sizes.append(cnt)
+    if len(sizes) <= 1:
+        return fg
+    big = max(sizes)
+    keep = np.array([False] + [c >= big * 0.03 for c in sizes[1:]])
+    return keep[lab]
+
+
+def _despill(arr, key, edge):
+    """가장자리에 번진 바탕색 빼기: 바탕색 쪽 색상이면 채도를 낮춤"""
+    import numpy as np
+    from PIL import Image
+    hsv = np.asarray(Image.fromarray(arr).convert("HSV")).astype(np.float32)
+    hue = hsv[:, :, 0] * 360 / 255
+    dh = np.abs((hue - KEY_HUE[key] + 180) % 360 - 180)
+    spill = edge & (dh < 40) & (hsv[:, :, 1] > 50)
+    if spill.any():
+        g = arr.astype(np.float32).mean(axis=2, keepdims=True)
+        arr = np.where(spill[:, :, None], (arr * 0.35 + g * 0.65), arr).astype("uint8")
+    return arr
+
+
+def _solid(fg):
+    """캐릭터가 한 덩어리로 꽉 찼는지 (구멍·조각이 많으면 False)"""
+    import numpy as np
+    ys, xs = np.where(fg)
+    if not len(ys):
+        return False
+    box = (ys.max() - ys.min() + 1) * (xs.max() - xs.min() + 1)
+    return fg.sum() / box > 0.35
+
+
 def _fg_mask(im, S=256):
     """캐릭터 부분 찾기: 테두리에서 바탕 색을 알아내고, 테두리와 이어진 '바탕 색에 가깝고 매끈한' 곳을 모두 지움
     (흰 바탕이 아니어도·연한 그라데이션이어도 지워지고, 외곽선 안쪽 같은 색 옷은 남음) + 작은 부스러기 지움"""
@@ -340,29 +429,7 @@ def _fg_mask(im, S=256):
         if (grow == bg).all():
             break
         bg = grow
-    fg = ~bg
-    # 덩어리마다 크기를 재서, 가장 큰 덩어리의 3%보다 작은 부스러기(바탕 얼룩·글자)는 지움
-    lab = np.zeros((S, S), dtype=np.int32)
-    sizes = [0]
-    for y0 in range(S):
-        for x0 in range(S):
-            if fg[y0, x0] and not lab[y0, x0]:
-                n = len(sizes)
-                stack, cnt = [(y0, x0)], 0
-                lab[y0, x0] = n
-                while stack:
-                    y, x = stack.pop()
-                    cnt += 1
-                    for yy, xx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
-                        if 0 <= yy < S and 0 <= xx < S and fg[yy, xx] and not lab[yy, xx]:
-                            lab[yy, xx] = n
-                            stack.append((yy, xx))
-                sizes.append(cnt)
-    if len(sizes) > 1:
-        big = max(sizes)
-        keep = np.array([False] + [c >= big * 0.03 for c in sizes[1:]])
-        fg = keep[lab]
-    return fg
+    return _keep_big(~bg)
 
 
 def shrink_keep_lines(img, size):
@@ -384,7 +451,7 @@ def shrink_keep_lines(img, size):
     return Image.fromarray(np.clip(out, 0, 255).astype("uint8"))
 
 
-def pixel_sheet(pngs, height=96, colors=32):
+def pixel_sheet(pngs, height=96, colors=32, key=None):
     """꼬마 그림 여러 장(기본·치기·점프·슬픔) → 같은 크기·같은 발 위치·같은 색 팔레트의 도트 동작 그림들
     → (기본 한 장 PNG, 동작 줄 PNG [기본·치기 왼·치기 오른(뒤집기)·점프·슬픔])"""
     import numpy as np
@@ -392,7 +459,13 @@ def pixel_sheet(pngs, height=96, colors=32):
     ims = [Image.open(io.BytesIO(b)).convert("RGB") for b in pngs]
     W0, H0 = ims[0].size
     S = 256
-    masks = [_fg_mask(im, S) for im in ims]
+    masks = None
+    if key in KEY_HUE:          # 크로마키 바탕으로 그렸으면 그 색만 지움 — 이상하면(캐릭터가 조각나면) 예전 방식
+        km = [_key_mask(im, key, S) for im in ims]
+        if km[0].sum() > S * S * 0.04 and _solid(km[0]):
+            masks = km
+    if masks is None:
+        masks = [_fg_mask(im, S) for im in ims]
     if masks[0].sum() < 200:
         raise RuntimeError("캐릭터를 찾지 못했어요 (바탕만 그려졌어요).")
     for i in range(1, len(masks)):              # 동작 그림이 망가졌으면(캐릭터가 없거나 너무 다르면) 기본 자세로
@@ -415,6 +488,9 @@ def pixel_sheet(pngs, height=96, colors=32):
         mask = Image.fromarray((m[y0:y1, x0:x1] * 255).astype("uint8")).resize(crop.size, Image.NEAREST)
         ca = np.asarray(crop).copy()
         cm = np.asarray(mask) > 0
+        if key in KEY_HUE:
+            near_edge = cm & ~np.asarray(Image.fromarray((cm * 255).astype("uint8")).filter(__import__("PIL.ImageFilter", fromlist=["x"]).MinFilter(9))).astype(bool)
+            ca = _despill(ca, key, near_edge)
         if cm.any():
             ca[~cm] = ca[cm].mean(axis=0).astype("uint8")   # 줄일 때 흰 바탕이 가장자리에 번지지 않게
         rgb = shrink_keep_lines(Image.fromarray(ca), (w, h))
@@ -480,7 +556,7 @@ def main():
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     desc = desc_to_tags(spec.get("desc", ""), a.comfy)          # ComfyUI보다 먼저 (그래픽카드 메모리가 겹치지 않게)
-    (il_p, il_n, il_w, il_h), (ch_p, ch_n, ch_w, ch_h) = prompts(av, desc, spec.get("useLook", True) is not False)
+    (il_p, il_n, il_w, il_h), (ch_p, ch_n, ch_w, ch_h), key = prompts(av, desc, spec.get("useLook", True) is not False)
     ref = spec.get("ref") if spec.get("ref") and Path(spec["ref"]).is_file() else None
     rw = REF_WEIGHT.get(spec.get("strength"), REF_WEIGHT["mid"])
     comfy = Comfy(a.comfy)
@@ -507,7 +583,7 @@ def main():
             except Exception as e:
                 say(f"동작 하나를 못 그렸어요 ({str(e)[:60]}) — 기본 자세로 대신해요")
                 poses.append(ch)
-        one, sheet = pixel_sheet([ch] + poses)
+        one, sheet = pixel_sheet([ch] + poses, key=key)
         (out / "pixel.png").write_bytes(one)
         (out / "sheet.png").write_bytes(sheet)
         say("완성!")
