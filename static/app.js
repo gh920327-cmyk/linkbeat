@@ -658,6 +658,8 @@ function setupGameScreen(g, multi) {
   $('#gMeta').innerHTML = `<span class="tag">${g.nl}KEY</span> ${DIFF_EN[g.diff]} ${starHtml(g.stars)} · BPM ${Math.round(g.song.bpm)} · ${fmtTime(g.song.duration)}${extra ? ` <br><span class="warn">${esc(extra)}</span>` : ''}`;
   $('#livePanel').classList.toggle('hidden', !multi);
   $('#screen-game').classList.toggle('multi', !!multi);
+  const bg = $('#gameBg');     // 배경 연출: 곡 썸네일
+  if (bg) { $('.gb-img', bg).style.backgroundImage = `url("https://i.ytimg.com/vi/${g.song.id}/hqdefault.jpg")`; bg.style.setProperty('--pulse', '0'); }
   $('#specPanel').classList.add('hidden');
   $('#liveBoard').innerHTML = '';
   updateOffsetShow();

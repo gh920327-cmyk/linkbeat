@@ -73,6 +73,9 @@ class SkinPreview {
         this.fever = Math.min(100, this.fever + 4);
         fxHit(this.fx, n.l, now);
         fxBurst(this.fx, n.l, kind, now);
+        if (kind === 'perfect') fxPerfect(this.fx, n.l, now);
+        (this.errHist || (this.errHist = [])).push({ dt: (kind === 'perfect' ? (r - 0.4) * 0.08 : (r < 0.9 ? -0.065 : 0.07)), kind, at: now });
+        if (this.errHist.length > 30) this.errHist.shift();
         if (n.a) fxAccent(this.fx, n.l, kind, now);
         if (this.notes.some((m) => m !== n && m.t === n.t)) fxShake(this.fx, 2.2, now);
         if (this.combo % 50 === 0) fxMilestone(this.fx, this.combo, now);
@@ -94,10 +97,12 @@ class SkinPreview {
       if (yTail === null && yHead < -20) continue;
       drawNote(L, n.l, yHead, yTail, holding ? 'hold' : 'live', n.a);
     }
-    drawJudgeLine(L, judgeY, this.pressed);
+    drawJudgeLine(L, judgeY, this.pressed, this.fx, now);
     drawFx(L, judgeY, this.fx, now);
-    for (let l = 0; l < this.nl; l++) if (this.pressed[l] && t < this.holdUntil[l] - 0.08) fxHoldSpark(this.fx, l, now);
+    for (let l = 0; l < this.nl; l++) if (this.pressed[l] && t < this.holdUntil[l] - 0.08) { fxHoldSpark(this.fx, l, now); drawHoldGlow(L, judgeY, l, now); }
     drawPunch(L, judgeY, this.fx, now);
+    drawGlints(L, judgeY, this.fx, now);
+    if (settings.skin.errorBar !== false) drawErrorBar(L, judgeY, this.errHist, now);
     // 피버 게이지 + 연출
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillRect(x0 + fieldW + 2, 10, 6, judgeY - 20);
@@ -158,6 +163,13 @@ function renderSkin() {
   $('#optChorus').checked = sk.chorusFx !== false;
   $('#optApplause').checked = sk.applause !== false;
   $$('#punchOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.punch || 'mid')));
+  $('#optAccentSnd').checked = sk.accentSound !== false;
+  $('#optHoldSnd').checked = sk.holdSound !== false;
+  $('#optBreakSnd').checked = sk.breakSound !== false;
+  $('#optErrBar').checked = sk.errorBar !== false;
+  $('#optGlint').checked = sk.perfectGlint !== false;
+  $$('#lineStyleOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.lineStyle || 'auto')));
+  $$('#bgFxOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.bgFx || 'soft')));
 }
 function skinChanged() { saveSettings(); renderSkin(); }
 
@@ -232,6 +244,20 @@ for (const [id, big] of [['#applauseTest', false], ['#applauseTestAp', true]]) {
     sfx.applause(big);
   });
 }
+for (const [id, key] of [['#optAccentSnd', 'accentSound'], ['#optHoldSnd', 'holdSound'], ['#optBreakSnd', 'breakSound'], ['#optErrBar', 'errorBar'], ['#optGlint', 'perfectGlint']]) {
+  $(id).addEventListener('change', (e) => { settings.skin[key] = e.target.checked; skinChanged(); });
+}
+$('#fxSndTest').addEventListener('click', () => {   // 강타 → 롱노트 마무리 → 콤보 끊김 순서로
+  [[0, () => sfx.accent()], [650, () => sfx.release()], [1200, () => sfx.comboBreak()]].forEach(([ms, f]) => setTimeout(f, ms));
+});
+$('#lineStyleOpt').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-v]');
+  if (b) { settings.skin.lineStyle = b.dataset.v; skinChanged(); }
+});
+$('#bgFxOpt').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-v]');
+  if (b) { settings.skin.bgFx = b.dataset.v; skinChanged(); }
+});
 $('#punchOpt').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-v]');
   if (b) { settings.skin.punch = b.dataset.v; skinChanged(); }

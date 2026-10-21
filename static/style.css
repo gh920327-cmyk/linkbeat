@@ -730,3 +730,16 @@ dialog::backdrop { background: rgba(0, 0, 0, .65); backdrop-filter: blur(3px); }
 .r-rankup.up em { font-style: normal; font-family: var(--head); font-size: 10px; letter-spacing: 2px; grid-column: 1 / -1; text-align: center; }
 @keyframes rankUp { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: none; } }
 @keyframes rankGlow { 50% { box-shadow: 0 0 26px rgba(255,200,61,.6); } }
+
+/* 배경 연출: 곡 썸네일을 흐리고 어둡게, 박자마다 숨 쉬듯 (CSS 변수만 바뀜) */
+/* (#screen-game 은 .screen 의 position: fixed 를 그대로 써야 화면 크기가 창에 맞음) */
+#screen-game > .stage { position: relative; z-index: 1; }
+.game-bg { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; opacity: 0; transition: opacity .4s; --pulse: 0; --tint: 0; --fever: 0; }
+.game-bg.on { opacity: 1; }
+.game-bg .gb-img { position: absolute; inset: -40px; background-size: cover; background-position: center; filter: blur(28px) saturate(1.25) brightness(.32);
+  transform: scale(calc(1.04 + var(--pulse) * .025)); will-change: transform; }
+.game-bg .gb-glow { position: absolute; inset: 0; will-change: opacity;
+  background: radial-gradient(ellipse at 50% 60%, rgba(120, 170, 255, .22), transparent 65%),
+              radial-gradient(ellipse at 50% 100%, rgba(255, 200, 61, calc(var(--tint) * .30)), transparent 60%),
+              radial-gradient(ellipse at 50% 40%, rgba(255, 95, 162, calc(var(--fever) * .22)), transparent 70%);
+  opacity: calc(.35 + var(--pulse) * .9); }

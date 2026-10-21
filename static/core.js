@@ -64,6 +64,13 @@ const DEFAULT_SKIN = {
   punch: 'mid', shake: true,   // 타격감 강도, 화면 흔들림
   chorusFx: true,              // 후렴(하이라이트)에 들어갈 때 연출
   applause: true,              // 풀콤보·올퍼펙트 박수
+  accentSound: true,           // 드럼 강타 노트: 묵직한 소리(킥+심벌)를 겹침
+  holdSound: true,             // 롱노트를 정확히 뗐을 때 '딱'
+  breakSound: true,            // 긴 콤보가 끊길 때 '툭'
+  errorBar: true,              // 판정 오차 막대 (빠름 ← → 느림)
+  perfectGlint: true,          // PERFECT일 때만 작은 별빛 반짝임을 하나 더
+  lineStyle: 'auto',           // 판정선 모양: auto(원형 노트면 원형 받침) | bar | ring | thin
+  bgFx: 'soft',                // 배경 연출: off | soft | strong
 };
 settings.skin = Object.assign({ ...DEFAULT_SKIN, hitSound: settings.hit ? 'click' : 'off' }, settings.skin || {});
 settings.skin.colors = Object.assign({ ...DEFAULT_SKIN.colors }, settings.skin.colors || {});
@@ -206,6 +213,47 @@ const sfx = {
     o.start(t);
     o.stop(t + 0.07);
   },
+};
+/* 타격감 소리 (직접 합성): 강타 · 롱노트 마무리 · 콤보 끊김 — 음량은 전체 음량을 따름 */
+sfx.fxVol = function (k) { return clamp((settings.volume ?? 80) / 100, 0, 1) * k; };
+sfx.accent = function () {
+  if (settings.skin.accentSound === false) return;
+  const ctx = this.ensure();
+  if (!ctx) return;
+  const t = ctx.currentTime, v = this.fxVol(0.55);
+  const o = ctx.createOscillator(); o.type = 'sine';                 // 킥: 낮게 떨어지는 쿵
+  o.frequency.setValueAtTime(130, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.18);
+  const g = ctx.createGain(); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.26);
+  o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.28);
+  const n = this.noise(ctx, 0.45); const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 5500;   // 심벌: 치익
+  const g2 = ctx.createGain(); g2.gain.setValueAtTime(v * 0.35, t); g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+  n.connect(hp).connect(g2).connect(ctx.destination); n.start(t); n.stop(t + 0.45);
+};
+sfx.release = function () {
+  if (settings.skin.holdSound === false) return;
+  const ctx = this.ensure();
+  if (!ctx) return;
+  const t = ctx.currentTime, v = this.fxVol(0.3);
+  const o = ctx.createOscillator(); o.type = 'triangle';
+  o.frequency.setValueAtTime(2300, t); o.frequency.exponentialRampToValueAtTime(1500, t + 0.04);
+  const g = ctx.createGain(); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+  o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.08);
+  const n = this.noise(ctx, 0.04); const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 3200; bp.Q.value = 1.2;
+  const g2 = ctx.createGain(); g2.gain.setValueAtTime(v * 0.6, t); g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
+  n.connect(bp).connect(g2).connect(ctx.destination); n.start(t); n.stop(t + 0.04);
+};
+sfx.comboBreak = function () {
+  if (settings.skin.breakSound === false) return;
+  const ctx = this.ensure();
+  if (!ctx) return;
+  const t = ctx.currentTime, v = this.fxVol(0.32);
+  const o = ctx.createOscillator(); o.type = 'sine';
+  o.frequency.setValueAtTime(240, t); o.frequency.exponentialRampToValueAtTime(95, t + 0.12);
+  const g = ctx.createGain(); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+  o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.17);
+  const n = this.noise(ctx, 0.06); const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700;
+  const g2 = ctx.createGain(); g2.gain.setValueAtTime(v * 0.5, t); g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+  n.connect(lp).connect(g2).connect(ctx.destination); n.start(t); n.stop(t + 0.06);
 };
 /* 꾸미기에서 고른 타격음 (모두 직접 합성 — 저작권 걱정 없음) */
 sfx.noise = function (ctx, dur) {

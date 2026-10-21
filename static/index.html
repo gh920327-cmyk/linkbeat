@@ -219,6 +219,7 @@
 
 <!-- ======================= 플레이 ======================= -->
 <section id="screen-game" class="screen">
+  <div class="game-bg" id="gameBg" aria-hidden="true"><div class="gb-img"></div><div class="gb-glow"></div></div>
   <div class="stage">
     <div class="field-col"><canvas id="field"></canvas></div>
     <div class="info-col">
@@ -535,7 +536,7 @@
         <section>
           <h4>노트</h4>
           <div class="opt-row" id="noteShape">
-            <button data-v="bar">막대</button><button data-v="round">둥근 캡슐</button><button data-v="circle">원형</button><button data-v="line">얇은 선</button>
+            <button data-v="bar">막대</button><button data-v="round">둥근 캡슐</button><button data-v="circle">원형</button><button data-v="hollow">속 빈 원</button><button data-v="diamond">마름모</button><button data-v="line">얇은 선</button>
           </div>
           <div class="set-row"><span>두께 <b id="noteHVal"></b></span><input id="noteH" type="range" min="8" max="26" step="1"></div>
         </section>
@@ -545,6 +546,8 @@
             <select id="laneScale"><option value="0.8">좁게</option><option value="1">보통</option><option value="1.2">넓게</option></select></div>
           <div class="set-row"><span>기어 위치</span>
             <select id="gearPos"><option value="left">왼쪽</option><option value="center">가운데</option><option value="right">오른쪽</option></select></div>
+          <div class="set-row"><span>판정선 모양 <small class="muted">자동: 동그란 노트면 원형 받침</small></span>
+            <div class="opt-row" id="lineStyleOpt"><button data-v="auto">자동</button><button data-v="bar">막대</button><button data-v="ring">원형 받침</button><button data-v="thin">얇은 선</button></div></div>
           <div class="set-row"><span>판정선 색</span><div class="swatches line-sw" id="lineSw"></div></div>
           <div class="set-row"><span>판정선 높이 <b id="judgeYVal"></b></span><input id="judgeYIn" type="range" min="70" max="240" step="5"></div>
         </section>
@@ -562,15 +565,25 @@
             </div>
           </div>
           <div class="set-row"><span>타격음 음량 <b id="hitVolVal"></b></span><input id="hitVol" type="range" min="0" max="100" step="5"></div>
+          <div class="checks">
+            <label><input type="checkbox" id="optAccentSnd"> 강타 소리 <small class="muted">드럼 강타 노트에 쿵+치익</small></label>
+            <label><input type="checkbox" id="optHoldSnd"> 롱노트 마무리 소리</label>
+            <label><input type="checkbox" id="optBreakSnd"> 콤보 끊김 소리</label>
+            <button id="fxSndTest" class="small-btn" type="button">▶ 들어보기</button>
+          </div>
           <div class="set-row"><label><input type="checkbox" id="optApplause"> 풀콤보 박수 <small class="muted">ALL PERFECT면 더 크게</small></label>
             <div class="hit-row"><button id="applauseTest" class="small-btn" type="button">▶ 풀콤보</button><button id="applauseTestAp" class="small-btn" type="button">▶ 올퍼펙트</button></div></div>
         </section>
         <section>
           <h4>표시</h4>
+          <div class="set-row"><span>배경 연출 <small class="muted">곡 썸네일이 박자에 맞춰 숨 쉬듯</small></span>
+            <div class="opt-row" id="bgFxOpt"><button data-v="off">끄기</button><button data-v="soft">은은하게</button><button data-v="strong">강하게</button></div></div>
           <div class="set-row"><span>판정 글자</span>
             <select id="judgeText"><option value="normal">보통</option><option value="small">작게</option><option value="off">숨김</option></select></div>
           <div class="checks">
             <label><input type="checkbox" id="optEarly"> 빠름·느림 표시</label>
+            <label><input type="checkbox" id="optErrBar"> 판정 오차 막대</label>
+            <label><input type="checkbox" id="optGlint"> PERFECT 반짝임</label>
             <label><input type="checkbox" id="optCombo"> 콤보 숫자</label>
             <label><input type="checkbox" id="optFever"> 피버 연출</label>
             <label><input type="checkbox" id="optShake"> 화면 흔들림</label>
