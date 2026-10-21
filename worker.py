@@ -269,6 +269,7 @@ def run_avatar_job(api, job):
                 illust.write_bytes(base64.b64decode(job["illust"]))
             spec.write_text(json.dumps({"avatar": job.get("avatar") or {}, "desc": job.get("desc", ""), "mode": job.get("mode", "all"),
                                         "illust": str(illust) if illust else "",
+                                        "isnet": str(ai_tool()["dir"] / "models" / "isnet-anime.onnx") if ai_tool() else "",
                                         "strength": job.get("strength", "mid"), "useLook": job.get("useLook", True),
                                         "ref": str(ref) if ref else ""}, ensure_ascii=False), encoding="utf-8")
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
