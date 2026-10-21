@@ -451,6 +451,70 @@ def cmd_make(link):
     return r
 
 
+INST_GAP = 3.0   # 원곡 후보가 이만큼(초) 넘게 비운 곳만 반주 후보로 채움
+
+
+def _align(src, ref):
+    """반주 후보(src) 박 위치를 본 채보(ref)에 맞출 만큼(초): 두 후보 모두 박자 칸에 고르게 찍혀 있어서 겹치는 노트가 가장 많은 위치"""
+    import bisect
+    rt = sorted({n["t"] for n in ref})
+    st = sorted({n["t"] for n in src})
+    if len(rt) < 20 or len(st) < 20:
+        return 0.0
+    best = (0, 0.0)
+    for k in range(-30, 31):
+        sh = k * 0.002
+        m = 0
+        for t in st:
+            x = t + sh
+            i = bisect.bisect_left(rt, x)
+            if any(0 <= j < len(rt) and abs(rt[j] - x) <= 0.006 for j in (i - 1, i)):
+                m += 1
+        if m > best[0] or (m == best[0] and abs(sh) < abs(best[1])):
+            best = (m, sh)
+    return best[1]
+
+
+def fill_gaps_from(main, inst, duration):
+    """본 채보(원곡 후보)가 통째로 비운 구간(전주·간주)만 반주 후보 노트로 채움 → (채보, 채운 초)"""
+    import bisect
+    if not main or not inst:
+        return main, 0.0
+    sh = _align(inst, main)
+    ins = sorted((dict(n, t=round(n["t"] + sh, 3)) for n in inst), key=lambda n: n["t"])
+    its = [n["t"] for n in ins]
+    times = [-0.5] + sorted(n["t"] for n in main) + [duration + 0.5]
+    gaps = [(a, b) for a, b in zip(times, times[1:]) if b - a >= INST_GAP]
+    # 본 채보가 노트를 찍은 구간의 밀도에 맞춰 반주 노트를 솎음 (쉬움에 반주 후보가 빽빽하게 들어가지 않게)
+    covered = max(1.0, duration - sum(b - a for a, b in gaps))
+    target = len({n["t"] for n in main}) / covered
+    add, filled = [], 0.0
+    for a, b in gaps:
+        lo, hi = a + 0.3, b - 0.3
+        i = bisect.bisect_left(its, lo)
+        part = []
+        while i < len(ins) and ins[i]["t"] < hi:
+            n = ins[i]
+            if n["t"] + float(n.get("d", 0) or 0) < b - 0.2:
+                part.append(n)
+            i += 1
+        if part:
+            groups = sorted({n["t"] for n in part})
+            dens = len(groups) / max(0.5, hi - lo)
+            if dens > target * 1.15:
+                k = dens / max(0.3, target)
+                keep, acc = set(), 0.0
+                for t in groups:                  # 고르게 솎기 (k개 중 하나)
+                    acc += 1
+                    if acc >= k:
+                        keep.add(t)
+                        acc -= k
+                part = [n for n in part if n["t"] in keep]
+            add += part
+            filled += hi - lo
+    return sorted(main + add, key=lambda n: (n["t"], n["l"])), round(filled, 1)
+
+
 def demucs_ok():
     try:
         import demucs.pretrained  # noqa: F401
@@ -543,7 +607,16 @@ def make_charts(vid, wav, targets, title, artist, duration):
         cands.append((chartgen.star_rating(notes, 4), notes, path.stem))
     if not cands:
         raise RuntimeError("AI가 채보를 제대로 만들지 못했어요.")
-    chosen = pick_for_diffs(cands, relative_targets(targets))
+    # 본 채보는 원곡 후보에서만 (원곡 노래에 맞춰 치는 느낌), 반주 후보는 원곡 후보가 비운 전주·간주만 채움
+    main_c = [c for c in cands if not c[2].endswith("_i")] or cands
+    inst_c = [c for c in cands if c[2].endswith("_i") and len(c[1]) >= 50]
+    chosen = pick_for_diffs(main_c, relative_targets(targets))
+    if inst_c:
+        for d, c in list(chosen.items()):
+            src = min(inst_c, key=lambda x: abs(x[0] - c[0]))
+            notes, filled = fill_gaps_from(c[1], src[1], duration)
+            if filled:
+                chosen[d] = (chartgen.star_rating(notes, 4), notes, f"{c[2]}+{src[2]}({filled:.0f}초)")
     say(f"  {len(cands)}개 만들었어요 ({time.time() - t0:.0f}초)")
     body = {"charts": {d: c[1] for d, c in chosen.items()}, "by": f"MuG Diffusion v{mug.version}", "style": "rc"}
     if onsets:

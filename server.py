@@ -809,7 +809,7 @@ def finish_pc_job(job, meta, res):
 
 
 ACC_WIN = 0.05   # 기존 채보의 드럼 강타 시각과 이만큼(초) 가까운 AI 노트를 강타로
-AI_FIX = 11       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
+AI_FIX = 12       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
 HOLD_GAP = 0.1   # 롱노트 끝과 같은 줄 다음 노트 사이 최소 간격
 MAX_HOLDS = 1    # 동시에 누르고 있는 롱노트 최대 개수 (롱노트는 최소한으로)
 HOLD_MIN = 0.6   # 이보다 짧은 롱노트는 일반 노트로
@@ -1236,11 +1236,17 @@ SAFE_GAP = {"easy": 0.3, "normal": 0.15, "hard": 0.075, "extreme": 0.06}   # 이
 
 
 def basic_onsets(song):
-    """음원의 소리 위치 — AI 채보 박자를 맞추는 기준. 소리 분리로 찾은 위치가 있으면 그것(더 정확), 없으면 기존 채보 노트 시각"""
+    """기존 채보 노트 시각 — AI 채보 박자를 맞추는 기준 (사용자 싱크가 그동안 기존 채보에 맞춰져 있어서)"""
+    return sorted({round(float(n["t"]), 3) for v in (song.get("charts") or {}).values() for n in v})
+
+
+def sound_onsets(song):
+    """음원의 소리 위치 — '소리 없는 곳' 판단용. 소리 분리로 찾은 위치가 있으면 그것(보컬·악기 전부), 없으면 기존 채보
+    (분리로 찾은 위치는 소리가 커지는 지점이라 기존 채보보다 15ms쯤 늦게 잡혀서, 박자 맞추기에는 안 씀)"""
     on = song.get("onsets")
     if isinstance(on, list) and len(on) >= 30:
         return sorted(float(t) for t in on)
-    return sorted({round(float(n["t"]), 3) for v in (song.get("charts") or {}).values() for n in v})
+    return basic_onsets(song)
 
 
 def _match_rate(times, onsets, shift, w):
@@ -1254,20 +1260,32 @@ def _match_rate(times, onsets, shift, w):
     return k / max(1, len(times))
 
 
-def ai_fit(song, charts):
-    """AI 채보가 음원보다 얼마나 일찍/늦게 나오는지 재기 (실제 39곡: 15~60ms 일찍, 곡마다 다름)
-    → (밀 시간 초, 맞는 비율, 소리 없는 곳 비율)"""
-    onsets = basic_onsets(song)
-    times = sorted({round(float(n["t"]), 3) for v in charts.values() for n in v})
-    if len(onsets) < 30 or len(times) < 30:
-        return 0.0, 0.0, 0.0
+def _best_shift(times, onsets):
     base = _match_rate(times, onsets, 0.0, 0.015)
     best = max(((_match_rate(times, onsets, sh / 1000, 0.015), sh) for sh in range(-60, 125, 5)), key=lambda x: (x[0], -abs(x[1])))
     fine = max(((_match_rate(times, onsets, sh / 1000, 0.012), sh) for sh in range(best[1] - 4, best[1] + 5)), key=lambda x: (x[0], -abs(x[1])))
-    shift = fine[1] / 1000 if best[0] - base >= 0.03 and abs(fine[1]) >= 5 else 0.0
-    match = _match_rate(times, onsets, shift, 0.025)
-    off = 1 - _match_rate(times, onsets, shift, 0.06)
-    return shift, round(match, 3), round(off, 3)
+    return fine[1] / 1000 if best[0] - base >= 0.03 and abs(fine[1]) >= 5 else 0.0
+
+
+def ai_fit(song, charts):
+    """AI 채보가 음원보다 얼마나 일찍/늦게 나오는지 재기 (실제 39곡: 15~60ms 일찍, 곡마다 다름)
+    AI 후보마다 박 위치가 조금씩 달라서(같은 곡도 최대 30ms) 난이도마다 따로 잼
+    → ({난이도: 밀 시간 초}, 맞는 비율, 소리 없는 곳 비율)"""
+    onsets = basic_onsets(song)
+    sound = sound_onsets(song)
+    alltimes = sorted({round(float(n["t"]), 3) for v in charts.values() for n in v})
+    if len(onsets) < 30 or len(alltimes) < 30:
+        return {d: 0.0 for d in charts}, 0.0, 0.0
+    common = _best_shift(alltimes, onsets)
+    shifts, hit, hit60, tot = {}, 0.0, 0.0, 0
+    for d, v in charts.items():
+        times = sorted({round(float(n["t"]), 3) for n in v})
+        sh = _best_shift(times, onsets) if len(times) >= 30 else common
+        shifts[d] = sh
+        hit += _match_rate(times, onsets, sh, 0.025) * len(times)
+        hit60 += _match_rate(times, sound, sh, 0.06 if sound is onsets else 0.075) * len(times)
+        tot += len(times)
+    return shifts, round(hit / max(1, tot), 3), round(1 - hit60 / max(1, tot), 3)
 
 
 def ai_safe(song, diff, notes):
@@ -1334,10 +1352,11 @@ def ai_safe(song, diff, notes):
 def ai_accents(song, charts):
     """AI 채보 다듬기 (최소한만): 박자 밀기(음원에 맞춤) → 칠 수 없는 것만 고침 → 롱노트 정리 → 동시치기 제한 → 강타 표시"""
     import bisect
-    shift, match, off = ai_fit(song, charts)
+    shifts, match, off = ai_fit(song, charts)
     acc = sorted({round(float(n["t"]), 3) for notes in (song.get("charts") or {}).values() for n in notes if n.get("a")})
     out = {}
     for d in [d for d in ("easy", "normal", "hard", "extreme") if d in charts]:
+        shift = shifts.get(d, 0.0)
         moved = [dict(n, t=round(float(n["t"]) + shift, 3)) for n in charts[d] if float(n["t"]) + shift >= 0]
         notes = limit_chords(ai_tidy(ai_safe(song, d, moved)), d)
         res = []
@@ -1351,7 +1370,8 @@ def ai_accents(song, charts):
                     n["d"] = 0.0 if n.get("d", 0) < 0.3 else n["d"]
             res.append(n)
         out[d] = res
-    out["_fit"] = {"shift": round(shift * 1000), "match": match, "off": off, "rec": off < AI_REC_OFF and match >= AI_REC_MATCH}
+    vals = [round(v * 1000) for v in shifts.values()]
+    out["_fit"] = {"shift": round(sum(vals) / max(1, len(vals))), "shifts": {d: round(v * 1000) for d, v in shifts.items()}, "match": match, "off": off, "rec": off < AI_REC_OFF and match >= AI_REC_MATCH}
     return out
 
 
