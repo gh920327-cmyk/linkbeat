@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.2.0"
+VERSION = "1.2.2"
 
 # 가상환경의 실행 파일 폴더(deno 등)를 PATH 앞에 → yt-dlp가 JS 런타임을 찾을 수 있게
 os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
@@ -258,7 +258,14 @@ def run_avatar_job(api, job):
         progress("그림 준비 중...")
         with tempfile.TemporaryDirectory() as td:
             spec = Path(td) / "spec.json"
-            spec.write_text(json.dumps({"avatar": job.get("avatar") or {}}, ensure_ascii=False), encoding="utf-8")
+            ref = None
+            if job.get("ref"):
+                ext = job.get("refExt") if job.get("refExt") in ("jpg", "png", "webp") else "jpg"
+                ref = Path(td) / f"ref.{ext}"
+                ref.write_bytes(base64.b64decode(job["ref"]))
+            spec.write_text(json.dumps({"avatar": job.get("avatar") or {}, "desc": job.get("desc", ""),
+                                        "strength": job.get("strength", "mid"), "useLook": job.get("useLook", True),
+                                        "ref": str(ref) if ref else ""}, ensure_ascii=False), encoding="utf-8")
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             proc = subprocess.Popen([str(cd / "python_embeded" / "python.exe"), "-s", str(AVATAR_SCRIPT), "--comfy", str(cd),
                                      "--spec", str(spec), "--out", td], cwd=str(cd), stdout=subprocess.PIPE,
@@ -280,6 +287,9 @@ def run_avatar_job(api, job):
             if proc.returncode != 0 or not il.exists() or not px.exists():
                 raise RuntimeError(err or "그림을 만들지 못했어요.")
             images = {"illust": base64.b64encode(il.read_bytes()).decode(), "pixel": base64.b64encode(px.read_bytes()).decode()}
+            sh = Path(td) / "sheet.png"
+            if sh.exists():
+                images["sheet"] = base64.b64encode(sh.read_bytes()).decode()
         progress("올리는 중...")
         r = api.call("worker/done", {"jobId": jid, "images": images, "version": VERSION}, timeout=120)
         status("ready", f"캐릭터 완성: {title}" if r.get("ok") else f"캐릭터 저장 실패: {r.get('msg', '')}")

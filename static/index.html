@@ -112,6 +112,12 @@
         <button id="btnAiOne" class="skew ai-one hidden" title="이 곡의 AI 채보만 새로 만들어요 (호스트 PC의 AI 채보 도구 · 기존 채보·기록은 그대로)">✦ AI</button>
         <button id="btnDel" class="skew danger hidden">삭제</button>
       </div>
+      <div id="myChar" class="my-char" title="누르면 도트 ↔ 일러스트">
+        <canvas id="myCharCv"></canvas>
+        <img id="myCharIl" class="hidden" alt="">
+        <div class="mc-tag"><b>MY CHARACTER</b><span id="myCharMode"></span></div>
+        <div id="myCharHint" class="mc-hint"></div>
+      </div>
     </div>
 
     <!-- 곡 목록 -->
@@ -516,6 +522,16 @@
         <section id="avAi" class="av-ai">
           <h4>✦ AI 캐릭터</h4>
           <div class="av-ai-row"><img id="avAiIllust" class="av-ai-illust hidden" alt=""><img id="avAiPixel" class="av-ai-pixel hidden" alt=""></div>
+          <textarea id="avAiDesc" class="av-ai-desc" maxlength="200" rows="2" placeholder="원하는 모습 (선택) — 예: 검은 정장에 선글라스, 쿨한 표정, 별 모양 귀걸이"></textarea>
+          <div class="av-ai-ref">
+            <label class="av-ai-file"><input id="avAiFile" type="file" accept="image/*">📷 참고 사진 (선택)</label>
+            <img id="avAiRefImg" class="av-ai-refimg hidden" alt=""><button id="avAiRefDel" class="ghost small-btn hidden" type="button">사진 빼기</button>
+          </div>
+          <div class="av-ai-opts">
+            <span class="small muted">사진 따라 그리기</span>
+            <div class="opt-row" id="avAiStr"><button data-s="low" type="button">약하게</button><button data-s="mid" type="button">보통</button><button data-s="high" type="button">강하게</button></div>
+            <label class="check-row small"><input id="avAiLook" type="checkbox"> 내 캐릭터 설정(머리·옷 등)도 반영</label>
+          </div>
           <div class="av-ai-btns"><button id="avAiGo" class="primary skew" type="button">✦ AI로 그리기</button><button id="avAiUse" class="chip hidden" type="button">AI 그림 쓰기</button></div>
           <div id="avAiMsg" class="small muted"></div>
         </section>
