@@ -1010,7 +1010,7 @@ def cmd_gen(vid, audio, targets_file, out_file, title="", artist="", duration=90
     try:
         say("AI: 오디오 준비 중...")
         wav = to_wav(Path(audio), wdir)
-        body, _ = make_charts(vid, wav, targets, title, artist, duration)
+        body, _ = make_charts(vid, wav, targets, title, artist, duration, mode="consist")   # 8번(전체 새로 만들기)과 같은 방식
         Path(out_file).write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
         say("AI: 완료")
     finally:
