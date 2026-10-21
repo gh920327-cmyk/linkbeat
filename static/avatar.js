@@ -428,6 +428,8 @@ function renderAiAvatar() {
   if (aiAv.ref && $('#avAiRefImg').getAttribute('src') !== aiAv.ref) $('#avAiRefImg').src = aiAv.ref;
   go.disabled = !profile.tok || aiAv.busy;
   go.textContent = a.ai ? '✦ 다시 그리기' : '✦ AI로 그리기';
+  $('#avAiPx').classList.toggle('hidden', !a.ai);
+  $('#avAiPx').disabled = !profile.tok || aiAv.busy;
   if (!profile.tok) msg.textContent = '프로필에 로그인해야 그릴 수 있어요.';
   else if (aiAv.busy) {
     const where = j.stage === 'waitpc' ? (w && w.online && w.avatar ? `차례를 기다리는 중... (${j.pos || 1}번째)` : '호스트 PC가 꺼져 있어요. 켜지면 그려요.') : (j.msg || '그리는 중...');
@@ -436,22 +438,23 @@ function renderAiAvatar() {
   else msg.textContent = a.ai ? '지금 캐릭터 설정(머리·옷·액세서리…)으로 다시 그릴 수 있어요. 결과 화면엔 일러스트, 플레이·목록엔 AI 도트가 나와요.'
     : '지금 캐릭터 설정(머리·옷·액세서리…)으로 호스트 PC의 AI가 일러스트와 도트를 그려 줘요.';
 }
-$('#avAiGo').addEventListener('click', async () => {
+async function aiAvRequest(mode) {
   if (!profile.tok) return;
-  const go = $('#avAiGo');
-  go.disabled = true;
+  $('#avAiGo').disabled = true; $('#avAiPx').disabled = true;
   try {
     const o = aiOpt();
     const r = await fetch('/api/avatar/ai', {
       method: 'POST', headers: profile.headers(),
-      body: JSON.stringify({ avatar: settings.avatar, desc: o.desc, strength: o.strength, useLook: o.useLook !== false, ref: aiAv.ref || undefined }),
+      body: JSON.stringify({ avatar: settings.avatar, desc: o.desc, strength: o.strength, useLook: o.useLook !== false, ref: aiAv.ref || undefined, mode }),
     });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || r.status);
     aiAv.job = j; aiAv.busy = true;
   } catch (e) { toast(e.message); }
   aiAvFetch();
-});
+}
+$('#avAiGo').addEventListener('click', () => aiAvRequest('all'));
+$('#avAiPx').addEventListener('click', () => aiAvRequest('pixel'));
 $('#avAiUse').addEventListener('click', () => {
   settings.avatar.aiUse = settings.avatar.aiUse === 'off' ? 'on' : 'off';
   avatarChanged();

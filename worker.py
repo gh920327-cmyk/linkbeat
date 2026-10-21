@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.2.2"
+VERSION = "1.2.3"
 
 # 가상환경의 실행 파일 폴더(deno 등)를 PATH 앞에 → yt-dlp가 JS 런타임을 찾을 수 있게
 os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
@@ -263,7 +263,7 @@ def run_avatar_job(api, job):
                 ext = job.get("refExt") if job.get("refExt") in ("jpg", "png", "webp") else "jpg"
                 ref = Path(td) / f"ref.{ext}"
                 ref.write_bytes(base64.b64decode(job["ref"]))
-            spec.write_text(json.dumps({"avatar": job.get("avatar") or {}, "desc": job.get("desc", ""),
+            spec.write_text(json.dumps({"avatar": job.get("avatar") or {}, "desc": job.get("desc", ""), "mode": job.get("mode", "all"),
                                         "strength": job.get("strength", "mid"), "useLook": job.get("useLook", True),
                                         "ref": str(ref) if ref else ""}, ensure_ascii=False), encoding="utf-8")
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -284,9 +284,10 @@ def run_avatar_job(api, job):
                     progress(d["p"])
             proc.wait()
             il, px = Path(td) / "illust.webp", Path(td) / "pixel.png"
-            if proc.returncode != 0 or not il.exists() or not px.exists():
+            if proc.returncode != 0 or not px.exists() or (not il.exists() and job.get("mode") != "pixel"):
                 raise RuntimeError(err or "그림을 만들지 못했어요.")
-            images = {"illust": base64.b64encode(il.read_bytes()).decode(), "pixel": base64.b64encode(px.read_bytes()).decode()}
+            images = {"illust": base64.b64encode(il.read_bytes()).decode() if il.exists() else "",
+                      "pixel": base64.b64encode(px.read_bytes()).decode()}
             sh = Path(td) / "sheet.png"
             if sh.exists():
                 images["sheet"] = base64.b64encode(sh.read_bytes()).decode()

@@ -794,7 +794,11 @@ def av_request(headers, data):
     av = clean_avatar(data.get("avatar"))
     if not av:
         raise HttpError(400, "캐릭터 설정이 없어요.")
-    extra = {"desc": str(data.get("desc") or "").strip()[:200],
+    cur = pr.get("aiAvatar") if isinstance(pr.get("aiAvatar"), dict) else {}
+    keep_il = data.get("mode") == "pixel" and AV_TOKEN_RE.match(str(cur.get("token") or "")) and \
+        (AVATARS / f"{cur['token']}_i.webp").is_file()
+    extra = {"mode": "pixel" if keep_il else "all",     # pixel: 일러스트는 그대로 두고 도트(동작 그림)만 다시
+             "desc": str(data.get("desc") or "").strip()[:200],
              "strength": data.get("strength") if data.get("strength") in ("low", "mid", "high") else "mid",
              "useLook": data.get("useLook") is not False}
     ref = None
@@ -890,6 +894,12 @@ def av_finish(j, images):
         if not isinstance(images, dict):
             raise ValueError("그림이 없어요.")
         il = base64.b64decode(str(images.get("illust", "")), validate=True)
+        if not il and j.get("mode") == "pixel":      # 도트만 다시 그린 경우: 지금 일러스트를 그대로 씀
+            with FILE_LOCK:
+                pr0 = load_profiles().get(j["pid"]) or {}
+            t0 = (pr0.get("aiAvatar") or {}).get("token") if isinstance(pr0.get("aiAvatar"), dict) else None
+            if t0 and AV_TOKEN_RE.match(t0) and (AVATARS / f"{t0}_i.webp").is_file():
+                il = (AVATARS / f"{t0}_i.webp").read_bytes()
         px = base64.b64decode(str(images.get("pixel", "")), validate=True)
         if not (il[:4] == b"RIFF" and il[8:12] == b"WEBP" and 1000 < len(il) <= 2_500_000):
             raise ValueError("일러스트 형식이 이상해요.")
@@ -2212,7 +2222,7 @@ async def api(method, path, headers, body):
                     return {"job": {"id": a["id"], "kind": "avatar", "avatar": a["avatar"], "title": f"캐릭터: {a['name']}",
                                     "desc": a.get("desc", ""), "strength": a.get("strength", "mid"),
                                     "useLook": a.get("useLook", True), "ref": av_ref_b64(a),
-                                    "refExt": (a.get("ref") or ".jpg").rsplit(".", 1)[-1]}}
+                                    "refExt": (a.get("ref") or ".jpg").rsplit(".", 1)[-1], "mode": a.get("mode", "all")}}
             return {"job": {"id": j["id"], "vid": j["vid"], "title": j["title"], "keepEdited": j["keepEdited"],
                             "keepTitle": j["keepTitle"], "aiOnly": bool(j.get("aiOnly"))} if j else None}
         aj = AVJOBS.get(str(data.get("jobId", "")))
