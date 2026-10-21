@@ -898,6 +898,15 @@ function startResultAvatar(r) {
   const stage = new AvatarStage($('#rAvatar'));
   const good = !r.incomplete && (r.rank === 'SS' || r.rank === 'S');
   const bad = r.incomplete || r.rank === 'C' || r.rank === 'D';
+  const url = typeof aiIllustUrl === 'function' ? aiIllustUrl(settings.avatar) : '';   // AI 일러스트가 있으면 그걸 크게
+  const il = $('#rIllust');
+  il.classList.toggle('hidden', !url);
+  $('#rAvatar').classList.toggle('hidden', !!url);
+  if (url) {
+    if (il.getAttribute('src') !== url) il.src = url;
+    il.className = 'r-illust ' + (good ? 'good' : bad ? 'bad' : '');
+    return;
+  }
   const force = good ? { pose: 'up', eyes: 'happy', mouth: 'open' }
     : bad ? { pose: 'sad', eyes: 'closed', mouth: 'sad', sweat: true }
     : { pose: 'right', mouth: 'smile' };

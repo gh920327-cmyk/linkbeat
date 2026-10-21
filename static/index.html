@@ -268,7 +268,7 @@
     <div class="result-main panel">
       <div id="rSong" class="r-song"></div>
       <div class="r-top">
-        <div class="r-left"><div id="rRank" class="r-rank">S</div><div id="rRankUp" class="r-rankup hidden"></div><canvas id="rAvatar" class="r-avatar"></canvas></div>
+        <div class="r-left"><div id="rRank" class="r-rank">S</div><div id="rRankUp" class="r-rankup hidden"></div><canvas id="rAvatar" class="r-avatar"></canvas><img id="rIllust" class="r-illust hidden" alt=""></div>
         <div>
           <div id="rScore" class="r-score">0</div>
           <div id="rDelta" class="r-delta hidden"></div>
@@ -513,12 +513,19 @@
         <button id="avRandom" class="primary skew">🎲 랜덤</button>
       </div>
       <div class="skin-controls av-controls">
+        <section id="avAi" class="av-ai">
+          <h4>✦ AI 캐릭터</h4>
+          <div class="av-ai-row"><img id="avAiIllust" class="av-ai-illust hidden" alt=""><img id="avAiPixel" class="av-ai-pixel hidden" alt=""></div>
+          <div class="av-ai-btns"><button id="avAiGo" class="primary skew" type="button">✦ AI로 그리기</button><button id="avAiUse" class="chip hidden" type="button">AI 그림 쓰기</button></div>
+          <div id="avAiMsg" class="small muted"></div>
+        </section>
         <section><h4>피부</h4><div class="av-sws" id="avSkin"></div></section>
         <section><h4>머리 모양</h4><div class="opt-row" id="avHair"></div></section>
         <section><h4>머리 색</h4><div class="av-sws" id="avHairColor"></div></section>
         <section><h4>눈</h4><div class="opt-row" id="avEyes"></div></section>
         <section><h4>옷</h4><div class="opt-row" id="avOutfit"></div><div class="av-sws" id="avOutfitColor"></div></section>
         <section><h4>액세서리</h4><div class="opt-row" id="avAcc"></div></section>
+        <section><h4>느낌 <small class="muted">AI 그림용</small></h4><div class="opt-row" id="avGender"></div></section>
         <p class="small muted">플레이 중에는 오른쪽 칸에서 박자에 맞춰 까딱이고, 콤보 50마다 점프, 피버 때 춤춰요. 멀티에서는 친구들에게도 보여요.</p>
       </div>
     </div>

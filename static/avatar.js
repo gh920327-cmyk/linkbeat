@@ -10,8 +10,9 @@ const AV_OPTS = {
   outfit: [['hoodie', '후드티'], ['jacket', '재킷'], ['dress', '원피스']],
   outfitColor: ['#3f8cff', '#ff5fa2', '#2fe0a8', '#ffc83d', '#8a93ad', '#ff3b55', '#b98cff', '#2b2f45'],
   acc: [['none', '없음'], ['phones', '헤드폰'], ['cap', '모자'], ['ribbon', '리본'], ['cat', '고양이 귀'], ['glasses', '안경']],
+  gender: [['girl', '여자'], ['boy', '남자']],   // AI 그림에만 씀 (도트는 그대로)
 };
-const DEFAULT_AVATAR = { skin: 0, hair: 'twin', hairColor: 3, eyes: 'sparkle', outfit: 'hoodie', outfitColor: 0, acc: 'phones' };
+const DEFAULT_AVATAR = { skin: 0, hair: 'twin', hairColor: 3, eyes: 'sparkle', outfit: 'hoodie', outfitColor: 0, acc: 'phones', gender: 'girl' };
 const AV_OUT = '#1b1430';
 
 function avatarValid(a) {
@@ -24,6 +25,11 @@ function avatarValid(a) {
   };
   pick('skin', AV_OPTS.skin, true); pick('hairColor', AV_OPTS.hairColor, true); pick('outfitColor', AV_OPTS.outfitColor, true);
   pick('hair', AV_OPTS.hair); pick('eyes', AV_OPTS.eyes); pick('outfit', AV_OPTS.outfit); pick('acc', AV_OPTS.acc);
+  pick('gender', AV_OPTS.gender);
+  if (typeof a.ai === 'string' && /^[0-9a-f]{12}$/.test(a.ai)) {      // AI로 그린 캐릭터 (서버 /avatars/<ai>_p.png · _i.webp)
+    o.ai = a.ai;
+    o.aiUse = a.aiUse === 'off' ? 'off' : 'on';
+  }
   return o;
 }
 settings.avatar = avatarValid(settings.avatar);
@@ -170,8 +176,34 @@ function avatarSprite(a, st = {}) {
   avCache.set(key, c);
   return c;
 }
+/* AI 도트 그림 (불러오는 중이면 null → 기존 도트로 그림) */
+const avAiImgs = new Map();
+function aiPixel(a) {
+  if (!a || !a.ai || a.aiUse === 'off') return null;
+  let e = avAiImgs.get(a.ai);
+  if (!e) {
+    e = { img: new Image(), ok: false };
+    e.img.onload = () => { e.ok = true; paintMinis(); renderTopAvatar(); };
+    e.img.src = `/avatars/${a.ai}_p.png`;
+    avAiImgs.set(a.ai, e);
+  }
+  return e.ok ? e.img : null;
+}
+const aiIllustUrl = (a) => (a && a.ai && a.aiUse !== 'off' ? `/avatars/${a.ai}_i.webp` : '');
 /* (cx, footY) 기준으로 scale배 크기로 그리기 */
 function drawAvatar(ctx, a, st, cx, footY, scale) {
+  const ai = aiPixel(a);
+  if (ai) {
+    const s2 = Math.max(1, Math.round(AV_H * scale / ai.height));
+    const w = ai.width * s2, h = ai.height * s2;
+    const dx = st && st.pose === 'left' ? -s2 * 2 : st && st.pose === 'right' ? s2 * 2 : 0;
+    ctx.imageSmoothingEnabled = false;
+    ctx.save();
+    if (st && st.pose === 'sad') ctx.globalAlpha = 0.8;
+    ctx.drawImage(ai, Math.round(cx - w / 2 + dx), Math.round(footY - h), w, h);
+    ctx.restore();
+    return;
+  }
   const img = avatarSprite(a, st);
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(img, Math.round(cx - AV_W * scale / 2), Math.round(footY - AV_H * scale), AV_W * scale, AV_H * scale);
@@ -180,6 +212,13 @@ function drawAvatar(ctx, a, st, cx, footY, scale) {
 function paintMini(cv, a) {
   const ctx = cv.getContext('2d');
   ctx.clearRect(0, 0, cv.width, cv.height);
+  const ai = aiPixel(a);
+  if (ai) {      // 얼굴 위주로 (위쪽 45%)
+    const sh = Math.round(ai.height * 0.45), sc = Math.min(cv.width / ai.width, cv.height / sh);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(ai, 0, 0, ai.width, sh, Math.round((cv.width - ai.width * sc) / 2), Math.round((cv.height - sh * sc) / 2), ai.width * sc, sh * sc);
+    return;
+  }
   const s = Math.max(1, Math.floor(Math.min(cv.width / AV_W, cv.height / 20)));
   ctx.imageSmoothingEnabled = false;
   // 얼굴 위주로 잘라서 (위쪽 20줄)
@@ -261,6 +300,8 @@ function renderAvatarEditor() {
   $('#avOutfit').innerHTML = opts('outfit');
   $('#avOutfitColor').innerHTML = sw('outfitColor', AV_OPTS.outfitColor);
   $('#avAcc').innerHTML = opts('acc');
+  $('#avGender').innerHTML = opts('gender');
+  renderAiAvatar();
   $('#avName').textContent = settings.nick || '닉네임을 정해 주세요';
   renderTopAvatar();
 }
@@ -309,10 +350,75 @@ $('#avatarDlg').addEventListener('click', (e) => {
 $('#avRandom').addEventListener('click', () => {
   const r = (n) => Math.floor(Math.random() * n);
   const pickV = (k) => AV_OPTS[k][r(AV_OPTS[k].length)][0];
+  const keep = settings.avatar.ai ? { ai: settings.avatar.ai, aiUse: settings.avatar.aiUse } : {};
   settings.avatar = {
     skin: r(AV_OPTS.skin.length), hair: pickV('hair'), hairColor: r(AV_OPTS.hairColor.length), eyes: pickV('eyes'),
-    outfit: pickV('outfit'), outfitColor: r(AV_OPTS.outfitColor.length), acc: pickV('acc'),
+    outfit: pickV('outfit'), outfitColor: r(AV_OPTS.outfitColor.length), acc: pickV('acc'), gender: settings.avatar.gender || 'girl', ...keep,
   };
   avatarChanged();
 });
 renderTopAvatar();
+
+/* ---------------- AI 캐릭터 (호스트 PC의 ComfyUI가 지금 캐릭터 설정으로 일러스트·도트를 그림) */
+let aiAv = { job: null, worker: null, timer: 0, busy: false };
+async function aiAvFetch() {
+  if (!profile.tok) return;
+  try {
+    const r = await fetch('/api/avatar/ai', { headers: profile.headers() });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.status);
+    aiAv.job = j.job; aiAv.worker = j.worker;
+    if (j.token && j.token !== settings.avatar.ai && (!j.job || j.job.stage === 'done')) {   // 새로 그린 그림이 생기면 바로 씀
+      const first = !settings.avatar.ai;
+      settings.avatar.ai = j.token;
+      if (first || !settings.avatar.aiUse) settings.avatar.aiUse = 'on';
+      avatarChanged();
+      if (aiAv.busy) toast('AI 캐릭터가 완성됐어요!');
+    }
+    aiAv.busy = !!(j.job && ['waitpc', 'claimed', 'working'].includes(j.job.stage));
+  } catch { /* 무시 */ }
+  renderAiAvatar();
+  clearTimeout(aiAv.timer);
+  if (aiAv.busy) aiAv.timer = setTimeout(aiAvFetch, 4000);
+}
+function renderAiAvatar() {
+  const box = $('#avAi');
+  if (!box) return;
+  const a = settings.avatar;
+  const il = $('#avAiIllust'), px = $('#avAiPixel');
+  il.classList.toggle('hidden', !a.ai); px.classList.toggle('hidden', !a.ai);
+  if (a.ai) { il.src = `/avatars/${a.ai}_i.webp`; px.src = `/avatars/${a.ai}_p.png`; }
+  $('#avAiUse').classList.toggle('hidden', !a.ai);
+  $('#avAiUse').classList.toggle('on', !!a.ai && a.aiUse !== 'off');
+  $('#avAiUse').innerHTML = a.aiUse === 'off' ? 'AI 그림 쓰기<small>꺼짐</small>' : 'AI 그림 쓰기<small>켜짐</small>';
+  const msg = $('#avAiMsg'), go = $('#avAiGo');
+  const j = aiAv.job, w = aiAv.worker;
+  go.disabled = !profile.tok || aiAv.busy;
+  go.textContent = a.ai ? '✦ 다시 그리기' : '✦ AI로 그리기';
+  if (!profile.tok) msg.textContent = '프로필에 로그인해야 그릴 수 있어요.';
+  else if (aiAv.busy) {
+    const where = j.stage === 'waitpc' ? (w && w.online && w.avatar ? `차례를 기다리는 중... (${j.pos || 1}번째)` : '호스트 PC가 꺼져 있어요. 켜지면 그려요.') : (j.msg || '그리는 중...');
+    msg.innerHTML = `<span class="spin"></span>${esc(where)} <span class="muted">· 보통 1~3분</span>`;
+  } else if (j && j.stage === 'error') msg.textContent = '그리기 실패: ' + (j.msg || '');
+  else msg.textContent = a.ai ? '지금 캐릭터 설정(머리·옷·액세서리…)으로 다시 그릴 수 있어요. 결과 화면엔 일러스트, 플레이·목록엔 AI 도트가 나와요.'
+    : '지금 캐릭터 설정(머리·옷·액세서리…)으로 호스트 PC의 AI가 일러스트와 도트를 그려 줘요.';
+}
+$('#avAiGo').addEventListener('click', async () => {
+  if (!profile.tok) return;
+  const go = $('#avAiGo');
+  go.disabled = true;
+  try {
+    const r = await fetch('/api/avatar/ai', { method: 'POST', headers: profile.headers(), body: JSON.stringify({ avatar: settings.avatar }) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.status);
+    aiAv.job = j; aiAv.busy = true;
+  } catch (e) { toast(e.message); }
+  aiAvFetch();
+});
+$('#avAiUse').addEventListener('click', () => {
+  settings.avatar.aiUse = settings.avatar.aiUse === 'off' ? 'on' : 'off';
+  avatarChanged();
+});
+$('#btnAvatar').addEventListener('click', aiAvFetch);
+if (typeof net !== 'undefined' && net.on) net.on('avjobs', () => { if (aiAv.busy) aiAvFetch(); });
+setTimeout(aiAvFetch, 1500);   // 다른 기기에서 그린 그림도 가져오기

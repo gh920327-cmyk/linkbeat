@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.1.1"
+VERSION = "1.2.0"
 
 # 가상환경의 실행 파일 폴더(deno 등)를 PATH 앞에 → yt-dlp가 JS 런타임을 찾을 수 있게
 os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
@@ -79,6 +79,41 @@ def ai_tool():
         AI_CHECKED = time.time()
         AI = find_ai()
     return AI
+
+
+# ------------------------------------------------------------------ AI 캐릭터 그림 (선택: 호스트 PC에 ComfyUI가 있으면)
+AVATAR_SCRIPT = Path(__file__).resolve().parent / "avatar_gen.py"
+
+
+def find_comfy():
+    """ComfyUI(포터블) 폴더 찾기: LB_COMFY_DIR → 각 드라이브의 ComfyUI_AI\\ComfyUI_windows_portable · ComfyUI_windows_portable
+    애니풍 모델(animagine-xl-4.0)이 있어야 씀"""
+    cands = []
+    if os.environ.get("LB_COMFY_DIR"):
+        cands.append(Path(os.environ["LB_COMFY_DIR"]))
+    if os.name == "nt":
+        for c in "FDEGHCIJK":
+            cands += [Path(f"{c}:\\ComfyUI_AI\\ComfyUI_windows_portable"), Path(f"{c}:\\ComfyUI_windows_portable")]
+    for d in cands:
+        try:
+            if ((d / "python_embeded" / "python.exe").exists() and (d / "ComfyUI" / "main.py").exists()
+                    and (d / "ComfyUI" / "models" / "checkpoints" / "animagine-xl-4.0.safetensors").exists()):
+                return d
+        except OSError:
+            continue
+    return None
+
+
+COMFY = None
+COMFY_CHECKED = 0.0
+
+
+def comfy_dir():
+    global COMFY, COMFY_CHECKED
+    if time.time() - COMFY_CHECKED > 60:
+        COMFY_CHECKED = time.time()
+        COMFY = find_comfy() if AVATAR_SCRIPT.exists() else None
+    return COMFY
 
 
 def status(state, msg="", **extra):
@@ -204,6 +239,62 @@ def run_ai_job(api, job):
             pass
 
 
+def run_avatar_job(api, job):
+    """AI 캐릭터: 호스트 PC의 ComfyUI로 일러스트·도트를 그려서 서버에 올림"""
+    import base64
+    jid = job["id"]
+    title = job.get("title") or "캐릭터"
+
+    def progress(msg):
+        status("working", f"{title} · {msg}")
+        try:
+            api.call("worker/progress", {"jobId": jid, "msg": msg, "version": VERSION}, timeout=15)
+        except Exception:
+            pass
+    try:
+        cd = comfy_dir()
+        if not cd:
+            raise RuntimeError("이 PC에서 ComfyUI(애니풍 모델)를 찾지 못했어요.")
+        progress("그림 준비 중...")
+        with tempfile.TemporaryDirectory() as td:
+            spec = Path(td) / "spec.json"
+            spec.write_text(json.dumps({"avatar": job.get("avatar") or {}}, ensure_ascii=False), encoding="utf-8")
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            proc = subprocess.Popen([str(cd / "python_embeded" / "python.exe"), "-s", str(AVATAR_SCRIPT), "--comfy", str(cd),
+                                     "--spec", str(spec), "--out", td], cwd=str(cd), stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, creationflags=flags, env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+            err, last = "", 0.0
+            for raw in proc.stdout:
+                line = raw.decode("utf-8", "replace").strip()
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                if d.get("error"):
+                    err = d["error"]
+                elif d.get("p") and time.time() - last > 1.5:
+                    last = time.time()
+                    progress(d["p"])
+            proc.wait()
+            il, px = Path(td) / "illust.webp", Path(td) / "pixel.png"
+            if proc.returncode != 0 or not il.exists() or not px.exists():
+                raise RuntimeError(err or "그림을 만들지 못했어요.")
+            images = {"illust": base64.b64encode(il.read_bytes()).decode(), "pixel": base64.b64encode(px.read_bytes()).decode()}
+        progress("올리는 중...")
+        r = api.call("worker/done", {"jobId": jid, "images": images, "version": VERSION}, timeout=120)
+        status("ready", f"캐릭터 완성: {title}" if r.get("ok") else f"캐릭터 저장 실패: {r.get('msg', '')}")
+    except PermissionError:
+        raise
+    except Exception as e:
+        traceback.print_exc(file=sys.stderr)
+        msg = str(e)[:300]
+        status("ready", f"캐릭터 실패: {title} · {msg}")
+        try:
+            api.call("worker/fail", {"jobId": jid, "msg": msg, "version": VERSION}, timeout=15)
+        except Exception:
+            pass
+
+
 def clean_audio_cache():
     """하루 넘은 오디오는 지움 (AI 작업이 취소됐거나 실패한 곡)"""
     try:
@@ -215,6 +306,8 @@ def clean_audio_cache():
 
 
 def run_job(api, job):
+    if job.get("kind") == "avatar":
+        return run_avatar_job(api, job)
     import pipeline
     if job.get("aiOnly"):
         return run_ai_job(api, job)
@@ -250,10 +343,13 @@ def loop(api):
     t = ai_tool()
     if t:
         status("ready", f"AI 채보 도구 찾음: {t['dir']}")
+    c = comfy_dir()
+    if c:
+        status("ready", f"AI 캐릭터용 ComfyUI 찾음: {c}")
     fails = 0
     while True:
         try:
-            r = api.call("worker/poll", {"version": VERSION, "ai": bool(ai_tool())}, timeout=20)
+            r = api.call("worker/poll", {"version": VERSION, "ai": bool(ai_tool()), "avatar": bool(comfy_dir())}, timeout=20)
             if fails:
                 status("ready", "서버에 다시 연결됐어요")
             fails = 0
