@@ -1677,3 +1677,25 @@ $('#siSave').addEventListener('click', () => {
 });
 $('#siAuto').addEventListener('click', () => saveSongInfo({ title: $('#siTitle').value.trim() || undefined, artist: '' }));
 $('#siArtist').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) $('#siSave').click(); });
+
+/* ============================================================ 화면 테마 */
+function renderThemeRow() {
+  const cur = settings.uiTheme || 'neon';
+  $('#themeRow').innerHTML = UI_THEMES.map((t) => `<button type="button" data-t="${t.id}" class="${t.id === cur ? 'on' : ''}"><i style="background:${t.sw}"></i>${t.name}</button>`).join('');
+  const t = UI_THEMES.find((x) => x.id === cur) || UI_THEMES[0];
+  $('#btnTheme').title = `화면 테마: ${t.name} (누를 때마다 다음 테마)`;
+}
+function setUiTheme(id) {
+  settings.uiTheme = id;
+  saveSettings();
+  applyUiTheme();
+  renderThemeRow();
+}
+$('#themeRow').addEventListener('click', (e) => { const b = e.target.closest('[data-t]'); if (b) setUiTheme(b.dataset.t); });
+$('#btnTheme').addEventListener('click', () => {
+  const i = UI_THEMES.findIndex((x) => x.id === (settings.uiTheme || 'neon'));
+  const t = UI_THEMES[(i + 1) % UI_THEMES.length];
+  setUiTheme(t.id);
+  if (typeof toast === 'function') toast(`화면 테마: ${t.name}`);
+});
+renderThemeRow();

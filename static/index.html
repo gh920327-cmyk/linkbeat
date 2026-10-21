@@ -51,6 +51,7 @@
       <span id="myTitle" class="ptitle my-title hidden" title="내 칭호"></span>
       <button id="btnAch" class="ghost ach-btn" type="button" title="업적 · 칭호">🏆<span>업적</span></button>
       <button id="btnAvatar" class="ghost av-btn"><canvas id="topAvatar" width="28" height="28"></canvas>내 캐릭터</button>
+      <button id="btnTheme" class="ghost" type="button" title="화면 테마 바꾸기 (누를 때마다 다음 테마)">🎨 테마</button>
       <button id="btnSkin" class="ghost">꾸미기</button>
       <button id="btnSettings" class="ghost">설정</button>
     </div>
@@ -418,6 +419,7 @@
         <button type="button" id="btnKeyReset" class="ghost small-btn">키 기본값으로</button>
       </div>
     </div>
+    <div class="set-row"><span class="nowrap">화면 테마</span><div class="theme-row" id="themeRow"></div></div>
     <div class="set-row"><span>노트 속도 <b id="speedVal"></b></span><input id="setSpeed" type="range" min="1" max="10" step="0.5"></div>
     <div class="set-row"><span>싱크 (ms) <b id="offsetVal"></b></span><input id="setOffset" type="range" min="-300" max="300" step="5"></div>
     <p class="small muted">노트보다 소리가 늦게 들리면 + 쪽으로, 빨리 들리면 - 쪽으로 옮기세요.</p>
