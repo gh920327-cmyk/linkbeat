@@ -204,8 +204,58 @@ function aiSheet(a) {
   return e.ok ? e.img : null;
 }
 const aiIllustUrl = (a) => (a && a.ai && a.aiUse !== 'off' ? `/avatars/${a.ai}_i.webp` : '');
+/* SD 스티커 (도트 대신): 흰 테두리 꼬마 그림 한 장 + 얼굴만 바꾼 표정 6칸 — 예전에 그린 캐릭터면 없음(null) */
+const STK_EXPR = ['idle', 'smile', 'cheer', 'oops', 'sad', 'blink'];     // avatar_gen.py 의 EXPR 순서와 같게
+const avStickers = new Map();
+function aiSticker(a) {
+  if (!a || !a.ai || a.aiUse === 'off') return null;
+  let e = avStickers.get(a.ai);
+  if (!e) {
+    e = { img: new Image(), ok: false, fail: false };
+    e.img.onload = () => { e.ok = e.img.width >= e.img.height * 2; e.fail = !e.ok; paintMinis(); renderTopAvatar(); if (typeof renderMyChar === 'function') renderMyChar(); };
+    e.img.onerror = () => { e.fail = true; };
+    e.img.src = `/avatars/${a.ai}_x.webp`;
+    avStickers.set(a.ai, e);
+  }
+  return e.ok ? e.img : null;
+}
+const stickerPending = (a) => { const e = a && a.ai && avStickers.get(a.ai); return !!(e && !e.ok && !e.fail); };
+/* 상황 → 표정 (기본·웃음·신남·놀람·슬픔·깜빡임) */
+function stickerExpr(st, now) {
+  if (st && st.expr) return st.expr;
+  const pose = (st && st.pose) || 'idle';
+  if (pose === 'sad') return st.sweat ? 'oops' : 'sad';
+  if (pose === 'up') return 'cheer';
+  if (st && st.eyes === 'happy') return st.mouth === 'open' ? 'cheer' : 'smile';
+  if (st && st.eyes === 'closed') return 'blink';
+  return now % 3700 < 130 ? 'blink' : 'idle';          // 가끔 눈 깜빡임
+}
+function drawSticker(ctx, img, st, cx, footY, scale) {
+  const n = STK_EXPR.length;
+  const fw = img.width / n, fh = img.height;
+  const roomH = ctx.canvas.height / (window.devicePixelRatio || 1) - 24;     // 칸보다 커서 머리가 잘리지 않게
+  const h = Math.max(24, Math.min(roomH, AV_H * scale * 1.3)), w = fw * h / fh;
+  const now = performance.now();
+  const ex = stickerExpr(st, now);
+  const f = Math.max(0, STK_EXPR.indexOf(ex));
+  const pose = (st && st.pose) || 'idle';
+  // 움직임: 치기 = 살짝 기울기, 슬픔 = 조금 움츠림 (위아래 까딱·점프는 무대가 footY로 줌)
+  const rot = pose === 'left' ? -0.075 : pose === 'right' ? 0.075 : 0;
+  const sy = pose === 'sad' ? 0.96 : pose === 'up' ? 1.03 : 1, sx = pose === 'sad' ? 1.02 : 1;
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.translate(cx, footY);
+  ctx.rotate(rot);
+  ctx.scale(sx, sy);
+  ctx.drawImage(img, f * fw, 0, fw, fh, -w / 2, -h, w, h);
+  ctx.restore();
+}
 /* (cx, footY) 기준으로 scale배 크기로 그리기 */
 function drawAvatar(ctx, a, st, cx, footY, scale) {
+  const stk = aiSticker(a);
+  if (stk) { drawSticker(ctx, stk, st, cx, footY, scale); return; }
+  if (stickerPending(a)) return;          // 스티커를 받는 중이면 잠깐 비워 둠 (예전 그림이 깜빡 보이지 않게)
   const sheet = aiSheet(a);
   if (sheet) {          // 동작마다 따로 그린 그림
     const fw = Math.round(sheet.width / 5), fh = sheet.height;
@@ -239,6 +289,14 @@ function drawAvatar(ctx, a, st, cx, footY, scale) {
 function paintMini(cv, a) {
   const ctx = cv.getContext('2d');
   ctx.clearRect(0, 0, cv.width, cv.height);
+  const stk = aiSticker(a);
+  if (stk) {     // 스티커: 기본 표정의 머리 부분
+    const fw = stk.width / STK_EXPR.length, sh = stk.height * 0.42, sc = Math.min(cv.width / (fw * 0.8), cv.height / sh);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(stk, fw * 0.1, 0, fw * 0.8, sh, (cv.width - fw * 0.8 * sc) / 2, (cv.height - sh * sc) / 2, fw * 0.8 * sc, sh * sc);
+    return;
+  }
   const ai = aiPixel(a);
   if (ai) {      // 얼굴 위주로 (위쪽 45%)
     const sh = Math.round(ai.height * 0.45), sc = Math.min(cv.width / ai.width, cv.height / sh);
@@ -439,8 +497,8 @@ function renderAiAvatar() {
     const where = j.stage === 'waitpc' ? (w && w.online && w.avatar ? `차례를 기다리는 중... (${j.pos || 1}번째)` : '호스트 PC가 꺼져 있어요. 켜지면 그려요.') : (j.msg || '그리는 중...');
     msg.innerHTML = `<span class="spin"></span>${esc(where)} <span class="muted">· 보통 1~3분</span>`;
   } else if (j && j.stage === 'error') msg.textContent = '그리기 실패: ' + (j.msg || '');
-  else msg.textContent = a.ai ? '지금 캐릭터 설정(머리·옷·액세서리…)으로 다시 그릴 수 있어요. 결과 화면엔 일러스트, 플레이·목록엔 AI 도트가 나와요.'
-    : '지금 캐릭터 설정(머리·옷·액세서리…)으로 호스트 PC의 AI가 일러스트와 도트를 그려 줘요.';
+  else msg.textContent = a.ai ? '지금 캐릭터 설정(머리·옷·액세서리…)으로 다시 그릴 수 있어요. 결과 화면엔 일러스트, 플레이·목록엔 표정이 바뀌는 꼬마 캐릭터가 나와요.'
+    : '지금 캐릭터 설정(머리·옷·액세서리…)으로 호스트 PC의 AI가 일러스트와 표정이 바뀌는 꼬마 캐릭터를 그려 줘요.';
 }
 async function aiAvRequest(mode) {
   if (!profile.tok) return;
@@ -503,7 +561,8 @@ function renderMyChar() {
   $('#myCharIl').classList.toggle('hidden', view !== 'illust');
   $('#myCharCv').classList.toggle('hidden', view !== 'dot');
   if (view === 'illust' && $('#myCharIl').getAttribute('src') !== url) $('#myCharIl').src = url;
-  $('#myCharMode').textContent = url ? (view === 'illust' ? '일러스트 · 누르면 도트' : '도트 · 누르면 일러스트') : '';
+  const what = aiSticker(a) ? '캐릭터' : '도트';
+  $('#myCharMode').textContent = url ? (view === 'illust' ? `일러스트 · 누르면 ${what}` : `${what} · 누르면 일러스트`) : '';
   $('#myCharHint').textContent = url ? '' : "'내 캐릭터'에서 AI 캐릭터를 그리면 일러스트도 볼 수 있어요";
   box.classList.toggle('can-flip', !!url);
   if (!mcStage) mcStage = new AvatarStage($('#myCharCv'));

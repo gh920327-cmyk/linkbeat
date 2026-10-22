@@ -893,7 +893,7 @@ html[data-theme] #screen-game, html[data-theme] #screen-calib { background: #040
 .av-ai-row { display: flex; gap: 10px; align-items: flex-end; }
 .av-ai-row:has(img:not(.hidden)) { margin-bottom: 8px; }
 .av-ai-illust { width: 120px; aspect-ratio: 896 / 1152; object-fit: cover; border: 1px solid var(--line2); background: var(--panel2); }
-.av-ai-pixel { height: 132px; image-rendering: pixelated; }
+.av-ai-pixel { height: 132px; image-rendering: auto; }
 .av-ai-btns { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
 .r-illust { width: 150px; aspect-ratio: 896 / 1152; object-fit: cover; border: 2px solid var(--line2); box-shadow: 0 10px 26px rgba(0, 0, 0, .35); }
 .r-illust.good { animation: illustHop 1.1s ease-in-out infinite; border-color: var(--gold); }

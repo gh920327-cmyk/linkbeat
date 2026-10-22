@@ -788,7 +788,7 @@ AVQ_FILE = DATA / "avqueue.json"
 AVJOBS = {}
 AV_PENDING = ("waitpc", "claimed", "working")
 AV_TOKEN_RE = re.compile(r"^[0-9a-f]{12}$")
-AV_FILE_RE = re.compile(r"^/avatars/([0-9a-f]{12})_(i\.webp|p\.png|s\.png)$")
+AV_FILE_RE = re.compile(r"^/avatars/([0-9a-f]{12})_(i\.webp|p\.png|s\.png|x\.webp)$")
 
 
 def clean_avatar(av):
@@ -956,11 +956,14 @@ def av_finish(j, images):
         px = base64.b64decode(str(images.get("pixel", "")), validate=True)
         if not (il[:4] == b"RIFF" and il[8:12] == b"WEBP" and 1000 < len(il) <= 2_500_000):
             raise ValueError("일러스트 형식이 이상해요.")
-        if not (px[:8] == b"\x89PNG\r\n\x1a\n" and 100 < len(px) <= 300_000):
+        if not (px[:8] == b"\x89PNG\r\n\x1a\n" and 100 < len(px) <= 400_000):
             raise ValueError("도트 그림 형식이 이상해요.")
         sh = base64.b64decode(str(images.get("sheet", "")), validate=True) if images.get("sheet") else b""
         if sh and not (sh[:8] == b"\x89PNG\r\n\x1a\n" and len(sh) <= 600_000):
             raise ValueError("동작 그림 형식이 이상해요.")
+        sk = base64.b64decode(str(images.get("sticker", "")), validate=True) if images.get("sticker") else b""
+        if sk and not (sk[:4] == b"RIFF" and sk[8:12] == b"WEBP" and len(sk) <= 4_000_000):
+            raise ValueError("스티커 그림 형식이 이상해요.")
     except (ValueError, TypeError) as e:
         j.update(stage="error", msg=str(e)[:200], finished=time.time())
         av_drop_ref(j)
@@ -972,7 +975,9 @@ def av_finish(j, images):
     (AVATARS / f"{tok}_i.webp").write_bytes(il)
     (AVATARS / f"{tok}_p.png").write_bytes(px)
     if sh:
-        (AVATARS / f"{tok}_s.png").write_bytes(sh)     # 동작 그림 (기본·치기 왼·오른·점프·슬픔)
+        (AVATARS / f"{tok}_s.png").write_bytes(sh)     # 동작 그림 (기본·치기 왼·오른·점프·슬픔) — 예전 도트 방식
+    if sk:
+        (AVATARS / f"{tok}_x.webp").write_bytes(sk)    # SD 스티커 표정 줄 (기본·웃음·신남·놀람·슬픔·깜빡임)
     old = None
     with FILE_LOCK:
         profiles = load_profiles()
@@ -988,7 +993,7 @@ def av_finish(j, images):
             for f in AVATARS.glob("*_old_*"):
                 if time.time() - f.stat().st_mtime > 86400:
                     f.unlink()
-            for suf in ("i.webp", "p.png", "s.png"):
+            for suf in ("i.webp", "p.png", "s.png", "x.webp"):
                 src = AVATARS / f"{old}_{suf}"
                 if src.exists():
                     src.rename(AVATARS / f"{old}_old_{suf}")
