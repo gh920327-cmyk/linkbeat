@@ -270,13 +270,149 @@ def coverage(notes, active):
 MIN_COVER = 0.85   # 곡에서 쳐야 할 곳의 85% 이상을 찍은 후보만 고름
 
 
-def pick_for_diffs(cands, targets, active=None):
+# ------------------------------------------------------------------ 기술 단계 (노트 수가 아니라 '무엇을 쳐야 하나'로 난이도 구분)
+# 박 길이에 대한 노트 간격으로 봄 (박 위치가 조금 틀려도 괜찮게, 간격만 씀)
+#   8분: 반 박 간격으로 움직임 · 16분: 1/4박 간격 · 긴 연속: 16분이 8개 넘게 이어짐
+#   3개 동시 · 연타(같은 키를 반 박 안에 다시) · 아주 빠른 연속(1/5박보다 촘촘)
+# 단계 = 1 + 8분 + 16분 + (긴 연속 + 3개 동시 + 연타 + 아주 빠름) → 기존 채보 기준 쉬움≈1 · 보통≈2 · 어려움≈3 · 극한≈5
+SKILL_NAMES = {"m8": "8분", "m16": "16분", "st": "긴 연속", "c3": "3개 동시", "jk": "연타", "vf": "아주 빠른 연속"}
+SKILL_SHOW = {"m8": 0.5, "m16": 0.3, "st": 0.2, "c3": 0.3, "jk": 0.3, "vf": 0.3}   # 이만큼 넘으면 '있다'고 표시
+DEFAULT_LEVELS = {"easy": 1.0, "normal": 2.0, "hard": 3.2, "extreme": 4.8}       # 기존 채보가 없을 때 (39곡 기존 채보 가운데값)
+LEVEL_STEP = 0.4          # 위 난이도는 기술 단계가 이만큼 넘게 올라야 함 (= 새 기술이 확실히 하나 생김)
+STAR_BANDS = [(0.75, 1.3), (0.6, 1.6)]   # 세기(★)는 울타리로만: 목표 ★의 이 범위 안에서 고름 (없으면 넓게)
+LEVEL_KEEP = 0.6          # 구간 갈아 끼운 뒤 기술 단계가 이만큼 넘게 달라지면 평소 방식 그대로
+
+
+def beat_of(bpm=None, beats=None):
+    """곡 BPM(또는 박 위치들) → 한 박 길이(초). 85~175 BPM 사이로 맞춤 (반·두 배로 잡힌 BPM 정리). 모르면 None"""
+    b = None
+    try:
+        if bpm and float(bpm) > 0:
+            b = 60.0 / float(bpm)
+        elif beats and len(beats) > 8:
+            g = sorted(float(y) - float(x) for x, y in zip(beats, beats[1:]) if float(y) > float(x))
+            b = g[len(g) // 2] if g else None
+    except (TypeError, ValueError):
+        b = None
+    if not b or b <= 0:
+        return None
+    while 60.0 / b < 85:
+        b /= 2
+    while 60.0 / b >= 175:
+        b *= 2
+    return b
+
+
+def skill_parts(notes, beat):
+    """채보 → 기술별 0~1 {m8, m16, st, c3, jk, vf}"""
+    def cl(x):
+        return max(0.0, min(1.0, x))
+    by_t = {}
+    for n in notes:
+        by_t.setdefault(round(float(n["t"]), 3), []).append(int(n["l"]))
+    ts = sorted(by_t)
+    if len(ts) < 3:
+        return {k: 0.0 for k in SKILL_NAMES}
+    g = [(b - a) / beat for a, b in zip(ts, ts[1:])]
+    n_g = len(g)
+    slow = sum(1 for x in g if x >= 0.9) / n_g
+    fast = sum(1 for x in g if x < 0.4) / n_g
+    vf = sum(1 for x in g if x < 0.2) / n_g
+    runs, cur = [], 1
+    for x in g:
+        if x < 0.4:
+            cur += 1
+        else:
+            runs.append(cur)
+            cur = 1
+    runs.append(cur)
+    in8 = sum(r for r in runs if r >= 8) / len(ts)
+    ch3 = sum(1 for t in ts if len(by_t[t]) >= 3) / len(ts)
+    last, jack, total = {}, 0, 0
+    for t in ts:
+        for lane in by_t[t]:
+            total += 1
+            if lane in last and (t - last[lane]) / beat <= 0.55:
+                jack += 1
+            last[lane] = t
+    return {"m8": cl((1 - slow) / 0.7), "m16": cl(fast / 0.5), "st": cl((in8 - 0.25) / 0.5),
+            "c3": cl(ch3 / 0.1), "jk": cl((jack / max(1, total) - 0.2) / 0.3), "vf": cl(vf / 0.2)}
+
+
+def skill_level(notes, beat):
+    return round(1.0 + sum(skill_parts(notes, beat).values()), 2)
+
+
+def skill_text(notes, beat):
+    """채보에 들어 있는 기술 (사람이 읽는 말)"""
+    if not beat:
+        return ""
+    p = skill_parts(notes, beat)
+    have = [SKILL_NAMES[k] for k in SKILL_NAMES if p[k] >= SKILL_SHOW[k]]
+    return "·".join(have) or "박자"
+
+
+def new_skills(p, prev):
+    """p에는 '있다'고 할 만큼 있는데 prev(아래 난이도)에는 없던 기술 수"""
+    return sum(1 for k in SKILL_NAMES if p[k] >= SKILL_SHOW[k] and (prev is None or prev[k] < SKILL_SHOW[k]))
+
+
+def skill_ref(basic=None, bpm=None, beats=None):
+    """곡 기준: 박 길이 + 난이도마다 기존 채보의 기술 단계 (기존 채보가 없으면 기본값)"""
+    beat = beat_of(bpm, beats)
+    levels = dict(DEFAULT_LEVELS)
+    if beat and basic:
+        for d in DIFF_ORDER:
+            if len(basic.get(d) or []) >= 20:
+                levels[d] = skill_level(basic[d], beat)
+    return {"beat": beat, "levels": levels}
+
+
+def pick_by_skill(cands, targets, ref):
+    """기술 단계로 고르기: 난이도마다 '아래 난이도에 없던 기술'이 확실히 생긴 후보만 → 그 안에서 기존 채보와 기술 단계가 가장 비슷한 것.
+    세기(★)는 목표 ★ 근처(울타리)만 보고, 위 난이도가 더 쉬워지지만 않게. 맞는 게 없으면 예전처럼 ★로."""
+    beat = ref["beat"]
+    parts = [skill_parts(c[1], beat) for c in cands]
+    lv = [round(1.0 + sum(p.values()), 2) for p in parts]
+    chosen, prev, used = {}, None, set()
+    for d in DIFF_ORDER:
+        if d not in targets:
+            continue
+        T = float(targets[d])
+        TL = float(ref["levels"].get(d, DEFAULT_LEVELS[d]))
+        if prev is not None:
+            TL = max(TL, lv[prev] + LEVEL_STEP)
+        pick = None
+        for lo, hi in STAR_BANDS:
+            pool = [i for i in range(len(cands)) if i not in used and lo * T <= cands[i][0] <= hi * T
+                    and (prev is None or (lv[i] >= lv[prev] + LEVEL_STEP and cands[i][0] >= cands[prev][0]))]
+            if pool:
+                best = min(abs(lv[i] - TL) for i in pool)
+                near_ = [i for i in pool if abs(lv[i] - TL) <= best + 0.15]
+                # 비슷하면: 아래 난이도에 없던 기술이 '눈에 띄게' 생긴 쪽 → 스트림이 자연스러운 쪽
+                pick = max(near_, key=lambda j: (new_skills(parts[j], parts[prev] if prev is not None else None) > 0,
+                                                 stream_ratio(cands[j][1]), -abs(cands[j][0] - T)))
+                break
+        if pick is None:     # 기술이 더 생긴 후보가 없음 → ★로 (그래도 앞 난이도보다는 확실히 어렵게)
+            pool = [i for i in range(len(cands)) if i not in used and (prev is None or cands[i][0] >= cands[prev][0] + MIN_STEP)] or \
+                   [i for i in range(len(cands)) if i not in used] or list(range(len(cands)))
+            pick = min(pool, key=lambda i: abs(cands[i][0] - T))
+        chosen[d] = cands[pick]
+        used.add(pick)
+        prev = pick
+    return chosen
+
+
+def pick_for_diffs(cands, targets, active=None, ref=None):
     """cands: [(★, notes, 이름)], targets: {diff: 기본 채보 ★}. 난이도 순서가 뒤집히지 않게 가장 가까운 것 고르기.
-    active가 있으면 곡 대부분을 비운 후보는 뺌 (남는 게 없으면 그대로)"""
+    active가 있으면 곡 대부분을 비운 후보는 뺌 (남는 게 없으면 그대로)
+    ref(박 길이·기존 채보 기술 단계)가 있으면 기술 단계로 고름 (pick_by_skill)"""
     if active:
         good = [c for c in cands if coverage(c[1], active) >= MIN_COVER]
         if len(good) >= min(len(targets), len(cands)):
             cands = good
+    if ref and ref.get("beat") and cands:
+        return pick_by_skill(cands, targets, ref)
     cands = sorted(cands, key=lambda c: c[0])
     chosen = {}
     lo = -1.0
@@ -479,19 +615,31 @@ def cmd_make(link, mode="", srv=None):
     wav, info = download_audio(vid, wdir)
 
     say("\n[3/4] AI 채보 만들기 (그래픽카드로 2~5분)")
-    body, chosen = make_charts(vid, wav, targets, title, song.get("artist", ""), song.get("duration") or 900, mode=mode)
+    ref = skill_ref(basic, song.get("bpm"), song.get("beats"))
+    body, chosen = make_charts(vid, wav, targets, title, song.get("artist", ""), song.get("duration") or 900, mode=mode, ref=ref)
 
     say("\n[4/4] 서버에 'AI 채보'로 따로 저장 (기본 채보는 그대로)")
     r = upload(srv, vid, body)
     shutil.rmtree(wdir, ignore_errors=True)
     shutil.rmtree(WORK / ("sep_" + vid), ignore_errors=True)   # 오디오는 지움 (채보만 남김)
-    say("\n완료! 난이도별 비교 (★ = 링크비트 별점)")
-    say("  난이도      기본 채보          AI 채보")
-    for d in DIFF_ORDER:
-        if d in chosen:
-            say(f"  {DIFF_KO[d]:<6}  ★{targets[d]:4.1f} {len(basic[d]):5d}노트   ★{chosen[d][0]:4.1f} {len(chosen[d][1]):5d}노트")
+    say_table(targets, basic, chosen, ref)
     say("\n게임에서 이 곡을 고르면 4키는 AI 채보로 플레이돼요. ('AI 채보' 칩을 끄면 기존 채보)")
     return r
+
+
+def say_table(targets, basic, chosen, ref=None):
+    beat = (ref or {}).get("beat")
+    say("\n완료! 난이도별 비교 (★ = 링크비트 별점, 단계 = 쳐야 하는 기술)")
+    say("  난이도      기본 채보                AI 채보")
+    for d in DIFF_ORDER:
+        if d in chosen:
+            ai = f"★{chosen[d][0]:4.1f} {len(chosen[d][1]):5d}노트"
+            if beat:
+                ai += f"  단계 {skill_level(chosen[d][1], beat):.1f} ({skill_text(chosen[d][1], beat)})"
+            base = f"★{targets[d]:4.1f} {len(basic.get(d) or []):5d}노트" if d in targets else "-"
+            if beat and d in (ref or {}).get("levels", {}) and basic.get(d):
+                base += f" 단계 {ref['levels'][d]:.1f}"
+            say(f"  {DIFF_KO[d]:<6}  {base:<22}  {ai}")
 
 
 GAP_MIN = 3.0    # 본 채보가 이만큼(초) 넘게 비운 곳만 채움
@@ -585,14 +733,15 @@ def fill_gaps(main, others, insts, duration):
     return sorted(notes + add, key=lambda n: (n["t"], n["l"])), used
 
 
-def choose(cands, targets, duration):
+def choose(cands, targets, duration, ref=None):
     """후보들 → 난이도마다 채보 하나 {diff: (★, notes, 설명)}
-    본 채보는 원곡 후보(a·s)에서만, 곡 대부분을 비운 후보는 빼고 고름 → 빈 곳만 채움"""
+    본 채보는 원곡 후보(a·s)에서만, 곡 대부분을 비운 후보는 빼고 고름 → 빈 곳만 채움
+    ref(박 길이·기존 채보 기술 단계)가 있으면 기술 단계로 난이도를 나눔"""
     import chartgen
     main_c = [c for c in cands if not c[2].endswith("_i")] or cands
     inst_c = [c for c in cands if c[2].endswith("_i") and len(c[1]) >= 50]
     active = active_secs(main_c, duration)
-    chosen = pick_for_diffs(main_c, relative_targets(targets), active)
+    chosen = pick_for_diffs(main_c, relative_targets(targets), active, ref=ref)
     for d, c in list(chosen.items()):
         notes, used = fill_gaps(c, main_c, inst_c, duration)
         if used:
@@ -612,10 +761,20 @@ def load_cands(odir, duration):
     return cands
 
 
-def write_summary(odir, vid, title, seed, model, targets, chosen, cands, mode=""):
+def write_summary(odir, vid, title, seed, model, targets, chosen, cands, mode="", ref=None):
+    beat = (ref or {}).get("beat")
+
+    def info(c):
+        x = {"file": c[2], "stars": c[0], "notes": len(c[1])}
+        if beat:
+            x.update(level=skill_level(c[1], beat), skills=skill_text(c[1], beat))
+        return x
     summary = {"vid": vid, "title": title, "at": time.time(), "seed": seed, "model": model, "targets": targets, "mode": mode,
-               "chosen": {d: {"file": c[2], "stars": c[0], "notes": len(c[1])} for d, c in chosen.items()},
-               "candidates": [{"file": c[2], "stars": c[0], "notes": len(c[1])} for c in sorted(cands, key=lambda c: c[0])]}
+               "pick": "skill" if beat else "star",
+               "chosen": {d: info(c) for d, c in chosen.items()},
+               "candidates": [info(c) for c in sorted(cands, key=lambda c: c[0])]}
+    if beat:
+        summary["ref"] = {"bpm": round(60.0 / beat, 2), "levels": ref.get("levels")}
     (odir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
@@ -856,10 +1015,10 @@ def consist_one(main, pool, stems, phrases, labels, duration):
     return sorted(out, key=lambda n: (n["t"], n["l"])), [names[k] for k in path], table
 
 
-def choose_consist(cands, targets, duration, stems):
+def choose_consist(cands, targets, duration, stems, ref=None):
     """일관성 방식: 평소처럼 난이도마다 본 채보를 고른 뒤, 묶음마다 따라갈 소리에 맞는 후보로 갈아 끼움 → (chosen, 기록)"""
     import chartgen
-    base = choose(cands, targets, duration)
+    base = choose(cands, targets, duration, ref=ref)
     phrases = phrases_of(stems or {}, duration)
     if not phrases:
         return base, None
@@ -887,9 +1046,28 @@ def choose_consist(cands, targets, duration, stems):
             chosen[d] = c
             log["picks"][d] = f"평소 방식 그대로 (별 {c[0]:.1f}→{star:.1f}로 너무 달라짐)"
             continue
+        beat = (ref or {}).get("beat")
+        if beat:
+            lv0, lv1 = skill_level(c[1], beat), skill_level(notes, beat)
+            if abs(lv1 - lv0) > LEVEL_KEEP:
+                chosen[d] = c
+                log["picks"][d] = f"평소 방식 그대로 (기술 단계 {lv0:.1f}→{lv1:.1f}로 너무 달라짐)"
+                continue
         tag = "일관성" + (("+" + "+".join(f"{n}({s:.0f}초)" for n, s in used[:3])) if used else "")
         chosen[d] = (star, notes, f"{main[2]}·{tag}")
         log["picks"][d] = path
+    beat = (ref or {}).get("beat")
+    if beat:      # 갈아 끼운 뒤에도 위 난이도가 기술 단계로 확실히 위인지 (아니면 그 난이도는 평소 방식 그대로)
+        prev = None
+        for d in DIFF_ORDER:
+            if d not in chosen:
+                continue
+            lv = skill_level(chosen[d][1], beat)
+            if prev is not None and lv < prev + LEVEL_STEP / 2 and chosen[d] is not base[d]:
+                chosen[d] = base[d]
+                log["picks"][d] = f"평소 방식 그대로 (갈아 끼우니 아래 난이도와 기술 차이가 작아짐)"
+                lv = skill_level(base[d][1], beat)
+            prev = lv
     return chosen, log
 
 
@@ -959,8 +1137,9 @@ def separate(wav, folder):
         return None
 
 
-def make_charts(vid, wav, targets, title, artist, duration, mode=""):
-    """AI로 후보 채보를 여러 개 만들고, 기존 채보 ★와 비슷한 걸 난이도마다 하나씩 → (서버에 보낼 body, chosen)
+def make_charts(vid, wav, targets, title, artist, duration, mode="", ref=None):
+    """AI로 후보 채보를 여러 개 만들고, 난이도마다 하나씩 → (서버에 보낼 body, chosen)
+    ref(박 길이·기존 채보 기술 단계)가 있으면 기술 단계로, 없으면 기존 채보 ★로 고름
     out\\<곡ID>\\ 에 후보 .osu · summary.json · upload.json 보관"""
     import chartgen
     t0 = time.time()
@@ -980,12 +1159,15 @@ def make_charts(vid, wav, targets, title, artist, duration, mode=""):
     cands = load_cands(odir, duration)
     if not cands:
         raise RuntimeError("AI가 채보를 제대로 만들지 못했어요.")
-    chosen, log = choose(cands, targets, duration), None
+    ref = dict(ref or {"levels": dict(DEFAULT_LEVELS)})
+    if not ref.get("beat") and sep and sep.get("stems"):        # 곡 BPM을 모르면 소리 분석으로 찾은 박에서
+        ref["beat"] = beat_of(beats=sep["stems"].get("beats"))
+    chosen, log = choose(cands, targets, duration, ref=ref), None
     if sep and sep.get("stems"):
         (odir / "stems.json").write_text(json.dumps(sep["stems"]), encoding="utf-8")   # 다시 고를 때 쓰려고 보관
         if mode == "consist":
             try:
-                chosen, log = choose_consist(cands, targets, duration, sep["stems"])
+                chosen, log = choose_consist(cands, targets, duration, sep["stems"], ref=ref)
             except Exception as e:
                 traceback.print_exc()
                 say(f"  ⚠ 일관성 방식에서 문제가 생겨서 평소 방식으로 만들어요: {e}")
@@ -996,21 +1178,24 @@ def make_charts(vid, wav, targets, title, artist, duration, mode=""):
     if onsets:
         body["onsets"] = onsets      # 소리 분리로 찾은 진짜 소리 위치 → 서버가 '소리 없는 곳' 판단에 씀
     (odir / "upload.json").write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
-    write_summary(odir, vid, title, seed, body["by"], targets, chosen, cands, mode="consist" if log else "")
+    write_summary(odir, vid, title, seed, body["by"], targets, chosen, cands, mode="consist" if log else "", ref=ref)
     return body, chosen
 
 
 def cmd_gen(vid, audio, targets_file, out_file, title="", artist="", duration=900.0):
-    """링크비트 실행기의 채보 엔진이 부름: 받은 오디오 + 기존 채보 ★ → AI 채보 json (인터넷 안 씀)"""
-    targets = json.loads(Path(targets_file).read_text(encoding="utf-8"))
-    targets = {d: float(v) for d, v in targets.items() if d in DIFF_ORDER}
+    """링크비트 실행기의 채보 엔진이 부름: 받은 오디오 + 기존 채보 ★ → AI 채보 json (인터넷 안 씀)
+    targets 파일: {난이도: ★} (+ 새 실행기는 "_bpm"·"_beats"·"_basic"(기존 채보)도 넣어 줌 → 기술 단계 기준)"""
+    raw = json.loads(Path(targets_file).read_text(encoding="utf-8"))
+    targets = {d: float(v) for d, v in raw.items() if d in DIFF_ORDER}
     if not targets:
         raise RuntimeError("기존 채보 별점이 없어요.")
+    basic = raw.get("_basic") if isinstance(raw.get("_basic"), dict) else None
+    ref = skill_ref(basic, raw.get("_bpm"), raw.get("_beats"))
     wdir = WORK / ("gen_" + vid)
     try:
         say("AI: 오디오 준비 중...")
         wav = to_wav(Path(audio), wdir)
-        body, _ = make_charts(vid, wav, targets, title, artist, duration, mode="consist")   # 8번(전체 새로 만들기)과 같은 방식
+        body, _ = make_charts(vid, wav, targets, title, artist, duration, mode="consist", ref=ref)   # 8번(전체 새로 만들기)과 같은 방식
         Path(out_file).write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
         say("AI: 완료")
     finally:
@@ -1311,12 +1496,121 @@ def cmd_restore_test(ids=None):
     say(f"\n{n}곡을 예전 AI 채보로 되돌렸어요. 게임을 새로고침하면 반영돼요.")
 
 
+REPICK_BACKUP = ROOT / "backup_repick"    # 기술 단계로 다시 고르기 전 상태 (되돌리기용)
+REPICK_FILES = ("upload.json", "summary.json", "sections.json")
+
+
+def repick(srv, vid):
+    """out\\<곡ID>\\ 에 남은 후보에서 기술 단계 기준으로 난이도마다 다시 고름 (그래픽카드 안 씀)
+    → (body, chosen, targets, basic, ref) / 후보가 없으면 None"""
+    import chartgen
+    odir = OUT / vid
+    up = odir / "upload.json"
+    if not up.exists():
+        return None
+    song = srv.call("GET", f"songs/{vid}")
+    duration = float(song.get("duration") or 900)
+    cands = load_cands(odir, duration)
+    if not cands:
+        return None
+    basic = song.get("charts") or {}
+    targets = {d: chartgen.star_rating(basic[d], 4) for d in DIFF_ORDER if basic.get(d)}
+    if not targets:
+        return None
+    stp = odir / "stems.json"
+    stems = json.loads(stp.read_text(encoding="utf-8")) if stp.exists() else None
+    ref = skill_ref(basic, song.get("bpm"), song.get("beats"))
+    if not ref.get("beat") and stems:
+        ref["beat"] = beat_of(beats=stems.get("beats"))
+    if not ref.get("beat"):
+        return None
+    log = None
+    if stems and any(odir.glob("sr*_i.osu")):
+        chosen, log = choose_consist(cands, targets, duration, stems, ref=ref)
+    else:
+        chosen = choose(cands, targets, duration, ref=ref)
+    if log:
+        (odir / "sections.json").write_text(json.dumps(log, ensure_ascii=False, indent=1), encoding="utf-8")
+    old = json.loads(up.read_text(encoding="utf-8"))
+    body = dict(old, charts={d: c[1] for d, c in chosen.items()})
+    up.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+    sp = odir / "summary.json"
+    summary = json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else {}
+    write_summary(odir, vid, summary.get("title") or song.get("title", ""), summary.get("seed"), summary.get("model", ""),
+                  targets, chosen, cands, mode="consist" if log else "", ref=ref)
+    return body, chosen, targets, basic, ref
+
+
+def cmd_repick(ids=None):
+    """기술 단계로 난이도 다시 고르기: 이미 만든 후보(out 폴더)에서 다시 골라 서버에 올림. 곡마다 지금 것을 backup_repick 에 보관"""
+    srv = get_server(need_key=True)
+    if not ids:
+        ids = sorted(p.parent.name for p in OUT.glob("*/upload.json")) if OUT.exists() else []
+    if not ids:
+        say("다시 고를 AI 채보가 없어요.")
+        return
+    say(f"기술 단계로 난이도 다시 고르기: {len(ids)}곡 (그래픽카드 안 씀, 곡마다 몇 초)")
+    REPICK_BACKUP.mkdir(parents=True, exist_ok=True)
+    ok = 0
+    for i, vid in enumerate(ids):
+        src, dst = OUT / vid, REPICK_BACKUP / vid
+        try:
+            if src.is_dir() and not dst.exists():          # 맨 처음 것만 보관 (여러 번 해도 원래 것으로 돌아가게)
+                dst.mkdir(parents=True)
+                for f in REPICK_FILES:
+                    if (src / f).exists():
+                        shutil.copy2(src / f, dst / f)
+            res = repick(srv, vid)
+            if not res:
+                say(f"\n{i + 1}/{len(ids)} {vid}: 후보나 곡 정보가 없어서 그대로 둬요")
+                continue
+            body, chosen, targets, basic, ref = res
+            r = upload(srv, vid, body)
+            ok += 1
+            say(f"\n{i + 1}/{len(ids)} {vid} {r.get('stars', '')}")
+            say_table(targets, basic, chosen, ref)
+        except SystemExit:
+            raise
+        except Exception as e:
+            traceback.print_exc()
+            say(f"\n{i + 1}/{len(ids)} {vid} 건너뜀: {e}")
+    say(f"\n끝! {ok}곡을 다시 골랐어요. 게임을 새로고침하면 반영돼요.")
+    say("마음에 안 들면 11_난이도다시고르기되돌리기.bat 으로 되돌릴 수 있어요.")
+
+
+def cmd_repick_undo(ids=None):
+    """다시 고르기 전으로: backup_repick 에 보관한 upload·summary 를 out 으로 되돌리고 서버에 다시 보냄"""
+    srv = get_server(need_key=True)
+    if not ids:
+        ids = sorted(p.name for p in REPICK_BACKUP.iterdir() if p.is_dir()) if REPICK_BACKUP.exists() else []
+    if not ids:
+        say("되돌릴 곡이 없어요.")
+        return
+    n = 0
+    for vid in ids:
+        src, dst = REPICK_BACKUP / vid, OUT / vid
+        if not (src / "upload.json").exists():
+            say(f"  보관한 게 없어요: {vid}")
+            continue
+        dst.mkdir(parents=True, exist_ok=True)
+        for f in REPICK_FILES:
+            if (src / f).exists():
+                shutil.copy2(src / f, dst / f)
+        r = upload(srv, vid, json.loads((dst / "upload.json").read_text(encoding="utf-8")))
+        shutil.rmtree(src)
+        n += 1
+        say(f"  되돌렸어요: {vid} {r.get('stars', '')}")
+    say(f"\n{n}곡을 다시 고르기 전으로 되돌렸어요. 게임을 새로고침하면 반영돼요.")
+
+
 def main():
     ap = argparse.ArgumentParser(description="링크비트 AI 채보 도구")
     ap.add_argument("--consist", nargs="+", default=None, help="일관성 방식으로 다시 만들기 (곡 ID 여러 개)")
     ap.add_argument("--restore-test", nargs="*", default=None, help="되돌리기 (곡 링크/ID, 없으면 전체 새로 만들기로 만든 곡)")
     ap.add_argument("--remake-all", action="store_true", help="곡 전부 새로 만들기 (--skip 곡 빼고)")
     ap.add_argument("--skip", nargs="*", default=[])
+    ap.add_argument("--repick", nargs="*", default=None, help="기술 단계로 난이도 다시 고르기 (곡 링크/ID, 없으면 전부)")
+    ap.add_argument("--repick-undo", nargs="*", default=None, help="다시 고르기 되돌리기 (곡 링크/ID, 없으면 전부)")
     ap.add_argument("--spectro", default="", help="채보 점검 그림 (곡 링크/ID)")
     ap.add_argument("--diffs", default="hard,extreme", help="점검 그림 난이도 (쉼표로)")
     ap.add_argument("link", nargs="?", default="")
@@ -1339,7 +1633,17 @@ def main():
         if x in ("--gen", "--upload", "--title", "--artist", "--spectro") and argv[i + 1].startswith("-"):
             argv[i:i + 2] = [f"{x}={argv[i + 1]}"]
             break
+    tail = []
+    for flag in ("--repick", "--repick-undo"):       # 그 뒤는 전부 곡 ID ('-'로 시작하는 ID도 그대로)
+        if flag in argv:
+            k = argv.index(flag)
+            argv, tail = argv[:k + 1], argv[k + 1:]
+            break
     a = ap.parse_args(argv)
+    if a.repick is not None:
+        a.repick = tail
+    if a.repick_undo is not None:
+        a.repick_undo = tail
     try:
         if a.gen:
             cmd_gen(a.gen, a.audio, a.targets, a.out, a.title, a.artist, a.duration)
@@ -1358,6 +1662,12 @@ def main():
             return
         if a.remake_all:
             cmd_remake_all(a.skip)
+            return
+        if a.repick is not None:
+            cmd_repick([parse_vid(x) or x for x in " ".join(a.repick).split() if x.strip()])
+            return
+        if a.repick_undo is not None:
+            cmd_repick_undo([parse_vid(x) or x for x in " ".join(a.repick_undo).split() if x.strip()])
             return
         if a.resend_all:
             cmd_resend_all()
