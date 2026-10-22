@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.2.14"
+VERSION = "1.2.15"
 
 # 가상환경의 실행 파일 폴더(deno 등)를 PATH 앞에 → yt-dlp가 JS 런타임을 찾을 수 있게
 os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
@@ -191,7 +191,9 @@ def run_ai_job(api, job):
             else:
                 audio, _ = pipeline.download_audio(vid, td, progress)
             tfile, ofile = Path(td) / "targets.json", Path(td) / "ai.json"
-            tfile.write_text(json.dumps(targets), encoding="utf-8")
+            # 기존 채보 ★ + (AI 도구가 기술 단계로 난이도를 나눌 때 쓰는) BPM·박·기존 채보 — 옛 도구는 난이도 키만 읽어서 괜찮음
+            tfile.write_text(json.dumps(dict(targets, _bpm=song.get("bpm"), _beats=song.get("beats") or [], _basic=charts)),
+                             encoding="utf-8")
             progress("ai", "AI가 채보 쓰는 중... (그래픽카드로 2~5분)", force=True)
             env = dict(os.environ, PYTHONIOENCODING="utf-8")
             cmd = [str(tool["py"]), "-I", str(tool["tool"]), "--gen=" + vid, "--audio", str(audio),   # ID가 '-'로 시작해도 되게

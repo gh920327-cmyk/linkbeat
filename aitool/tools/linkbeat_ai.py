@@ -1554,14 +1554,18 @@ def cmd_repick(ids=None):
     ok = 0
     for i, vid in enumerate(ids):
         src, dst = OUT / vid, REPICK_BACKUP / vid
+        made = False
         try:
             if src.is_dir() and not dst.exists():          # 맨 처음 것만 보관 (여러 번 해도 원래 것으로 돌아가게)
                 dst.mkdir(parents=True)
+                made = True
                 for f in REPICK_FILES:
                     if (src / f).exists():
                         shutil.copy2(src / f, dst / f)
             res = repick(srv, vid)
             if not res:
+                if made:
+                    shutil.rmtree(dst, ignore_errors=True)
                 say(f"\n{i + 1}/{len(ids)} {vid}: 후보나 곡 정보가 없어서 그대로 둬요")
                 continue
             body, chosen, targets, basic, ref = res
@@ -1574,6 +1578,11 @@ def cmd_repick(ids=None):
         except Exception as e:
             traceback.print_exc()
             say(f"\n{i + 1}/{len(ids)} {vid} 건너뜀: {e}")
+            try:                                            # 아무것도 안 바뀌었으면 방금 만든 보관본은 지움
+                if made and (src / "upload.json").read_bytes() == (dst / "upload.json").read_bytes():
+                    shutil.rmtree(dst, ignore_errors=True)
+            except OSError:
+                pass
     say(f"\n끝! {ok}곡을 다시 골랐어요. 게임을 새로고침하면 반영돼요.")
     say("마음에 안 들면 11_난이도다시고르기되돌리기.bat 으로 되돌릴 수 있어요.")
 
