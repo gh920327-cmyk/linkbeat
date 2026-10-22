@@ -76,16 +76,21 @@ def prompts(a, desc="", use_look=True):
     g, look = tags(a)
     parts = [p for p in (f"({desc}:1.15)" if desc else "", look if use_look else "") if p]   # 설정 반영을 끄면 예전 캐릭터 칸은 안 씀
     who = ", ".join(parts) or "original character"
-    illust = (f"{g}, solo, {who}, upper body, looking at viewer, music, rhythm game, dynamic pose, "
+    # 일러스트: 가슴 위 초상 + 손은 화면 밖 (애니 모델이 손을 자주 망가뜨려서 손이 안 나오는 구도로)
+    illust = (f"{g}, solo, {who}, portrait, upper body, hands out of frame, looking at viewer, music, "
               f"colorful, vibrant, gradient background, safe, {QUALITY}")
+    illust_neg = NEG + (", bad hands, extra hands, extra arms, deformed hands, malformed hands, fused fingers, too many fingers, "
+                        "holding, hand up, hands up, v, peace sign")
     key = key_color(who)
-    chibi = (f"{g}, solo, chibi, super deformed, 2 heads tall, big head, large detailed eyes, clear facial features, expressive face, "
+    # 꼬마: 머리만 크게 나오지 않게 (전신이 그림 가운데에 작게, 머리·몸 비율은 보통 꼬마 정도)
+    chibi = (f"{g}, solo, chibi, super deformed, wide shot, small character, detailed eyes, clear facial features, expressive face, "
              f"cute, {who}, full body, standing, front view, arms at sides, "
              f"game sprite, simple background, ({key} background:1.45), solid color background, flat background, thick outline, "
              f"flat color, cel shading, safe, {QUALITY}")
     chibi_neg = NEG + (", shadow, drop shadow, ground, floor, white background, gradient background, detailed background, scenery, "
-                       "border, frame, multiple views, character sheet, reference sheet, close-up, portrait, cropped feet, text")
-    return (illust, NEG, 896, 1152), (chibi, chibi_neg, 1024, 1024), key
+                       "border, frame, multiple views, character sheet, reference sheet, close-up, portrait, upper body, bust, "
+                       "head only, oversized head, cropped, cropped legs, cropped feet, text")
+    return (illust, illust_neg, 896, 1152), (chibi, chibi_neg, 1024, 1024), key
 
 
 KEY_HUE = {"green": 120, "blue": 220, "pink": 315}
