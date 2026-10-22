@@ -54,6 +54,9 @@ function songPick(s) {
   if (typeof o === 'boolean') return o;
   return settings.aiChart !== false && aiRec(s);
 }
+/* 이 곡 AI 채보를 어느 AI가 만들었나: 새 AI(Mapperatorinator) / 예전 AI(MuG) — 서버가 저장한 ai.by 로 구분 */
+const aiIsMug = (s) => !!(s && s.ai && !/^mapperatorinator/i.test(String(s.ai.by || '')));
+const aiMaker = (s) => aiIsMug(s) ? '예전 AI(MuG)' : '새 AI(Mapperatorinator)';
 const hasAi = (s, nl = settings.mode, diff = settings.diff) => nl === 4 && !!(s && s.ai && (s.ai.counts || {})[diff]);
 const aiOn = (s, nl = settings.mode, diff = settings.diff) => hasAi(s, nl, diff) && songPick(s);
 const starOf = (s, nl = settings.mode, diff = settings.diff) => aiOn(s, nl, diff) ? (s.ai.stars || {})[diff] || 0 : ((s.stars || {})[nl] || {})[diff] || 0;
@@ -126,7 +129,7 @@ function renderSongs() {
       return `<div class="row${s.id === selId ? ' sel' : ''}${roomSel}" data-id="${s.id}">
         <button class="fav${fav[s.id] ? ' on' : ''}" type="button" title="${fav[s.id] ? '즐겨찾기에서 빼기' : '즐겨찾기'}">${fav[s.id] ? '★' : '☆'}</button>
         <img class="row-thumb" src="https://i.ytimg.com/vi/${s.id}/mqdefault.jpg" alt="" loading="lazy">
-        <div class="row-info"><div class="row-title">${s.ai && songPick(s) ? '<span class="ai-badge" title="이 곡은 AI 채보로 플레이 (곡 화면의 AI 채보 칩으로 바꿀 수 있어요)">AI</span>' : ''}${esc(s.title)}</div><div class="row-artist">${esc(artistOf(s))}</div></div>
+        <div class="row-info"><div class="row-title">${s.ai && songPick(s) ? (aiIsMug(s) ? '<span class="ai-badge mug" title="이 곡은 예전 AI(MuG)로 만든 AI 채보로 플레이 (곡 화면의 AI 채보 칩으로 바꿀 수 있어요)">MuG</span>' : '<span class="ai-badge" title="이 곡은 새 AI로 만든 AI 채보로 플레이 (곡 화면의 AI 채보 칩으로 바꿀 수 있어요)">AI</span>') : ''}${esc(s.title)}</div><div class="row-artist">${esc(artistOf(s))}</div></div>
         <div class="row-slots">${slots}</div>
       </div>`;
     }).join('');
@@ -207,7 +210,9 @@ function renderDetail() {
   ac.classList.toggle('hidden', !songAi || nl !== 4);
   ac.classList.toggle('on', songAi && songPick(s));
   ac.disabled = inRoom && !leader;
-  ac.title = songAi ? `다른 리듬게임 채보로 학습한 AI가 만든 채보 · ${aiRec(s) ? '이 곡은 AI 채보가 기본' : '이 곡은 AI가 음원과 잘 안 맞아서 기존 채보가 기본'}${s.ai.match != null ? ` (음원과 맞음 ${Math.round(s.ai.match * 100)}%)` : ''}${s.ai.at ? ` · ${new Date(s.ai.at * 1000).toLocaleDateString()} 생성` : ''} · 누르면 이 곡만 바꿔요 · 기록은 따로` : '';
+  ac.textContent = songAi && aiIsMug(s) ? 'AI 채보 · MuG' : 'AI 채보';
+  ac.classList.toggle('mug', songAi && aiIsMug(s));
+  ac.title = songAi ? `${aiMaker(s)}가 만든 채보 · ${aiRec(s) ? '이 곡은 AI 채보가 기본' : '이 곡은 AI가 음원과 잘 안 맞아서 기존 채보가 기본'}${s.ai.match != null ? ` (음원과 맞음 ${Math.round(s.ai.match * 100)}%)` : ''}${s.ai.at ? ` · ${new Date(s.ai.at * 1000).toLocaleDateString()} 생성` : ''} · 누르면 이 곡만 바꿔요 · 기록은 따로` : '';
   ac.classList.toggle('old', songAi && !(s.ai.gen >= 2));
   applyDiffAccent();
   drawBeatLine();
@@ -486,7 +491,7 @@ $('#btnEdit').addEventListener('click', () => selId && openEditor(selId, setting
 $('#btnAiOne').addEventListener('click', async () => {
   const s = songById(selId);
   if (!s) return;
-  if (s.ai && !confirm(`'${s.title}'의 AI 채보를 새로 다시 만들까요? (곡당 2~5분 · 기록은 그대로)`)) return;
+  if (s.ai && !confirm(`'${s.title}'의 AI 채보를 새로 다시 만들까요? (곡당 7~8분 · 기록은 그대로)`)) return;
   try {
     await api('/ai/batch', { method: 'POST', body: { ids: [s.id] } });
     toast(`'${s.title}' AI 채보를 대기열에 넣었어요.`, 2600);
@@ -641,10 +646,19 @@ $('#pcList').addEventListener('click', async (e) => {
 });
 net.on('jobs', () => loadJobs());
 $('#btnAiBatch').addEventListener('click', async () => {
+  const mug = songs.filter((s) => aiIsMug(s));
+  if (mug.length && confirm(`예전 AI(MuG)로 만든 AI 채보 ${mug.length}곡을 새 AI로 다시 만들까요? (곡당 7~8분 · 기록은 그대로)`)) {
+    try {
+      const r = await api('/ai/batch', { method: 'POST', body: { ids: mug.map((s) => s.id) } });
+      toast(`${r.queued}곡을 AI 채보 대기열에 넣었어요.`, 3000);
+      loadJobs();
+    } catch (err) { toast(err.message); }
+    return;
+  }
   const left = songs.filter((s) => !s.ai).length;
   const old = songs.filter((s) => s.ai && !(s.ai.gen >= 2)).length;
   let all = false;
-  if (old && confirm(`예전 방식(롱노트 많음) AI 채보 ${old}곡${left ? `과 AI 채보가 없는 ${left}곡` : ''}을 새 방식으로 만들까요? (곡당 2~5분 · 기록은 그대로)`)) {
+  if (old && confirm(`예전 방식(롱노트 많음) AI 채보 ${old}곡${left ? `과 AI 채보가 없는 ${left}곡` : ''}을 새 방식으로 만들까요? (곡당 7~8분 · 기록은 그대로)`)) {
     try {
       const r = await api('/ai/batch', { method: 'POST', body: { old: true } });
       toast(`${r.queued}곡을 AI 채보 대기열에 넣었어요.`, 3000);
@@ -654,9 +668,9 @@ $('#btnAiBatch').addEventListener('click', async () => {
   }
   if (old) return;
   if (!left) {
-    if (!confirm(`모든 곡에 이미 AI 채보가 있어요. ${songs.length}곡의 AI 채보를 전부 새로 다시 만들까요? (곡당 2~5분 · 기록은 그대로)`)) return;
+    if (!confirm(`모든 곡에 이미 AI 채보가 있어요. ${songs.length}곡의 AI 채보를 전부 새로 다시 만들까요? (곡당 7~8분 · 기록은 그대로)`)) return;
     all = true;
-  } else if (!confirm(`AI 채보가 없는 ${left}곡을 대기열에 넣어요. 호스트 PC의 AI 채보 도구가 한 곡씩 만들어요 (곡당 2~5분).\n새로 추가한 곡이 항상 먼저 만들어져요. 진행할까요?`)) return;
+  } else if (!confirm(`AI 채보가 없는 ${left}곡을 대기열에 넣어요. 호스트 PC의 AI 채보 도구가 한 곡씩 만들어요 (곡당 7~8분).\n새로 추가한 곡이 항상 먼저 만들어져요. 진행할까요?`)) return;
   try {
     const r = await api('/ai/batch', { method: 'POST', body: { all } });
     toast(r.queued ? `${r.queued}곡을 AI 채보 대기열에 넣었어요.` : '넣을 곡이 없어요.', 3000);
