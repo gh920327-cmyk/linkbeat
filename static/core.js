@@ -596,6 +596,7 @@ function showScreen(name) {
   const slot = { game: '#slotGame', editor: '#slotEditor', calib: '#slotCalib' }[name];
   const slotEl = slot ? $(slot) : null;
   requestAnimationFrame(() => placePlayer(slotEl));
+  if (name === 'lobby' && typeof drawBeatLine === 'function') requestAnimationFrame(drawBeatLine);   // 숨겨져 있던 동안은 크기를 몰라서
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
 }
 
