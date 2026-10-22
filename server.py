@@ -190,6 +190,46 @@ def song_stars(song):
     return table
 
 
+_DENS_CACHE = {}
+DENS_N = 48
+_B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def song_dens(song):
+    """곡 선택 화면의 '비트 라인': 채보마다 곡을 48칸으로 나눠 칸마다 1초에 노트가 몇 개인지 (0.5개 단위, 36가지 글자 하나씩)
+    → {"4": {난이도: "0a3…"}, "6": {...}, "ai": {...}, "dur": 길이} (곡 파일이 바뀔 때만 다시 계산)"""
+    sid, stamp = song["id"], song.get("_m")
+    hit = _DENS_CACHE.get(sid)
+    if hit and stamp is not None and hit[0] == stamp:
+        return hit[1]
+    dur = float(song.get("duration") or 0)
+    if dur <= 0:
+        ts = [n.get("t", 0) for ch in (song.get("charts") or {}).values() for n in ch]
+        dur = max(ts) + 1 if ts else 1
+    step = dur / DENS_N
+
+    def enc(notes):
+        cnt = [0] * DENS_N
+        for n in notes or []:
+            try:
+                i = int(float(n.get("t", 0)) / step)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= i < DENS_N:
+                cnt[i] += 1
+        return "".join(_B36[min(35, round(c / step * 2))] for c in cnt)
+
+    out = {"4": {d: enc(n) for d, n in (song.get("charts") or {}).items()},
+           "6": {d: enc(n) for d, n in (song.get("charts6") or {}).items()},
+           "dur": round(dur, 2)}
+    ai = song.get("ai")
+    if isinstance(ai, dict) and isinstance(ai.get("charts"), dict):
+        out["ai"] = {d: enc(n) for d, n in ai["charts"].items()}
+    if stamp is not None:
+        _DENS_CACHE[sid] = (stamp, out)
+    return out
+
+
 def ai_summary(song):
     """AI 채보(4키, 기본 채보와 따로 저장)가 있으면 난이도별 노트 수·별점"""
     ai = song.get("ai")
@@ -2491,6 +2531,8 @@ async def api(method, path, headers, body):
         song = load_song(sid)
         if song is None:
             raise HttpError(404, "곡이 없어요.")
+        if len(parts) == 3 and parts[2] == "dens" and method == "GET":
+            return song_dens(song)
         if len(parts) == 2:
             if method == "GET":
                 song["_hl"] = song_hl(song)   # 하이라이트 모드 구간 (파일에는 저장 안 함)

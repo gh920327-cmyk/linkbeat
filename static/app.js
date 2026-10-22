@@ -177,10 +177,10 @@ function renderDetail() {
     $('.dnotes', b).textContent = `${countOf(s, nl, d)} NOTES`;
   });
   const top = boardOf(s, nl, settings.diff)[0];
-  $('#dTop').innerHTML = top ? `${esc(top.name)} <em>${top.score.toLocaleString()}</em>` : '-';
+  $('#dTop').innerHTML = top ? `${esc(top.name)} <em>${top.score.toLocaleString()}</em>` : '<span class="none">아직 없음</span>';
   const mine = myRecord(s, nl, settings.diff);
-  $('#dMine').innerHTML = mine ? `<span class="rank-${esc(mine.rank)}">${esc(mine.rank)}</span> <em>${mine.score.toLocaleString()}</em>` : '-';
-  $('#dRate').innerHTML = mine && mine.acc != null ? `<em>${(+mine.acc).toFixed(2)}%</em>${mine.fc ? ' <span class="fc">FC</span>' : ''}` : '-';
+  $('#dMine').innerHTML = mine ? `<span class="rank-${esc(mine.rank)}">${esc(mine.rank)}</span> <em>${mine.score.toLocaleString()}</em>` : '<span class="none">기록 없음</span>';
+  $('#dRate').innerHTML = mine && mine.acc != null ? `<em>${(+mine.acc).toFixed(2)}%</em>${mine.fc ? ' <span class="fc">FC</span>' : ''}` : '';
   const pb = $('#btnPlay');
   const hlOn = hlActive();
   if (inRoom) {
@@ -209,7 +209,96 @@ function renderDetail() {
   ac.disabled = inRoom && !leader;
   ac.title = songAi ? `다른 리듬게임 채보로 학습한 AI가 만든 채보 · ${aiRec(s) ? '이 곡은 AI 채보가 기본' : '이 곡은 AI가 음원과 잘 안 맞아서 기존 채보가 기본'}${s.ai.match != null ? ` (음원과 맞음 ${Math.round(s.ai.match * 100)}%)` : ''}${s.ai.at ? ` · ${new Date(s.ai.at * 1000).toLocaleDateString()} 생성` : ''} · 누르면 이 곡만 바꿔요 · 기록은 따로` : '';
   ac.classList.toggle('old', songAi && !(s.ai.gen >= 2));
+  applyDiffAccent();
+  drawBeatLine();
 }
+/* 고른 난이도 칸의 색을 곡 정보 칸 전체의 강조색으로 (PLAY 버튼·비트 라인·미리듣기 버튼) */
+function applyDiffAccent() {
+  const col = $('#detailCol');
+  const box = $('#diffBoxes .dbox.on') || $('#diffBoxes .dbox');
+  if (!col || !box) return;
+  const c = getComputedStyle(box).getPropertyValue('--sc').trim();
+  if (!c) { col.style.removeProperty('--acc'); col.style.removeProperty('--on-acc'); return; }
+  col.style.setProperty('--acc', c);
+  col.style.setProperty('--on-acc', inkOn(c));
+}
+/* 색 위에 올릴 글자색 (밝은 색 → 진한 남색, 어두운 색 → 흰색) */
+function inkOn(c) {
+  const cv = inkOn.cv || (inkOn.cv = document.createElement('canvas').getContext('2d'));
+  cv.fillStyle = '#000'; cv.fillStyle = c;
+  const m = /^#([0-9a-f]{6})$/i.exec(cv.fillStyle);
+  if (!m) return '#04060d';
+  const n = parseInt(m[1], 16), lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  const L = 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+  return L > 0.33 ? '#060914' : '#ffffff';
+}
+
+/* ---------------- 비트 라인: 곡을 48칸으로 나눠 칸마다 노트가 얼마나 몰려 있는지 (서버가 채보에서 계산, 곡마다 한 번 받음) */
+const densCache = new Map();
+function densOf(id) {
+  let e = densCache.get(id);
+  const s = songById(id);
+  const stamp = s ? JSON.stringify(s.edited || {}) + (s.ai ? s.ai.at : '') : '';
+  if (e && e.stamp === stamp) return e.data;
+  if (e && e.loading) return null;
+  e = { stamp, data: e && e.data, loading: true };
+  densCache.set(id, e);
+  api(`/songs/${id}/dens`).then((d) => { e.data = d; }).catch(() => {}).finally(() => { e.loading = false; if (selId === id) drawBeatLine(); });
+  return e.data || null;
+}
+function drawBeatLine() {
+  const cv = $('#beatCv');
+  if (!cv) return;
+  const box = cv.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const W = Math.max(60, Math.floor(box.width)), H = Math.max(20, Math.floor(box.height));
+  if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const s = songById(selId);
+  const d = s && densOf(s.id);
+  const nl = settings.mode, diff = settings.diff;
+  const str = d && (aiOn(s, nl, diff) && d.ai && d.ai[diff] ? d.ai[diff] : (d[String(nl)] || {})[diff]);
+  const cs = getComputedStyle($('#detailCol'));
+  const acc = cs.getPropertyValue('--acc').trim() || '#4de1ff';
+  const ink = cs.getPropertyValue('--muted').trim() || '#8691b3';
+  const dur = (d && d.dur) || (s && s.duration) || 1;
+  const pad = 6, top = 8, base = H - 6;
+  // 후렴(하이라이트) 구간: 밝은 띠 — 하이라이트 모드면 나머지를 어둡게
+  const hl = s && s.hl;
+  if (hl && hl.end > hl.from) {
+    const x0 = pad + (W - pad * 2) * clamp(hl.from / dur, 0, 1), x1 = pad + (W - pad * 2) * clamp(hl.end / dur, 0, 1);
+    ctx.fillStyle = hlActive() ? 'rgba(255, 210, 90, .16)' : 'rgba(255, 255, 255, .05)';
+    ctx.fillRect(x0, 2, x1 - x0, H - 4);
+    if (hlActive()) {
+      ctx.fillStyle = 'rgba(255, 210, 90, .75)';
+      ctx.fillRect(x0, 2, 2, H - 4); ctx.fillRect(x1 - 2, 2, 2, H - 4);
+    }
+  }
+  ctx.fillStyle = ink; ctx.globalAlpha = 0.35;
+  ctx.fillRect(pad, base + 1, W - pad * 2, 1);
+  ctx.globalAlpha = 1;
+  if (!str) return;
+  const n = str.length, gap = 2, bw = (W - pad * 2) / n;
+  const vals = [...str].map((ch) => parseInt(ch, 36) / 2);     // 1초에 노트 수
+  for (let i = 0; i < n; i++) {
+    const v = vals[i];
+    if (!v) continue;
+    const h = Math.max(2, (base - top) * Math.min(1, Math.sqrt(v / 16)));
+    const x = pad + i * bw;
+    const dim = hl && hlActive() && ((i + 0.5) / n * dur < hl.from || (i + 0.5) / n * dur > hl.end);
+    ctx.globalAlpha = dim ? 0.28 : 0.9;
+    ctx.fillStyle = acc;
+    ctx.beginPath();                       // 살짝 기운 막대 (링크비트의 사선 모양)
+    const sk = Math.min(3, bw * 0.35);
+    ctx.moveTo(x + gap / 2 + sk, base - h); ctx.lineTo(x + bw - gap / 2 + sk, base - h);
+    ctx.lineTo(x + bw - gap / 2, base); ctx.lineTo(x + gap / 2, base); ctx.closePath();
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+window.addEventListener('resize', () => { if (currentScreen === 'lobby') drawBeatLine(); });
 function renderMods() {
   $('#modMirror').classList.toggle('on', !!settings.mirror);
   $('#modRandom').classList.toggle('on', !!settings.random);
@@ -826,6 +915,11 @@ function showResult(g, r) {
   $('#rGreat').textContent = r.counts.great;
   $('#rGood').textContent = r.counts.good;
   $('#rMiss').textContent = r.counts.miss;
+  const tot = Math.max(1, r.counts.perfect + r.counts.great + r.counts.good + r.counts.miss);
+  [['.c-perfect', r.counts.perfect], ['.c-great', r.counts.great], ['.c-good', r.counts.good], ['.c-miss', r.counts.miss]].forEach(([k, v]) => {
+    const u = $(`#rCounts ${k} .cbar u`);
+    if (u) { u.style.setProperty('--w', '0%'); requestAnimationFrame(() => requestAnimationFrame(() => u.style.setProperty('--w', `${(v / tot * 100).toFixed(1)}%`))); }
+  });
   $('#rBadge').textContent = r.incomplete ? '중도 포기' : r.counts.miss === 0 && r.counts.good === 0 && r.counts.great === 0 ? 'ALL PERFECT' : r.fc ? 'FULL COMBO' : '';
   $('#rBest').textContent = g.practice && !g.hl ? '연습 모드라 기록은 남지 않아요.' : isTest ? '테스트 플레이라 기록은 남지 않아요.' : newLocal ? (g.hl ? '하이라이트 최고 기록 갱신!' : '내 최고 기록 갱신!') : '';
   const rg = $('#rGhost');
@@ -1713,6 +1807,7 @@ function setUiTheme(id) {
   saveSettings();
   applyUiTheme();
   renderThemeRow();
+  if (typeof renderDetail === 'function') renderDetail();
 }
 $('#themeRow').addEventListener('click', (e) => { const b = e.target.closest('[data-t]'); if (b) setUiTheme(b.dataset.t); });
 $('#btnTheme').addEventListener('click', () => {

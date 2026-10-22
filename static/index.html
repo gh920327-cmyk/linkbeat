@@ -7,7 +7,7 @@
 <title>링크비트</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Orbitron:wght@600;800;900&family=Noto+Sans+KR:wght@400;500;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Orbitron:wght@600;800;900&family=Saira:ital,wdth,wght@0,75..100,500..900;1,75..100,500..900&family=Noto+Sans+KR:wght@400;500;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -45,15 +45,18 @@
       <button data-mode="6">6<small>KEY</small></button>
     </div>
     <div class="top-right">
-      <input id="nick" maxlength="16" placeholder="닉네임" autocomplete="off" title="순위표에 표시되는 이름">
-      <span id="connDot" class="dot" title="서버 연결 상태"></span>
-      <button id="btnProfile" class="ghost pf-btn" type="button"></button>
-      <span id="myTitle" class="ptitle my-title hidden" title="내 칭호"></span>
-      <button id="btnAch" class="ghost ach-btn" type="button" title="업적 · 칭호">🏆<span>업적</span></button>
-      <button id="btnAvatar" class="ghost av-btn"><canvas id="topAvatar" width="28" height="28"></canvas>내 캐릭터</button>
-      <button id="btnTheme" class="ghost" type="button" title="화면 테마 바꾸기 (누를 때마다 다음 테마)">🎨 테마</button>
-      <button id="btnSkin" class="ghost">꾸미기</button>
-      <button id="btnSettings" class="ghost">설정</button>
+      <div class="who">
+        <span id="connDot" class="dot" title="서버 연결 상태"></span>
+        <button id="btnProfile" class="ghost pf-btn" type="button"></button>
+        <span id="myTitle" class="ptitle my-title hidden" title="내 칭호"></span>
+      </div>
+      <nav class="tools">
+        <button id="btnAch" class="tool ach-btn" type="button" title="업적 · 칭호"><i>🏆</i><span>업적</span></button>
+        <button id="btnAvatar" class="tool av-btn" type="button" title="내 캐릭터"><canvas id="topAvatar" width="28" height="28"></canvas><span>내 캐릭터</span></button>
+        <button id="btnTheme" class="tool" type="button" title="화면 테마 바꾸기 (누를 때마다 다음 테마)"><i>🎨</i><span>테마</span></button>
+        <button id="btnSkin" class="tool" type="button" title="꾸미기 (레인 색·노트 모양·효과)"><i>✨</i><span>꾸미기</span></button>
+        <button id="btnSettings" class="tool" type="button" title="설정"><i>⚙</i><span>설정</span></button>
+      </nav>
     </div>
   </header>
 
@@ -66,23 +69,25 @@
   </div>
   <div class="select-grid">
     <!-- 선택한 곡 -->
-    <div class="detail-col">
+    <div class="detail-col" id="detailCol">
       <div class="jacket-wrap">
         <img id="dJacket" class="jacket" alt="">
         <div class="yt-slot jacket-slot" id="slotPreview"></div>
         <div class="jacket-tag" id="dTag">4KEY</div>
+        <button id="btnPreview" class="prev-btn" title="미리듣기 켜기/끄기">♪</button>
       </div>
       <div class="d-info">
-        <div class="d-title-row">
-          <div id="dTitle" class="d-title">곡을 추가해 주세요</div>
-          <button id="btnPreview" class="prev-btn" title="미리듣기 켜기/끄기">♪</button>
-        </div>
+        <div id="dTitle" class="d-title">곡을 추가해 주세요</div>
         <div class="d-artist-row"><span id="dArtist" class="d-artist"></span><button id="btnSongInfo" class="edit-mini hidden" type="button" title="제목·가수 고치기">✎</button></div>
-        <div class="d-meta">
-          <div><span>BPM</span><b id="dBpm">-</b></div>
-          <div><span>TIME</span><b id="dTime">-</b></div>
-          <div><span>PLAY</span><b id="dPlays">-</b></div>
-        </div>
+      </div>
+      <div class="d-meta">
+        <span><b id="dBpm">-</b> BPM</span>
+        <span><b id="dTime">-</b></span>
+        <span><b id="dPlays">-</b>번 플레이</span>
+      </div>
+      <div class="beatline" id="beatLine" title="곡의 어느 부분에 노트가 몰려 있는지 (고른 난이도의 채보) · 밝은 띠는 후렴 구간">
+        <canvas id="beatCv"></canvas>
+        <span id="dHlRange" class="hl-range"></span>
       </div>
       <div class="diff-boxes" id="diffBoxes">
         <button class="dbox" data-diff="easy"><span class="dname">EASY<small>쉬움</small></span><b class="dstar"></b><span class="pips"></span><span class="dnotes"></span></button>
@@ -90,32 +95,33 @@
         <button class="dbox" data-diff="hard"><span class="dname">HARD<small>어려움</small></span><b class="dstar"></b><span class="pips"></span><span class="dnotes"></span></button>
         <button class="dbox" data-diff="extreme"><span class="dname">EXTREME<small>극한</small></span><b class="dstar"></b><span class="pips"></span><span class="dnotes"></span></button>
       </div>
-      <div class="mods">
-        <button id="modMirror" class="chip" title="좌우 반전">MIRROR<small>미러</small></button>
-        <button id="modRandom" class="chip" title="레인 섞기 (매판 달라짐)">RANDOM<small>랜덤</small></button>
-        <button id="modHl" class="chip hl-chip" title="곡에서 가장 잘 들리는 부분(후렴)만 짧게 플레이 · 기록은 따로">HIGHLIGHT<small>후렴만</small></button>
-        <span id="dHlRange" class="hl-range"></span>
-        <button id="modAi" class="chip ai-chip hidden">AI 채보<small>끄면 기존</small></button>
-        <button id="modGhost" class="chip ghost-chip" title="혼자 할 때 친구 1위(또는 내 최고 기록)와 실시간 점수 대결">GHOST<small>고스트</small></button>
-        <span class="speed-show">SPEED <b id="speedShow"></b><small id="speedKeys"></small></span>
-      </div>
       <div class="d-records">
-        <div class="rec rec-hi"><span>HIGH SCORE</span><b id="dMine">-</b></div>
-        <div class="rec rec-rate"><span>MAX RATE</span><b id="dRate">-</b></div>
+        <div class="rec rec-hi"><span>내 최고</span><b id="dMine">-</b><b id="dRate" class="rec-rate">-</b></div>
         <div class="rec rec-top"><span>친구 1위</span><b id="dTop">-</b></div>
+      </div>
+      <div class="mods">
+        <button id="modMirror" class="chip" title="좌우 반전">미러</button>
+        <button id="modRandom" class="chip" title="레인 섞기 (매판 달라짐)">랜덤</button>
+        <button id="modHl" class="chip hl-chip" title="곡에서 가장 잘 들리는 부분(후렴)만 짧게 플레이 · 기록은 따로">후렴만</button>
+        <button id="modAi" class="chip ai-chip hidden">AI 채보</button>
+        <button id="modGhost" class="chip ghost-chip" title="혼자 할 때 친구 1위(또는 내 최고 기록)와 실시간 점수 대결">고스트</button>
+        <span class="speed-show" title="노트 속도 (설정에서 바꿔요)">속도 <b id="speedShow"></b><small id="speedKeys"></small></span>
       </div>
       <div class="d-actions">
         <button id="btnPlay" class="play-btn">PLAY<small>Enter</small></button>
-        <button id="btnRank" class="skew">순위표</button>
-        <button id="btnPractice" class="skew">연습</button>
-        <button id="btnEdit" class="skew hidden">수정</button>
-        <button id="btnAiOne" class="skew ai-one hidden" title="이 곡의 AI 채보만 새로 만들어요 (호스트 PC의 AI 채보 도구 · 기존 채보·기록은 그대로)">✦ AI</button>
-        <button id="btnDel" class="skew danger hidden">삭제</button>
+        <button id="btnPractice" class="act">연습</button>
+        <button id="btnRank" class="act">순위표</button>
+      </div>
+      <div class="d-host">
+        <span>곡 관리</span>
+        <button id="btnEdit" class="ghost small-btn hidden">채보 수정</button>
+        <button id="btnAiOne" class="ghost small-btn ai-one hidden" title="이 곡의 AI 채보만 새로 만들어요 (호스트 PC의 AI 채보 도구 · 기존 채보·기록은 그대로)">✦ AI 채보 다시</button>
+        <button id="btnDel" class="ghost small-btn danger hidden">곡 삭제</button>
       </div>
       <div id="myChar" class="my-char" title="누르면 도트 ↔ 일러스트">
         <canvas id="myCharCv"></canvas>
         <img id="myCharIl" class="hidden" alt="">
-        <div class="mc-tag"><b>MY CHARACTER</b><span id="myCharMode"></span></div>
+        <div class="mc-tag"><b>내 캐릭터</b><span id="myCharMode"></span></div>
         <div id="myCharHint" class="mc-hint"></div>
       </div>
     </div>
@@ -125,7 +131,7 @@
       <div id="addBox" class="add-box hidden">
         <div class="add-row">
           <input id="addUrl" placeholder="유튜브 링크를 붙여넣으세요 (예: https://youtu.be/...)" autocomplete="off">
-          <button id="btnAdd" class="primary skew">채보 만들기</button>
+          <button id="btnAdd" class="link-go">채보 만들기</button>
         </div>
         <div id="addStatus" class="add-status"></div>
         <div id="pcBox" class="pc-box hidden">
@@ -146,12 +152,12 @@
       <div id="reqBox" class="add-box hidden">
         <div class="add-row">
           <input id="reqUrl" placeholder="하고 싶은 곡의 유튜브 링크를 붙여넣으세요" autocomplete="off">
-          <button id="btnReq" class="primary skew">곡 신청</button>
+          <button id="btnReq" class="link-go">곡 신청</button>
         </div>
         <div id="reqStatus" class="add-status"></div>
       </div>
       <div class="list-head">
-        <h2>MUSIC <span id="songCount"></span></h2>
+        <h2>곡 목록 <span id="songCount"></span></h2>
         <select id="sortSel" title="정렬">
           <option value="new">최근 추가</option>
           <option value="title">제목순</option>
@@ -274,8 +280,11 @@
     <div class="result-main panel">
       <div id="rSong" class="r-song"></div>
       <div class="r-top">
-        <div class="r-left"><div id="rRank" class="r-rank">S</div><div id="rRankUp" class="r-rankup hidden"></div><canvas id="rAvatar" class="r-avatar"></canvas><img id="rIllust" class="r-illust hidden" alt=""></div>
-        <div>
+        <div class="r-left">
+          <div id="rRank" class="r-rank">S</div><div id="rRankUp" class="r-rankup hidden"></div>
+          <canvas id="rAvatar" class="r-avatar"></canvas><img id="rIllust" class="r-illust hidden" alt="">
+        </div>
+        <div class="r-right">
           <div id="rScore" class="r-score">0</div>
           <div id="rDelta" class="r-delta hidden"></div>
           <div id="rBadge" class="r-badge"></div>
@@ -283,16 +292,16 @@
             <div><span>정확도</span><b id="rAcc"></b><i id="dAcc" class="sd"></i></div>
             <div><span>최대 콤보</span><b id="rCombo"></b><i id="dCombo" class="sd"></i></div>
           </div>
+          <div class="r-counts" id="rCounts">
+            <div class="c-perfect"><span>PERFECT</span><i class="cbar"><u></u></i><b id="rPerfect"></b><i id="dPerfect" class="sd"></i></div>
+            <div class="c-great"><span>GREAT</span><i class="cbar"><u></u></i><b id="rGreat"></b><i id="dGreat" class="sd"></i></div>
+            <div class="c-good"><span>GOOD</span><i class="cbar"><u></u></i><b id="rGood"></b><i id="dGood" class="sd"></i></div>
+            <div class="c-miss"><span>MISS</span><i class="cbar"><u></u></i><b id="rMiss"></b><i id="dMiss" class="sd"></i></div>
+          </div>
         </div>
       </div>
-      <div class="r-counts">
-        <div class="c-perfect"><span>PERFECT</span><b id="rPerfect"></b><i id="dPerfect" class="sd"></i></div>
-        <div class="c-great"><span>GREAT</span><b id="rGreat"></b><i id="dGreat" class="sd"></i></div>
-        <div class="c-good"><span>GOOD</span><b id="rGood"></b><i id="dGood" class="sd"></i></div>
-        <div class="c-miss"><span>MISS</span><b id="rMiss"></b><i id="dMiss" class="sd"></i></div>
-      </div>
       <div class="r-timing">
-        <div class="rt-head"><span>TIMING</span><span id="rtStats" class="muted small"></span></div>
+        <div class="rt-head"><span>판정 타이밍</span><span id="rtStats" class="muted small"></span></div>
         <div class="rt-wrap"><canvas id="rtCanvas"></canvas></div>
         <div id="rtSuggest" class="rt-suggest small"></div>
       </div>
@@ -402,6 +411,7 @@
 <dialog id="settingsDlg">
   <form method="dialog" class="settings">
     <h3>설정</h3>
+    <div class="set-row"><span>닉네임 <small class="muted">순위표에 보이는 이름</small></span><input id="nick" maxlength="16" placeholder="닉네임" autocomplete="off"></div>
     <div class="key-section">
       <div class="key-head"><b>키 설정</b><span id="keyHint" class="muted small">바꿀 칸을 누른 뒤 원하는 키를 누르세요</span></div>
       <div class="set-row">
