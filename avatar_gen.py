@@ -16,6 +16,7 @@ import random
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -90,14 +91,20 @@ def prompts(a, desc="", use_look=True):
 KEY_HUE = {"green": 120, "blue": 220, "pink": 315}
 
 
+KEY_CLASH = {"green": ("green", "mint", "emerald", "lime", "olive", "teal", "jade"),
+             "blue": ("blue", "navy", "cyan", "teal", "aqua", "azure", "sky"),
+             "pink": ("pink", "magenta", "purple", "violet", "fuchsia", "rose", "lavender")}
+
+
 def key_color(who):
-    """꼬마 그림 바탕색 (크로마키): 캐릭터에 없는 진한 색 — 보통 초록, 캐릭터에 초록이 있으면 파랑, 둘 다 있으면 분홍"""
+    """꼬마 그림 바탕색 (크로마키): 캐릭터에 없는 진한 색 — 보통 초록, 캐릭터에 초록이 있으면 파랑, 그다음 분홍
+    (셋 다 있으면 캐릭터에 가장 적게 나오는 색)"""
     w = who.lower()
-    if not any(k in w for k in ("green", "mint", "emerald", "lime", "olive", "teal")):
-        return "green"
-    if not any(k in w for k in ("blue", "navy", "cyan", "teal", "aqua")):
-        return "blue"
-    return "pink"
+    clash = {k: sum(w.count(t) for t in ts) for k, ts in KEY_CLASH.items()}
+    for k in ("green", "blue", "pink"):
+        if not clash[k]:
+            return k
+    return min(("green", "blue", "pink"), key=lambda k: clash[k])
 
 
 # ------------------------------------------------------------------ 글 → 영어 태그 (PC의 Ollama)
@@ -276,8 +283,32 @@ class Comfy:
     def _json(self, path, body=None, timeout=30):
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + path, data=data, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8") or "{}")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode("utf-8") or "{}")
+        except urllib.error.HTTPError as e:      # 워크플로가 틀렸으면 ComfyUI가 이유를 알려 줌 (어떤 모델·노드가 없는지)
+            try:
+                d = json.loads(e.read().decode("utf-8", "replace") or "{}")
+            except Exception:
+                d = {}
+            why = [str((d.get("error") or {}).get("message", ""))]
+            for ne in (d.get("node_errors") or {}).values():
+                for er in ne.get("errors") or []:
+                    why.append(f"{ne.get('class_type', '')}: {er.get('message', '')} {er.get('details', '')}".strip())
+            raise RuntimeError(f"ComfyUI가 요청을 거절했어요 ({e.code}): " + " / ".join(w for w in why if w)[:240])
+
+    def files(self, node, field):
+        """ComfyUI에 설치된 모델 파일 목록 (노드가 없으면 빈 목록)"""
+        try:
+            info = self._json(f"/object_info/{node}").get(node) or {}
+            v = ((info.get("input") or {}).get("required") or {}).get(field) or []
+            if v and isinstance(v[0], list):
+                return set(v[0])
+            if v and v[0] == "COMBO" and len(v) > 1:
+                return set((v[1] or {}).get("options") or [])
+        except Exception:
+            pass
+        return set()
 
     def upload(self, path, prefix="linkbeat_ref"):
         """그림(참고 사진·기본 자세)을 ComfyUI input 폴더에 올림 → LoadImage에 넣을 이름 (끝나면 지움)"""
@@ -328,6 +359,8 @@ class Comfy:
                         except OSError:
                             pass
                         return data
+                if st.get("completed") or st.get("status_str") == "success":
+                    raise RuntimeError("ComfyUI가 그림 없이 끝났어요.")
             say(f"{label} 그리는 중... ({int(time.time() - t0)}초)")
             time.sleep(2)
         raise RuntimeError("그림이 10분 안에 끝나지 않았어요.")
@@ -345,6 +378,11 @@ POSES = {   # 기본 자세 그림에서 출발해 동작만 바꿈 (denoise가 
 
 def _key_mask(im, key, S=256):
     """크로마키: 바탕색(진한 초록 등)과 색상이 같고 채도가 높은 곳 중 테두리와 이어진 곳만 바탕"""
+    return _keep_big(~_key_bg(im, key, S))
+
+
+def _key_bg(im, key, S=256):
+    """테두리와 이어진 바탕색(크로마키) 부분 (True=바탕)"""
     import numpy as np
     from PIL import Image
     hsv = np.asarray(im.resize((S, S), Image.LANCZOS).convert("HSV")).astype(np.float32)
@@ -363,7 +401,7 @@ def _key_mask(im, key, S=256):
         if (grow == bg).all():
             break
         bg = grow
-    return _keep_big(~bg)
+    return bg
 
 
 def _keep_big(fg):
@@ -444,6 +482,10 @@ ISNET_URL = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet
 def ensure_isnet(path):
     """배경 제거 AI 모델: 없으면 한 번만 받음 (rembg 공식 배포, 약 170MB) — 실패하면 None"""
     if not path:
+        return None
+    import importlib.util
+    if importlib.util.find_spec("onnxruntime") is None:
+        say("배경 제거 AI 프로그램(onnxruntime)이 없어서 바탕색으로 지워요")
         return None
     p = Path(path)
     if p.is_file() and p.stat().st_size > 100_000_000:
@@ -530,6 +572,60 @@ def fill_holes(fg, r=3):
                     for y, x in pts:
                         keep[y, x] = True
     return fg | keep
+
+
+def _bg_gaps(im, fg, key, S=256):
+    """캐릭터에 둘러싸인 '진짜 빈 곳'(팔과 허리 사이·다리 사이 등)을 찾음: 바탕색(크로마키)과 거의 같은 색으로 매끈하게 칠해진 덩어리
+    → 구멍 메우기가 이런 곳까지 캐릭터로 채워서 초록 얼룩이 생기던 문제. 얼굴 높이 가운데(초록 눈동자일 수 있음)는 건드리지 않음"""
+    import numpy as np
+    from PIL import Image
+    none = np.zeros_like(fg)
+    if key not in KEY_HUE or not fg.any():
+        return none
+    small = np.asarray(im.resize((S, S), Image.LANCZOS).convert("RGB")).astype(np.float32)
+    ring = np.zeros_like(fg)
+    ring[:3, :], ring[-3:, :], ring[:, :3], ring[:, -3:] = True, True, True, True
+    samp = small[ring & ~fg]
+    if len(samp) < S:
+        return none
+    bgc = np.median(samp, axis=0)
+    h, s, v = np.asarray(Image.fromarray(bgc.reshape(1, 1, 3).astype("uint8")).convert("HSV"))[0, 0].astype(np.float32)
+    if abs((h * 360 / 255 - KEY_HUE[key] + 180) % 360 - 180) > 32 or s < 95 or v < 55:
+        return none                     # 바탕이 크로마키 색이 아니면(흰 바탕 등) 하지 않음 — 흰 옷·머리가 뚫리지 않게
+    dist = np.sqrt(((small - bgc) ** 2).sum(axis=2))
+    cand = fg & (dist < 48)
+    ys, xs = np.where(fg)
+    top, bot, lft, rgt = ys.min(), ys.max(), xs.min(), xs.max()
+    fy0, fy1 = top + (bot - top) * 0.18, top + (bot - top) * 0.5           # 얼굴 부분 (2등신: 위쪽 절반의 가운데)
+    fx0, fx1 = lft + (rgt - lft) * 0.2, rgt - (rgt - lft) * 0.2
+    out = np.zeros_like(fg)
+    lab = np.zeros(fg.shape, dtype=np.int32)
+    n = 0
+    for y0, x0 in zip(*np.where(cand)):
+        if lab[y0, x0]:
+            continue
+        n += 1
+        stack, pts = [(y0, x0)], []
+        lab[y0, x0] = n
+        while stack:
+            y, x = stack.pop()
+            pts.append((y, x))
+            for yy, xx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                if 0 <= yy < S and 0 <= xx < S and cand[yy, xx] and not lab[yy, xx]:
+                    lab[yy, xx] = n
+                    stack.append((yy, xx))
+        if len(pts) < 12:
+            continue
+        py, px = np.array(pts).T
+        cy, cx = py.mean(), px.mean()
+        if fy0 <= cy <= fy1 and fx0 <= cx <= fx1:
+            continue
+        if small[py, px].std(axis=0).max() > 22:        # 바탕은 한 가지 색으로 매끈함 (무늬·그라데이션이 있으면 캐릭터 쪽)
+            continue
+        out[py, px] = True
+    if out.sum() > fg.sum() * 0.2:      # 너무 많이 지워지면 뭔가 이상한 것 → 그대로 둠
+        return none
+    return out
 
 
 def _fg_mask(im, S=256):
@@ -624,6 +720,8 @@ def pixel_sheet(pngs, height=128, colors=32, key=None, ai_model=None):
             border = np.concatenate([am[0][0], am[0][-1], am[0][:, 0], am[0][:, -1]])
             frac = am[0].mean()
             if border.mean() < 0.25 and 0.03 < frac < 0.8:
+                if key in KEY_HUE:      # 가장자리에 같이 잡힌 바탕색(초록 테두리)은 빼기
+                    am = [m & ~_key_bg(im, key, S) for m, im in zip(am, ims)]
                 masks = [_keep_big(m) for m in am]
         except Exception as e:
             say(f"배경 제거 AI를 못 써서 다른 방법으로 지워요 ({str(e)[:80]})")
@@ -636,6 +734,7 @@ def pixel_sheet(pngs, height=128, colors=32, key=None, ai_model=None):
     if masks is None:
         masks = [_fg_mask(im, S) for im in ims]
     masks = [fill_holes(m) for m in masks]     # 캐릭터 안쪽에 생긴 구멍(밝은 머리·얼굴이 바탕으로 잘못 잡힌 곳)은 메움
+    masks = [m & ~_bg_gaps(im, m, key, S) for im, m in zip(ims, masks)]    # 단, 바탕색 그대로인 빈 곳(팔·다리 사이)은 다시 투명하게
     if masks[0].sum() < 200:
         raise RuntimeError("캐릭터를 찾지 못했어요 (바탕만 그려졌어요).")
     for i in range(1, len(masks)):              # 동작 그림이 망가졌으면(캐릭터가 없거나 너무 다르면) 기본 자세로
@@ -742,7 +841,15 @@ def main():
     comfy = Comfy(a.comfy)
     try:
         comfy.start()
-        ref_name = comfy.upload(ref) if ref else None
+        ipas = comfy.files("IPAdapterModelLoader", "ipadapter_file")
+        has_cv = CLIPV_FILE in comfy.files("CLIPVisionLoader", "clip_name")
+        use_ipa = IPA_FILE in ipas and has_cv              # 참고 그림 따라 그리기 (없으면 글로만 그림)
+        use_face = IPA_FACE_FILE in ipas and has_cv        # 얼굴 고정
+        if not use_ipa:
+            say("참고 그림 모델(IP-Adapter)이 없어서 글로만 그려요")
+        elif not use_face:
+            say("얼굴 고정 모델이 없어서 얼굴 고정 없이 그려요")
+        ref_name = comfy.upload(ref) if ref and use_ipa else None
         seed = random.randint(1, 2 ** 31)
         il_file = None
         if spec.get("mode") != "pixel":           # pixel: 일러스트는 그대로 두고 도트만
@@ -755,7 +862,7 @@ def main():
             il_file = Path(spec["illust"])          # 도트만 다시: 지금 일러스트를 참고 그림으로
         # 꼬마 도트는 일러스트를 보고 그림 (머리·옷·색이 일러스트를 따라감). 일러스트가 없으면 참고 사진을 약하게
         ch_end = 1.0
-        if il_file:     # 일러스트의 캐릭터 부분만 잘라서, 그림 앞부분에만 약하게 (바탕·분위기까지 따라가지 않게)
+        if il_file and use_ipa:     # 일러스트의 캐릭터 부분만 잘라서, 그림 앞부분에만 약하게 (바탕·분위기까지 따라가지 않게)
             from PIL import Image
             im0 = Image.open(il_file).convert("RGB")
             W0, H0 = im0.size
@@ -764,11 +871,11 @@ def main():
             ch_ref, ch_w8, ch_end = comfy.upload(crop, "linkbeat_ref_illust"), 0.5, 0.55
             fcrop = out / "illust_face.png"      # 얼굴 부분만 (얼굴 고정용 — 기본 자세에만, 동작 그림은 기본 자세에서 이어짐)
             im0.crop((int(W0 * 0.22), int(H0 * 0.06), int(W0 * 0.78), int(H0 * 0.52))).save(fcrop)
-            face_name = comfy.upload(fcrop, "linkbeat_ref_face")
+            face_name = comfy.upload(fcrop, "linkbeat_ref_face") if use_face else None
         else:
             ch_ref, ch_w8 = ref_name, rw[1]
             face_name = None
-        say("도트용 꼬마 캐릭터 그리는 중..." + (" (일러스트 얼굴을 따라)" if il_file else ""))
+        say("도트용 꼬마 캐릭터 그리는 중..." + (" (일러스트 얼굴을 따라)" if face_name else ""))
         ch = comfy.run(workflow(ch_p, ch_n, ch_w, ch_h, seed + 1, "linkbeat_avatar/chibi", ch_ref, ch_w8, ref_end=ch_end,
                                 face=face_name, face_w=FACE_W), "꼬마 캐릭터")
         base_file = out / "chibi_base.png"
@@ -780,7 +887,7 @@ def main():
             pp = ch_p.replace("full body, standing, front view, arms at sides", "full body, " + pose)
             try:
                 poses.append(comfy.run(workflow(pp, ch_n, ch_w, ch_h, seed + 1, f"linkbeat_avatar/pose_{pkey}",
-                                                base_name, 0.8, base=base_name, denoise=dn), "동작"))
+                                                base_name if use_ipa else None, 0.8, base=base_name, denoise=dn), "동작"))
             except Exception as e:
                 say(f"동작 하나를 못 그렸어요 ({str(e)[:60]}) — 기본 자세로 대신해요")
                 poses.append(ch)
