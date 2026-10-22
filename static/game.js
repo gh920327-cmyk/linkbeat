@@ -13,6 +13,13 @@ function laneColors(nl) {
   return nl === 6 ? [t.a, t.b, t.c, t.c, t.b, t.a] : [t.a, t.b, t.b, t.a];
 }
 const UI_FONT = '"Orbitron", "Noto Sans KR", sans-serif';
+/* 점수·콤보·판정 글자: 길쭉하고 읽기 쉬운 Saira (기울임) — 3과 8, 5와 S가 헷갈리지 않게 */
+const NUM_FONT = '"Saira", "Orbitron", "Noto Sans KR", sans-serif';
+function numFont(ctx, weight, px, italic = true, stretch = 'condensed') {
+  ctx.font = `${italic ? 'italic ' : ''}${weight} ${Math.round(px)}px ${NUM_FONT}`;
+  if ('fontStretch' in ctx) ctx.fontStretch = stretch;
+}
+function plainFont(ctx) { if ('fontStretch' in ctx) ctx.fontStretch = 'normal'; }
 
 /* 캔버스 크기를 부모에 맞추고 레인 배치를 계산 */
 function fitCanvas(cv, nl = 4, opts = {}) {
@@ -62,13 +69,12 @@ function drawLanes(L, judgeY, pressed, dim) {
   for (let l = 0; l < nl; l++) {
     const x = x0 + l * laneW;
     if (l % 2 === 1) { ctx.fillStyle = 'rgba(255,255,255,0.025)'; ctx.fillRect(x, 0, laneW, h); }
-    if (pressed && pressed[l]) {
-      const g = ctx.createLinearGradient(0, judgeY, 0, judgeY - h * 0.6);
-      g.addColorStop(0, colors[l] + '70');
-      g.addColorStop(0.4, colors[l] + '22');
+    if (pressed && pressed[l]) {        // 누르는 줄: 판정선 근처만 은은하게 (노트가 빛에 묻히지 않게)
+      const g = ctx.createLinearGradient(0, judgeY, 0, judgeY - h * 0.3);
+      g.addColorStop(0, colors[l] + '38');
       g.addColorStop(1, colors[l] + '00');
       ctx.fillStyle = g;
-      ctx.fillRect(x + 1, 0, laneW - 1, judgeY);
+      ctx.fillRect(x + 1, judgeY - h * 0.3, laneW - 1, h * 0.3);
     }
     ctx.fillStyle = 'rgba(160,190,255,0.08)';
     ctx.fillRect(x, 0, 1, h);
@@ -504,16 +510,13 @@ function drawBeams(L, judgeY, pressed, fx, now) {
     else if (now - fx.beamOff[l] < 140) a = 1 - (now - fx.beamOff[l]) / 140;
     if (a <= 0) continue;
     const cx = x0 + (l + 0.5) * laneW;
-    const top = judgeY - L.h * (0.45 + 0.25 * Math.min(1, k));
+    // 짧은 빛 (osu!mania·DJMAX처럼 판정선 위 조금만) — 타격감 '강하게'면 조금 더 길게
+    const top = judgeY - L.h * (0.14 + 0.1 * Math.min(1.6, k));
     const g = ctx.createLinearGradient(0, judgeY, 0, top);
-    g.addColorStop(0, colors[l] + 'cc'); g.addColorStop(0.25, colors[l] + '55'); g.addColorStop(1, colors[l] + '00');
-    ctx.globalAlpha = a * Math.min(1, 0.55 + 0.3 * k);
+    g.addColorStop(0, colors[l] + '99'); g.addColorStop(0.35, colors[l] + '33'); g.addColorStop(1, colors[l] + '00');
+    ctx.globalAlpha = a * Math.min(1, 0.5 + 0.25 * k);
     ctx.fillStyle = g;
-    ctx.fillRect(cx - laneW * 0.42, top, laneW * 0.84, judgeY - top);
-    const g2 = ctx.createLinearGradient(0, judgeY, 0, top + (judgeY - top) * 0.4);
-    g2.addColorStop(0, 'rgba(255,255,255,0.9)'); g2.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = g2;
-    ctx.fillRect(cx - 1.5, top + (judgeY - top) * 0.4, 3, (judgeY - top) * 0.6);
+    ctx.fillRect(cx - laneW * 0.46, top, laneW * 0.92, judgeY - top);
     ctx.globalAlpha = 1;
   }
 }
@@ -561,7 +564,7 @@ function drawPunch(L, judgeY, fx, now) {
     const e = (now - b.at) / 300;
     const cx = x0 + (b.lane + 0.5) * laneW;
     const col = JUDGE_COLORS[b.kind] || colors[b.lane];
-    const r = laneW * (0.35 + 0.75 * Math.sqrt(e)) * b.size * Math.min(1.4, 0.75 + 0.3 * k);
+    const r = laneW * (0.3 + 0.55 * Math.sqrt(e)) * b.size * Math.min(1.4, 0.75 + 0.3 * k);
     const rg = ctx.createRadialGradient(cx, judgeY, 0, cx, judgeY, r);
     rg.addColorStop(0, `rgba(255,255,255,${0.9 * (1 - e)})`);
     rg.addColorStop(0.35, col + Math.round(200 * (1 - e)).toString(16).padStart(2, '0'));
@@ -636,7 +639,7 @@ function drawMilestone(L, fx, now) {
   const e = (now - m.at) / 900;
   if (e >= 1) { fx.mile = null; return; }
   const { ctx, h, x0, fieldW } = L;
-  const cx = x0 + fieldW / 2, cy = h * 0.3;
+  const cx = x0 + fieldW / 2, cy = hudY(L);
   // 기어를 가로지르는 빛 띠
   const sweepX = x0 - fieldW * 0.3 + fieldW * 1.6 * Math.min(1, e * 1.6);
   const g = ctx.createLinearGradient(sweepX - 80, 0, sweepX + 80, 0);
@@ -656,17 +659,17 @@ function drawMilestone(L, fx, now) {
   // 글자
   const pop = Math.min(1, e / 0.12);
   ctx.save();
-  ctx.translate(cx, cy - 72);
-  ctx.transform(1, 0, -0.18, 1, 0, 0);
+  ctx.translate(cx, cy - comboSize(L) * 0.62 - 26);
   ctx.scale(1.5 - 0.5 * pop, 1.5 - 0.5 * pop);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = `900 18px ${UI_FONT}`;
+  numFont(ctx, 900, 20);
   ctx.fillStyle = C_GOLD;
   ctx.shadowColor = '#ff7a3d';
-  ctx.shadowBlur = 14;
+  ctx.shadowBlur = 12;
   ctx.fillText(`${m.combo} COMBO!`, 0, 0);
   ctx.restore();
+  plainFont(ctx);
   ctx.globalAlpha = 1;
 }
 function comboColor(combo) {
@@ -676,31 +679,41 @@ function comboColor(combo) {
         : ['#ffffff', '#9fc4ff', 'rgba(63,140,255,0.8)'];
 }
 
+/* 콤보·판정 글자 자리: 기어 가운데보다 조금 위 (노트 뒤에 그려서 노트를 가리지 않음) */
+function hudY(L) { return L.h * 0.33; }
+function comboSize(L) { return Math.round(Math.min(60, L.laneW * 0.62 + 22)); }
 function drawCombo(L, combo, popAt, now) {
   if (!settings.skin.combo || combo < 2) return;
-  const { ctx, h, laneW, x0, fieldW } = L;
-  const cx = x0 + fieldW / 2;
+  const { ctx, x0, fieldW } = L;
+  const cx = x0 + fieldW / 2, cy = hudY(L), fs = comboSize(L);
   const p = clamp((now - popAt) / 140, 0, 1);
-  const sc = 1 + 0.16 * punchK() * (1 - p) * (1 - p);
-  ctx.save();
-  ctx.textAlign = 'center';
-  ctx.translate(cx, h * 0.3);
-  ctx.scale(sc, sc);
-  ctx.textBaseline = 'middle';
-  ctx.font = `900 ${Math.min(64, laneW * 0.8 + 20)}px ${UI_FONT}`;
+  const sc = 1 + 0.14 * punchK() * (1 - p) * (1 - p);
   const cc = comboColor(combo);
-  const cg = ctx.createLinearGradient(0, -30, 0, 30);
+  ctx.save();
+  ctx.globalAlpha = 0.88;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.translate(cx, cy);
+  ctx.scale(sc, sc);
+  numFont(ctx, 800, fs);
+  const cg = ctx.createLinearGradient(0, -fs / 2, 0, fs / 2);
   cg.addColorStop(0, cc[0]); cg.addColorStop(1, cc[1]);
+  ctx.lineWidth = 5; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(3,6,16,0.55)';
+  ctx.strokeText(combo, 0, 0);
   ctx.fillStyle = cg;
   ctx.shadowColor = cc[2];
-  ctx.shadowBlur = 18;
+  ctx.shadowBlur = 10;
   ctx.fillText(combo, 0, 0);
   ctx.restore();
+  ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = `800 12px ${UI_FONT}`;
-  ctx.fillStyle = 'rgba(190,210,255,0.7)';
-  ctx.fillText('C O M B O', cx, h * 0.3 - 44);
+  numFont(ctx, 700, 12, false);
+  ctx.fillStyle = 'rgba(190,210,255,0.6)';
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '4px';
+  ctx.fillText('COMBO', cx, cy - fs * 0.62);
+  ctx.restore();
+  plainFont(ctx);
 }
 function drawJudgePopup(L, popup, now) {
   const mode = settings.skin.judgeText;
@@ -712,23 +725,30 @@ function drawJudgePopup(L, popup, now) {
   const pk = punchK();
   const big = (popup.kind === 'perfect' ? 0.3 : popup.kind === 'miss' ? 0.08 : 0.2) * Math.min(pk, 1.2);
   const sc = age < 0.08 ? 1 + big * (1 - age / 0.08) ** 2 : 1;
+  const fs = Math.round((laneW < 60 ? 24 : 30) * (small ? 0.68 : 1));
+  // 콤보가 보이면 그 바로 아래, 아니면 콤보 자리
+  const y = hudY(L) + (settings.skin.combo ? comboSize(L) * 0.5 + fs * 0.75 : 0);
   ctx.save();
   ctx.textAlign = 'center';
-  ctx.globalAlpha = age > 0.35 ? 1 - (age - 0.35) / 0.15 : 1;
-  ctx.translate(x0 + fieldW / 2, h * 0.45);
-  ctx.transform(1, 0, -0.18, 1, 0, 0);  // 살짝 기울인 판정 글자
+  ctx.globalAlpha = (age > 0.35 ? 1 - (age - 0.35) / 0.15 : 1) * 0.95;
+  ctx.translate(x0 + fieldW / 2, y);
   ctx.scale(sc, sc);
   ctx.textBaseline = 'middle';
-  ctx.font = `900 ${Math.round((laneW < 60 ? 24 : 30) * (small ? 0.65 : 1))}px ${UI_FONT}`;
+  numFont(ctx, 900, fs, true, 'semi-condensed');
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '1px';
+  ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(3,6,16,0.6)';
+  ctx.strokeText(JUDGE_TEXT[popup.kind], 0, 0);
   ctx.fillStyle = JUDGE_COLORS[popup.kind];
   ctx.shadowColor = JUDGE_COLORS[popup.kind];
-  ctx.shadowBlur = small ? 8 : 16;
+  ctx.shadowBlur = small ? 6 : 10;
   ctx.fillText(JUDGE_TEXT[popup.kind], 0, 0);
   ctx.shadowBlur = 0;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+  plainFont(ctx);
   if (popup.sub && settings.skin.earlyLate) {
-    ctx.font = `700 ${small ? 12 : 14}px "Noto Sans KR", sans-serif`;
-    ctx.fillStyle = 'rgba(255,255,255,0.8)';
-    ctx.fillText(popup.sub, 0, small ? 20 : 28);
+    ctx.font = `700 ${small ? 11 : 13}px "Noto Sans KR", sans-serif`;
+    ctx.fillStyle = 'rgba(255,255,255,0.78)';
+    ctx.fillText(popup.sub, 0, fs * 0.85);
   }
   ctx.restore();
 }
@@ -1208,12 +1228,13 @@ class Game {
     ctx.save();
     ctx.textAlign = alignLeft ? 'left' : 'right';
     ctx.textBaseline = 'top';
-    ctx.font = `800 ${outside ? 11 : 10}px ${UI_FONT}`;
-    ctx.fillStyle = 'rgba(185,140,255,0.85)';
+    ctx.font = `700 ${outside ? 11 : 10}px "Noto Sans KR", sans-serif`;
+    ctx.fillStyle = 'rgba(200,170,255,0.9)';
     ctx.fillText(`VS ${this.ghost.label}`, sx, y);
-    ctx.font = `800 ${outside ? 16 : 13}px "JetBrains Mono", monospace`;
+    numFont(ctx, 800, outside ? 19 : 15, false);
     ctx.fillStyle = this.judged === 0 ? 'rgba(255,255,255,0.5)' : d >= 0 ? '#4dffa6' : '#ff5a72';
-    ctx.fillText(`${d >= 0 ? '+' : '−'}${Math.abs(d).toLocaleString()}`, sx, y + 15);
+    ctx.fillText(`${d >= 0 ? '+' : '−'}${Math.abs(d).toLocaleString()}`, sx, y + 14);
+    plainFont(ctx);
     // 막대 두 개: 나(파랑) · 고스트(보라) — 지금까지의 점수
     const top = y + (outside ? 36 : 32);
     const full = Math.max(1, me, gs);
@@ -1296,16 +1317,18 @@ class Game {
       ctx.save();
       ctx.globalAlpha = e < 0.7 ? 1 : (1 - e) / 0.3;
       ctx.translate(x0 + fieldW / 2, h * 0.12);   // 콤보 숫자와 겹치지 않게 위쪽
-      ctx.transform(1, 0, -0.18, 1, 0, 0);
       ctx.scale(1.6 - 0.6 * pop, 1.6 - 0.6 * pop);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.font = `900 ${fieldW < 260 ? 16 : 20}px ${UI_FONT}`;
+      ctx.globalAlpha *= 0.85;
+      numFont(ctx, 900, fieldW < 260 ? 18 : 22);
+      if ('letterSpacing' in ctx) ctx.letterSpacing = '2px';
       ctx.fillStyle = '#fff';
       ctx.shadowColor = C_GOLD;
       ctx.shadowBlur = 18;
       ctx.fillText('HIGHLIGHT', 0, 0);
       ctx.restore();
+      plainFont(ctx);
     }
   }
 
@@ -1410,6 +1433,33 @@ class Game {
 
     const now = performance.now();
 
+    // 노트 뒤에 그리는 것들 (콤보·판정 글자·후렴·피버 글자) — 노트가 늘 맨 위에 보이게
+    const fv = this.fever;
+    const inFever = fv.mult > 1 && gt <= fv.until + 0.2;
+    this.drawChorus(L, judgeY, gt, now);
+    if (inFever && settings.skin.fever) {
+      const pulse = 0.5 + 0.5 * Math.sin(now / 90);
+      ctx.fillStyle = `rgba(255,170,40,${0.05 + 0.05 * pulse})`;
+      ctx.fillRect(x0, 0, fieldW, judgeY);
+      const pop = clamp((now - this.feverPop) / 250, 0, 1);
+      ctx.save();
+      ctx.translate(x0 + fieldW / 2, 34);
+      ctx.scale(1 + 0.35 * (1 - pop), 1 + 0.35 * (1 - pop));
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      numFont(ctx, 900, laneW < 60 ? 20 : 26);
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = C_GOLD;
+      ctx.shadowColor = '#ff7a3d';
+      ctx.shadowBlur = 12 + 8 * pulse;
+      ctx.fillText(`FEVER ×${fv.mult}`, 0, 0);
+      ctx.restore();
+      plainFont(ctx);
+    }
+    drawCombo(L, this.fcAt ? 0 : this.combo, this.comboPop, now);   // 풀콤보 글자가 뜨면 콤보 숫자는 숨김 (글자 아래에 콤보 수 표시)
+    drawMilestone(L, this.fx, now);
+    drawJudgePopup(L, this.popup, now);
+
     // 노트
     while (this.drawFrom < this.notes.length) {
       const n = this.notes[this.drawFrom];
@@ -1444,10 +1494,8 @@ class Game {
     ctx.fillStyle = this.practice ? C_GOLD : C_BLUE;
     ctx.fillRect(x0, 0, fieldW * clamp((gt - p0) / (p1 - p0 || 1), 0, 1), 4);
 
-    // 피버 게이지 (오른쪽 레일) + FEVER 표시
-    const fv = this.fever;
+    // 피버 게이지 (오른쪽 레일) — FEVER 글자는 노트 뒤에 그렸음
     const gh = judgeY - 20;
-    const inFever = fv.mult > 1 && gt <= fv.until + 0.2;
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillRect(x0 + fieldW + 2, 10, 6, gh);
     const ratio = inFever ? clamp((fv.until - gt) / FEVER_SEC, 0, 1) : fv.gauge / 100;
@@ -1455,24 +1503,6 @@ class Game {
     gg.addColorStop(0, inFever ? '#ff7a3d' : C_BLUE); gg.addColorStop(1, inFever ? C_GOLD : C_CYAN);
     ctx.fillStyle = gg;
     ctx.fillRect(x0 + fieldW + 2, 10 + gh * (1 - ratio), 6, gh * ratio);
-    if (inFever && settings.skin.fever) {
-      const pulse = 0.5 + 0.5 * Math.sin(now / 90);
-      ctx.fillStyle = `rgba(255,170,40,${0.05 + 0.05 * pulse})`;
-      ctx.fillRect(x0, 0, fieldW, judgeY);
-      const pop = clamp((now - this.feverPop) / 250, 0, 1);
-      ctx.save();
-      ctx.translate(x0 + fieldW / 2, 34);
-      ctx.transform(1, 0, -0.18, 1, 0, 0);
-      ctx.scale(1 + 0.4 * (1 - pop), 1 + 0.4 * (1 - pop));
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = `900 ${laneW < 60 ? 18 : 24}px ${UI_FONT}`;
-      ctx.fillStyle = C_GOLD;
-      ctx.shadowColor = '#ff7a3d';
-      ctx.shadowBlur = 16 + 10 * pulse;
-      ctx.fillText(`FEVER x${fv.mult}`, 0, 0);
-      ctx.restore();
-    }
     if (this.practice) {
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
@@ -1481,31 +1511,32 @@ class Game {
       ctx.fillText(this.hl ? 'HIGHLIGHT' : `PRACTICE x${this.rate}${this.practice.loop ? ' · LOOP' : ''}`, x0 + 6, 10);
     }
 
-    // 점수 / 정확도 (기어 옆에 자리가 있으면 바깥, 없으면 안쪽)
+    // 점수 / 정확도: 글자 폭을 재서 기어 옆에 다 들어가면 바깥, 아니면 기어 안 오른쪽 위 (잘리지 않게)
     ctx.textBaseline = 'top';
-    const roomR = w - (x0 + fieldW) >= 115, roomL = x0 >= 130;
+    const scoreTxt = String(this.score()).padStart(7, '0');
+    numFont(ctx, 800, 30, false);
+    const w30 = ctx.measureText('0000000').width;          // 30px일 때 폭 → 자리에 맞게 글자 크기를 정함
+    const spaceR = w - (x0 + fieldW) - 18 - 8, spaceL = x0 - 18 - 8;
+    const fitR = Math.min(30, Math.floor(30 * spaceR / w30)), fitL = Math.min(30, Math.floor(30 * spaceL / w30));
+    const roomR = fitR >= 20, roomL = !roomR && fitL >= 20;
     const outside = roomR || roomL;
+    const sfs = roomR ? fitR : roomL ? fitL : 20;
     ctx.textAlign = roomR ? 'left' : 'right';
     const sx = roomR ? x0 + fieldW + 18 : roomL ? x0 - 18 : x0 + fieldW - 10;
+    numFont(ctx, 800, sfs, false);
+    ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(3,6,16,0.55)';
+    ctx.strokeText(scoreTxt, sx, outside ? 4 : 8);
     ctx.fillStyle = '#fff';
-    ctx.font = `800 ${outside ? 13 : 11}px ${UI_FONT}`;
-    ctx.fillStyle = 'rgba(160,190,255,0.7)';
-    if (outside) ctx.fillText('SCORE', sx, 0);
-    ctx.fillStyle = '#fff';
-    ctx.font = `800 ${outside ? 26 : 18}px ${UI_FONT}`;
-    ctx.fillText(String(this.score()).padStart(7, '0'), sx, 16);
-    ctx.font = '500 14px "JetBrains Mono", monospace';
-    ctx.fillStyle = 'rgba(255,255,255,0.65)';
-    ctx.fillText(this.acc().toFixed(2) + '%', sx, outside ? 46 : 40);
-    if (this.ghost && settings.ghost !== false && this.phase !== 'loading' && this.phase !== 'ready') this.drawGhost(ctx, sx, outside ? 74 : 62, outside, roomR || !outside);
+    ctx.fillText(scoreTxt, sx, outside ? 4 : 8);
+    numFont(ctx, 700, outside ? Math.max(13, sfs * 0.55) : 13, false);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText(this.acc().toFixed(2) + '%', sx, outside ? 8 + sfs : 30);
+    plainFont(ctx);
+    if (this.ghost && settings.ghost !== false && this.phase !== 'loading' && this.phase !== 'ready') this.drawGhost(ctx, sx, outside ? 64 : 50, outside, roomR || !outside);
 
     const cx = x0 + fieldW / 2;
     if (this.stage) this.stage.draw({ beat: Math.max(0, Math.floor((gt - off) / bl)), fever: inFever && settings.skin.fever, label: settings.nick || '', cxr: this.ilOn ? 0.3 : 0.5 });
-    drawCombo(L, this.fcAt ? 0 : this.combo, this.comboPop, now);   // 풀콤보 글자가 뜨면 콤보 숫자는 숨김 (글자 아래에 콤보 수 표시)
-    drawMilestone(L, this.fx, now);
-    this.drawChorus(L, judgeY, gt, now);
     this.drawFullCombo(L, now);
-    drawJudgePopup(L, this.popup, now);
     ctx.restore();
 
     // 상태 문구
@@ -1517,9 +1548,10 @@ class Game {
     else if (this.phase === 'waitVideo' && now - this.waitSince > 600) msg = '영상 시작 대기 중...';
     if (msg) {
       ctx.textAlign = 'center';
-      ctx.font = msg.length <= 2 ? `900 84px ${UI_FONT}` : '700 20px "Noto Sans KR", sans-serif';
+      if (msg.length <= 2) numFont(ctx, 900, 96); else ctx.font = '700 20px "Noto Sans KR", sans-serif';
       ctx.fillStyle = '#fff';
       ctx.fillText(msg, cx, h * 0.45);
+      plainFont(ctx);
     }
   }
 
