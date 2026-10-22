@@ -190,6 +190,46 @@ def song_stars(song):
     return table
 
 
+_DENS_CACHE = {}
+DENS_N = 48
+_B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def song_dens(song):
+    """곡 선택 화면의 '비트 라인': 채보마다 곡을 48칸으로 나눠 칸마다 1초에 노트가 몇 개인지 (0.5개 단위, 36가지 글자 하나씩)
+    → {"4": {난이도: "0a3…"}, "6": {...}, "ai": {...}, "dur": 길이} (곡 파일이 바뀔 때만 다시 계산)"""
+    sid, stamp = song["id"], song.get("_m")
+    hit = _DENS_CACHE.get(sid)
+    if hit and stamp is not None and hit[0] == stamp:
+        return hit[1]
+    dur = float(song.get("duration") or 0)
+    if dur <= 0:
+        ts = [n.get("t", 0) for ch in (song.get("charts") or {}).values() for n in ch]
+        dur = max(ts) + 1 if ts else 1
+    step = dur / DENS_N
+
+    def enc(notes):
+        cnt = [0] * DENS_N
+        for n in notes or []:
+            try:
+                i = int(float(n.get("t", 0)) / step)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= i < DENS_N:
+                cnt[i] += 1
+        return "".join(_B36[min(35, round(c / step * 2))] for c in cnt)
+
+    out = {"4": {d: enc(n) for d, n in (song.get("charts") or {}).items()},
+           "6": {d: enc(n) for d, n in (song.get("charts6") or {}).items()},
+           "dur": round(dur, 2)}
+    ai = song.get("ai")
+    if isinstance(ai, dict) and isinstance(ai.get("charts"), dict):
+        out["ai"] = {d: enc(n) for d, n in ai["charts"].items()}
+    if stamp is not None:
+        _DENS_CACHE[sid] = (stamp, out)
+    return out
+
+
 def ai_summary(song):
     """AI 채보(4키, 기본 채보와 따로 저장)가 있으면 난이도별 노트 수·별점"""
     ai = song.get("ai")
@@ -377,6 +417,15 @@ def _submit_score(sid, diff, keys, name, data):
         "rank": str(data.get("rank", ""))[:3], "fc": bool(data.get("fc")),
         "maxCombo": max(0, int(data.get("maxCombo", 0))), "at": time.time(),
     }
+    cnt = data.get("counts")                     # 판정 개수 (결과 화면에서 최고 기록과 비교)
+    if isinstance(cnt, dict):
+        c2 = {}
+        for k in ("perfect", "great", "good", "miss"):
+            v = cnt.get(k)
+            if isinstance(v, (int, float)) and math.isfinite(v):
+                c2[k] = max(0, min(100000, int(v)))
+        if len(c2) == 4:
+            entry["counts"] = c2
     # 고스트 대결용: 노트 5%마다의 점수 (21칸)
     g = data.get("g")
     if isinstance(g, list) and 2 <= len(g) <= 21 and all(isinstance(x, (int, float)) and math.isfinite(x) for x in g):
@@ -660,7 +709,7 @@ def run_job(job_id, vid, keep_edited=False, keep_title=False):
 # 호스트가 곡을 추가하거나 신청을 승인하면 여기 쌓이고, 호스트 PC의 채보 엔진이 하나씩 가져가서
 # 음원 받기·분석을 한 뒤 결과만 올려 보냄. 서버는 계속 돌아가고, 결과가 오면 곡 목록에 바로 나타남.
 QUEUE_FILE = DATA / "pcqueue.json"
-WORKER = {"seen": 0.0, "version": "", "busy": None, "ai": False}   # ai: 호스트 PC에 AI 채보 도구가 설치돼 있는지
+WORKER = {"seen": 0.0, "version": "", "busy": None, "ai": False, "avatar": False}   # ai: 호스트 PC에 AI 채보 도구가 설치돼 있는지
 PENDING = ("waitpc", "claimed", "info", "download", "analyze", "ai", "upload")
 CLAIM_TIMEOUT = 20 * 60          # 엔진이 가져간 뒤 이 시간 동안 소식이 없으면 다시 대기열로
 
@@ -670,7 +719,8 @@ def worker_online():
 
 
 def worker_status():
-    return {"online": worker_online(), "seen": WORKER["seen"], "version": WORKER["version"], "ai": WORKER["ai"]}
+    return {"online": worker_online(), "seen": WORKER["seen"], "version": WORKER["version"], "ai": WORKER["ai"],
+            "avatar": WORKER.get("avatar", False)}
 
 
 def save_queue():
@@ -729,6 +779,244 @@ def recent_jobs():
     live = sorted((j for j in pcj if j["stage"] in PENDING), key=lambda j: j["created"])
     done = sorted((j for j in pcj if j["stage"] not in PENDING), key=lambda j: -j.get("finished", j["created"]))[:8]
     return [{k: v for k, v in j.items() if not k.startswith("_")} for j in live + done]
+
+
+# ============================================================ AI 캐릭터 그림 (호스트 PC의 ComfyUI가 그림)
+# 누구나 '내 캐릭터'에서 요청 → 호스트 PC 엔진이 하나씩 가져가서 일러스트(webp)·도트(png)를 그려 올림
+AVATARS = DATA / "avatars"
+AVQ_FILE = DATA / "avqueue.json"
+AVJOBS = {}
+AV_PENDING = ("waitpc", "claimed", "working")
+AV_TOKEN_RE = re.compile(r"^[0-9a-f]{12}$")
+AV_FILE_RE = re.compile(r"^/avatars/([0-9a-f]{12})_(i\.webp|p\.png|s\.png|x\.webp)$")
+
+
+def clean_avatar(av):
+    """캐릭터 설정: 짧은 값만 (방 목록에 보내는 것과 같은 규칙)"""
+    if not isinstance(av, dict):
+        return {}
+    return {str(k)[:12]: (v if isinstance(v, int) and 0 <= v < 100 else str(v)[:12])
+            for k, v in list(av.items())[:12] if isinstance(v, (int, str))}
+
+
+def save_avqueue():
+    with FILE_LOCK:
+        keep = [j for j in AVJOBS.values() if j["stage"] in AV_PENDING]
+        write_json_atomic(AVQ_FILE, keep)
+
+
+def load_avqueue():
+    d = read_json(AVQ_FILE, [])
+    for j in d if isinstance(d, list) else []:
+        if isinstance(j, dict) and j.get("id") and j.get("pid"):
+            j.update(stage="waitpc", msg="호스트 PC를 기다리는 중...")
+            AVJOBS[j["id"]] = j
+
+
+def av_job_public(j):
+    if not j:
+        return None
+    out = {k: j.get(k) for k in ("id", "stage", "msg", "created", "token")}
+    out["pos"] = av_position(j)
+    return out
+
+
+def av_position(j):
+    if j["stage"] != "waitpc":
+        return 0
+    return 1 + sum(1 for x in AVJOBS.values() if x["stage"] == "waitpc" and x["created"] < j["created"])
+
+
+def av_request(headers, data):
+    with FILE_LOCK:
+        profiles = load_profiles()
+        key, pr, _ = profile_find(headers, profiles)
+    av = clean_avatar(data.get("avatar"))
+    if not av:
+        raise HttpError(400, "캐릭터 설정이 없어요.")
+    cur = pr.get("aiAvatar") if isinstance(pr.get("aiAvatar"), dict) else {}
+    keep_il = data.get("mode") == "pixel" and AV_TOKEN_RE.match(str(cur.get("token") or "")) and \
+        (AVATARS / f"{cur['token']}_i.webp").is_file()
+    extra = {"mode": "pixel" if keep_il else "all",     # pixel: 일러스트는 그대로 두고 도트(동작 그림)만 다시
+             "desc": str(data.get("desc") or "").strip()[:200],
+             "strength": data.get("strength") if data.get("strength") in ("low", "mid", "high") else "mid",
+             "useLook": data.get("useLook") is not False}
+    ref = None
+    if data.get("ref"):                    # 참고 사진 (브라우저에서 작게 줄여 보냄) — 그림이 끝나면 지움
+        try:
+            ref = base64.b64decode(str(data["ref"]).split(",")[-1], validate=True)
+        except (ValueError, TypeError):
+            raise HttpError(400, "참고 사진을 읽을 수 없어요.")
+        kind = "jpg" if ref[:3] == b"\xff\xd8\xff" else "png" if ref[:8] == b"\x89PNG\r\n\x1a\n" else \
+            "webp" if ref[:4] == b"RIFF" and ref[8:12] == b"WEBP" else None
+        if not kind or len(ref) > 1_500_000:
+            raise HttpError(400, "참고 사진은 jpg·png·webp, 1.5MB 이하만 돼요.")
+    for j in AVJOBS.values():
+        if j["pid"] == key and j["stage"] in AV_PENDING:
+            if j["stage"] == "waitpc":
+                j["avatar"] = av            # 아직 안 그렸으면 바뀐 설정으로
+                j.update(extra)
+                if ref:
+                    av_drop_ref(j)
+                    j["ref"] = av_save_ref(j["id"], ref, kind)
+            return av_job_public(j)
+    if sum(1 for j in AVJOBS.values() if j["stage"] in AV_PENDING) >= 40:
+        raise HttpError(429, "그림 요청이 너무 많이 밀려 있어요. 조금 뒤에 다시 해 주세요.")
+    recent = [j for j in AVJOBS.values() if j["pid"] == key and j["stage"] == "done" and time.time() - j.get("finished", 0) < 30]
+    if recent:
+        raise HttpError(429, "방금 그렸어요. 30초 뒤에 다시 해 주세요.")
+    jid = secrets.token_hex(6)
+    j = {"id": jid, "pid": key, "name": pr.get("id", key), "avatar": av, "stage": "waitpc",
+         "msg": "호스트 PC를 기다리는 중...", "created": time.time(), "claimedAt": 0, **extra}
+    if ref:
+        j["ref"] = av_save_ref(jid, ref, kind)
+    AVJOBS[jid] = j
+    save_avqueue()
+    notify_all({"type": "avjobs"})
+    log("AI 캐릭터 요청:", j["name"])
+    return av_job_public(j)
+
+
+def av_save_ref(jid, data, kind):
+    AVATARS.mkdir(parents=True, exist_ok=True)
+    name = f"ref_{jid}.{kind}"
+    (AVATARS / name).write_bytes(data)
+    return name
+
+
+def av_drop_ref(j):
+    name = j.pop("ref", None)
+    if name and re.match(r"^ref_[0-9a-f]{12}\.(jpg|png|webp)$", name):
+        try:
+            (AVATARS / name).unlink()
+        except OSError:
+            pass
+
+
+def av_ref_b64(j):
+    name = j.get("ref")
+    if not name:
+        return None
+    try:
+        return base64.b64encode((AVATARS / name).read_bytes()).decode()
+    except OSError:
+        return None
+
+
+def av_cur_illust(j):
+    """도트만 다시 그릴 때 참고할 지금 일러스트 (base64)"""
+    with FILE_LOCK:
+        pr = load_profiles().get(j["pid"]) or {}
+    t0 = (pr.get("aiAvatar") or {}).get("token") if isinstance(pr.get("aiAvatar"), dict) else None
+    try:
+        if t0 and AV_TOKEN_RE.match(t0):
+            return base64.b64encode((AVATARS / f"{t0}_i.webp").read_bytes()).decode()
+    except OSError:
+        pass
+    return None
+
+
+def av_status(headers):
+    with FILE_LOCK:
+        profiles = load_profiles()
+        key, pr, _ = profile_find(headers, profiles)
+    mine = sorted((j for j in AVJOBS.values() if j["pid"] == key), key=lambda j: -j["created"])
+    ai = pr.get("aiAvatar") if isinstance(pr.get("aiAvatar"), dict) else {}
+    return {"job": av_job_public(mine[0]) if mine else None, "token": ai.get("token"),
+            "worker": {"online": worker_online(), "avatar": WORKER.get("avatar", False)}}
+
+
+def av_claim():
+    now = time.time()
+    for j in AVJOBS.values():
+        if j["stage"] in ("claimed", "working") and now - j.get("claimedAt", 0) > 10 * 60:
+            j.update(stage="waitpc", msg="호스트 PC를 기다리는 중... (다시 시도)")
+    waiting = sorted((j for j in AVJOBS.values() if j["stage"] == "waitpc"), key=lambda j: j["created"])
+    if not waiting:
+        return None
+    j = waiting[0]
+    j.update(stage="claimed", msg="호스트 PC에서 준비 중...", claimedAt=now)
+    save_avqueue()
+    notify_all({"type": "avjobs"})
+    return j
+
+
+def av_finish(j, images):
+    """엔진이 보낸 그림 저장: 일러스트 webp(2.5MB 이하) · 도트 png(300KB 이하)"""
+    try:
+        if not isinstance(images, dict):
+            raise ValueError("그림이 없어요.")
+        il = base64.b64decode(str(images.get("illust", "")), validate=True)
+        if not il and j.get("mode") == "pixel":      # 도트만 다시 그린 경우: 지금 일러스트를 그대로 씀
+            with FILE_LOCK:
+                pr0 = load_profiles().get(j["pid"]) or {}
+            t0 = (pr0.get("aiAvatar") or {}).get("token") if isinstance(pr0.get("aiAvatar"), dict) else None
+            if t0 and AV_TOKEN_RE.match(t0) and (AVATARS / f"{t0}_i.webp").is_file():
+                il = (AVATARS / f"{t0}_i.webp").read_bytes()
+        px = base64.b64decode(str(images.get("pixel", "")), validate=True)
+        if not (il[:4] == b"RIFF" and il[8:12] == b"WEBP" and 1000 < len(il) <= 2_500_000):
+            raise ValueError("일러스트 형식이 이상해요.")
+        if not (px[:8] == b"\x89PNG\r\n\x1a\n" and 100 < len(px) <= 400_000):
+            raise ValueError("도트 그림 형식이 이상해요.")
+        sh = base64.b64decode(str(images.get("sheet", "")), validate=True) if images.get("sheet") else b""
+        if sh and not (sh[:8] == b"\x89PNG\r\n\x1a\n" and len(sh) <= 600_000):
+            raise ValueError("동작 그림 형식이 이상해요.")
+        sk = base64.b64decode(str(images.get("sticker", "")), validate=True) if images.get("sticker") else b""
+        if sk and not (sk[:4] == b"RIFF" and sk[8:12] == b"WEBP" and len(sk) <= 4_000_000):
+            raise ValueError("스티커 그림 형식이 이상해요.")
+    except (ValueError, TypeError) as e:
+        j.update(stage="error", msg=str(e)[:200], finished=time.time())
+        av_drop_ref(j)
+        save_avqueue()
+        notify_all({"type": "avjobs"})
+        return
+    tok = secrets.token_hex(6)
+    AVATARS.mkdir(parents=True, exist_ok=True)
+    (AVATARS / f"{tok}_i.webp").write_bytes(il)
+    (AVATARS / f"{tok}_p.png").write_bytes(px)
+    if sh:
+        (AVATARS / f"{tok}_s.png").write_bytes(sh)     # 동작 그림 (기본·치기 왼·오른·점프·슬픔) — 예전 도트 방식
+    if sk:
+        (AVATARS / f"{tok}_x.webp").write_bytes(sk)    # SD 스티커 표정 줄 (기본·웃음·신남·놀람·슬픔·깜빡임)
+    old = None
+    with FILE_LOCK:
+        profiles = load_profiles()
+        pr = profiles.get(j["pid"])
+        if pr is not None:
+            prev = pr.get("aiAvatar") if isinstance(pr.get("aiAvatar"), dict) else {}
+            old = prev.get("token")
+            pr["aiAvatar"] = {"token": tok, "at": time.time()}
+            save_profiles(profiles)
+    # 예전 그림은 지움 (방 목록에서 잠깐 예전 걸 쓰는 친구가 있어도 하루 정도는 남겨 둠)
+    if old and AV_TOKEN_RE.match(old):
+        try:
+            for f in AVATARS.glob("*_old_*"):
+                if time.time() - f.stat().st_mtime > 86400:
+                    f.unlink()
+            for suf in ("i.webp", "p.png", "s.png", "x.webp"):
+                src = AVATARS / f"{old}_{suf}"
+                if src.exists():
+                    src.rename(AVATARS / f"{old}_old_{suf}")
+        except OSError:
+            pass
+    av_drop_ref(j)
+    j.update(stage="done", msg="완성!", token=tok, finished=time.time())
+    save_avqueue()
+    notify_all({"type": "avjobs"})
+    log("AI 캐릭터 완성:", j["name"])
+
+
+def serve_avatar(path):
+    m = AV_FILE_RE.match(path)
+    if not m:
+        return None
+    f = AVATARS / f"{m.group(1)}_{m.group(2)}"
+    if not f.is_file():
+        old = AVATARS / f"{m.group(1)}_old_{m.group(2)}"
+        if not old.is_file():
+            raise HttpError(404, "Not found")
+        f = old
+    return ("image/webp" if f.suffix == ".webp" else "image/png"), f.read_bytes()
 
 
 def _num(x, lo, hi, name):
@@ -1965,6 +2253,14 @@ async def api(method, path, headers, body):
         busy = any(r.players for r in ROOMS.values())
         return {"ok": True, "busy": busy, "clients": len(CLIENTS), "cloud": CLOUD}
 
+    if parts == ["avatar", "ai"]:
+        if not CLOUD:
+            raise HttpError(400, "클라우드 서버에서만 쓰는 기능이에요.")
+        if method == "POST":
+            return av_request(headers, json_body(body) if body else {})
+        if method == "GET":
+            return av_status(headers)
+
     if parts and parts[0] == "worker":
         require_host(headers)
         if not CLOUD:
@@ -1974,10 +2270,40 @@ async def api(method, path, headers, body):
         WORKER["version"] = str(data.get("version", ""))[:20]
         if "ai" in data:
             WORKER["ai"] = bool(data.get("ai"))
+        if "avatar" in data:
+            WORKER["avatar"] = bool(data.get("avatar"))
         if parts == ["worker", "poll"] and method == "POST":
             j = claim_job()
+            if not j and data.get("avatar"):         # 곡 작업이 없을 때만 캐릭터 그림 (그림 도구가 있는 엔진만)
+                a = av_claim()
+                if a:
+                    return {"job": {"id": a["id"], "kind": "avatar", "avatar": a["avatar"], "title": f"캐릭터: {a['name']}",
+                                    "desc": a.get("desc", ""), "strength": a.get("strength", "mid"),
+                                    "useLook": a.get("useLook", True), "ref": av_ref_b64(a),
+                                    "refExt": (a.get("ref") or ".jpg").rsplit(".", 1)[-1], "mode": a.get("mode", "all"),
+                                    "illust": av_cur_illust(a) if a.get("mode") == "pixel" else None}}
             return {"job": {"id": j["id"], "vid": j["vid"], "title": j["title"], "keepEdited": j["keepEdited"],
                             "keepTitle": j["keepTitle"], "aiOnly": bool(j.get("aiOnly"))} if j else None}
+        aj = AVJOBS.get(str(data.get("jobId", "")))
+        if aj:
+            if parts == ["worker", "progress"] and method == "POST":
+                if aj["stage"] in AV_PENDING:
+                    aj.update(stage="working", msg=str(data.get("msg", ""))[:200], claimedAt=time.time())
+                    notify_all({"type": "avjobs"})
+                return {"ok": aj["stage"] in AV_PENDING}
+            if parts == ["worker", "fail"] and method == "POST":
+                if aj["stage"] in AV_PENDING:
+                    aj.update(stage="error", msg=str(data.get("msg", "실패"))[:300], finished=time.time())
+                    av_drop_ref(aj)
+                    save_avqueue()
+                    notify_all({"type": "avjobs"})
+                    log("AI 캐릭터 실패:", aj["name"], aj["msg"])
+                return {"ok": True}
+            if parts == ["worker", "done"] and method == "POST":
+                if aj["stage"] not in AV_PENDING:
+                    return {"ok": False, "msg": "취소됐거나 없는 작업이에요."}
+                await loop.run_in_executor(EXECUTOR, av_finish, aj, data.get("images"))
+                return {"ok": aj["stage"] == "done", "msg": aj["msg"]}
         j = JOBS.get(str(data.get("jobId", "")))
         if parts == ["worker", "progress"] and method == "POST":
             if j and j.get("pc") and j["stage"] in PENDING:
@@ -2210,6 +2536,8 @@ async def api(method, path, headers, body):
         song = load_song(sid)
         if song is None:
             raise HttpError(404, "곡이 없어요.")
+        if len(parts) == 3 and parts[2] == "dens" and method == "GET":
+            return song_dens(song)
         if len(parts) == 2:
             if method == "GET":
                 song["_hl"] = song_hl(song)   # 하이라이트 모드 구간 (파일에는 저장 안 함)
@@ -2321,7 +2649,7 @@ def serve_static(path):
 async def write_response(writer, status, ctype, data, extra=None):
     head = [f"HTTP/1.1 {status} {STATUS_TEXT.get(status, 'OK')}",
             f"Content-Type: {ctype}", f"Content-Length: {len(data)}",
-            "Cache-Control: no-cache", "Connection: close",
+            *([] if "Cache-Control" in (extra or {}) else ["Cache-Control: no-cache"]), "Connection: close",
             "X-Content-Type-Options: nosniff"]
     for k, v in (extra or {}).items():
         head.append(f"{k}: {v}")
@@ -2376,6 +2704,11 @@ async def handle_conn(reader, writer):
                 res = await api(method, path, headers, body)
                 await write_response(writer, 200, "application/json; charset=utf-8",
                                      json.dumps(res, ensure_ascii=False).encode("utf-8"))
+            elif method in ("GET", "HEAD") and path.startswith("/avatars/"):
+                r = serve_avatar(path)
+                if not r:
+                    raise HttpError(404, "Not found")
+                await write_response(writer, 200, r[0], r[1], {"Cache-Control": "public, max-age=31536000, immutable"})
             elif method in ("GET", "HEAD"):
                 ctype, data = serve_static(path)
                 await write_response(writer, 200, ctype, data)
@@ -2684,7 +3017,7 @@ def handle_msg(c, m):
         av = m.get("avatar")
         if isinstance(av, dict):   # 캐릭터: 짧은 값만 받아서 저장 (화면에서 다시 검사함)
             c.avatar = {str(k)[:12]: (v if isinstance(v, int) and 0 <= v < 100 else str(v)[:12])
-                        for k, v in list(av.items())[:10] if isinstance(v, (int, str))}
+                        for k, v in list(av.items())[:12] if isinstance(v, (int, str))}
         if "title" in m:
             c.title = str(m.get("title") or "").strip()[:16]
         set_my_diff(c, m)
@@ -2751,6 +3084,8 @@ def handle_msg(c, m):
             room.diff = m["diff"]
         if m.get("keys") in (4, 6):
             room.keys = m["keys"]
+        if "ai" in m:                      # 방장이 그 곡에서 고른 AI 채보 사용 여부 (곡마다)
+            room.ai = bool(m.get("ai"))
         room.push()
         return
     if t == "aimode" and room.leader == c.id and room.phase == "lobby":
@@ -2891,6 +3226,7 @@ async def main():
             traceback.print_exc()
         migrate_ai_accents()
     if CLOUD:
+        load_avqueue()
         load_queue()                      # 대기열을 먼저 불러온 다음 (되돌리기가 대기열에 곡을 넣을 수 있어서)
     threading.Thread(target=_migrate, daemon=True).start()
     if CLOUD:
