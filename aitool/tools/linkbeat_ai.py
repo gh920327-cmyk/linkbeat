@@ -738,7 +738,7 @@ def choose(cands, targets, duration, ref=None):
     본 채보는 원곡 후보(a·s)에서만, 곡 대부분을 비운 후보는 빼고 고름 → 빈 곳만 채움
     ref(박 길이·기존 채보 기술 단계)가 있으면 기술 단계로 난이도를 나눔"""
     import chartgen
-    main_c = [c for c in cands if not c[2].endswith("_i")] or cands
+    main_c = [c for c in cands if not c[2].endswith(SIDE_TAGS)] or cands
     inst_c = [c for c in cands if c[2].endswith("_i") and len(c[1]) >= 50]
     active = active_secs(main_c, duration)
     chosen = pick_for_diffs(main_c, relative_targets(targets), active, ref=ref)
@@ -795,6 +795,10 @@ NEAR_STAR = 0.8        # 본 채보와 별 차이가 이 안인 후보만 섞음
 MAIN_BONUS = 0.05      # 본 채보(평소 방식으로 고른 것)는 조금 우대 — 확실히 더 맞을 때만 바꿈
 STAR_KEEP = 0.6        # 다 이어 붙인 뒤 별이 이만큼 넘게 달라지면 그 난이도는 평소 방식 그대로
 HIT_WIN = 0.04         # 노트가 소리에 맞았다고 보는 범위(초)
+INST_IN_POOL = True    # 구간 갈아 끼우기 후보에 반주만 듣고 쓴 후보도 넣음
+SIDE_TAGS = ("_i", "_o")   # 본 채보로는 안 쓰는 후보: _i 반주만 · _o 피아노·기타 등 나머지 소리만 듣고 씀
+OTHER_VARIANT = True   # 소리 분리가 되면 '나머지' 소리(피아노·기타 등)만 듣고 쓴 후보도 만듦
+INST_COVER = 0.6       # 그 후보는 곡의 쳐야 할 곳을 이만큼은 찍었을 때만
 
 
 def analyze_stems(ys, harm, sr=22050, hop=512):
@@ -821,6 +825,118 @@ def analyze_stems(ys, harm, sr=22050, hop=512):
         loud[n] = [round(float(v), 4) for v in (librosa.util.sync(rms[None], beats, aggregate=np.mean)[0][1:] if len(beats) else [])]
     return {"beats": [round(float(t), 3) for t in btimes], "stems": stems, "loud": loud,
             "chroma": [[round(float(v), 2) for v in col] for col in sync.T]}
+
+
+FINE_HOP = 128          # 촘촘한 소리 위치: 약 6ms 단위 (기본 분석은 23ms 단위)
+SNAP_MIN = 0.018        # 소리와 이보다 덜 어긋난 노트는 그대로
+SNAP_MAX = 0.07         # 이 안에 소리가 있으면 노트를 그 소리 위치로 옮김
+NOSOUND = 0.12          # 이 안에 아무 소리도 없으면 '소리 없는 곳'에 넣은 노트 → 뺌
+NOSOUND_MAX = 0.2       # 뺄 노트가 이 비율보다 많으면 소리 찾기가 잘못된 걸로 보고 안 뺌
+SNAP_LANE_GAP = 0.06    # 옮긴 뒤 같은 줄 노트가 이보다 붙으면 그 노트는 안 옮김
+
+
+def fine_onsets_of(ys, sr=22050):
+    """소리별 촘촘한 시작 위치 {소리: [[초, 세기]]} — 창을 짧게(1024)·간격을 촘촘하게(128) 해서 시각이 정확하게"""
+    import numpy as np
+    import librosa
+    out = {}
+    for n, y in ys.items():
+        env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=FINE_HOP, n_fft=1024, n_mels=64)
+        fr = librosa.onset.onset_detect(onset_envelope=env, sr=sr, hop_length=FINE_HOP, backtrack=False, delta=0.04)
+        if not len(fr):
+            continue
+        top = float(np.percentile(env[fr], 95)) or 1.0
+        out[n] = [[round(float(t), 4), round(float(min(1.5, env[f] / top)), 3)]
+                  for f, t in zip(fr, librosa.frames_to_time(fr, sr=sr, hop_length=FINE_HOP))]
+    return out
+
+
+def sound_times(stems):
+    """노트를 붙일 소리 위치들 (촘촘한 것이 있으면 그것, 없으면 None)"""
+    fine = (stems or {}).get("fine") or {}
+    ts = sorted(float(x[0]) for v in fine.values() for x in v)
+    return ts if len(ts) >= 50 else None
+
+
+def snap_to_sound(notes, sounds):
+    """노트를 실제 소리에 붙임: 소리와 0.02~0.07초 어긋난 노트는 그 소리 위치로 옮기고, 근처에 소리가 전혀 없는 노트는 뺌
+    (AI 채보 전체가 소리보다 일정하게 이르거나 늦은 건 그대로 두고 — 그건 서버가 곡 전체로 맞춤 — 그 기준에서 튀는 노트만)
+    → (노트, 옮긴 수, 뺀 수)"""
+    import bisect
+    if not sounds or len(notes) < 20:
+        return notes, 0, 0
+    ts = sorted({round(float(n["t"]), 3) for n in notes})
+    lag = _lag(ts, sounds)
+
+    def nearest(x):
+        i = bisect.bisect_left(sounds, x)
+        c = [sounds[j] for j in (i - 1, i) if 0 <= j < len(sounds)]
+        return min(c, key=lambda o: abs(o - x)) if c else None
+    move, drop = {}, set()
+    for t in ts:
+        o = nearest(t + lag)
+        if o is None:
+            continue
+        err = (o - lag) - t
+        if abs(err) > NOSOUND:
+            drop.add(t)
+        elif SNAP_MIN < abs(err) <= SNAP_MAX:
+            move[t] = round(o - lag, 3)
+    holds = {round(float(n["t"]), 3) for n in notes if float(n.get("d", 0) or 0) >= 0.3}
+    drop -= holds                                   # 롱노트는 안 뺌
+    if len(drop) > NOSOUND_MAX * len(ts):
+        drop = set()
+    by_new = {}
+    for t, nt in move.items():                      # 두 노트가 같은 소리로 몰리면 가까운 쪽만 옮김
+        by_new.setdefault(nt, []).append(t)
+    for nt, olds in by_new.items():
+        for t in sorted(olds, key=lambda t: abs(nt - t))[1:]:
+            move.pop(t, None)
+    final, prev = {}, -1.0
+    for t in ts:                                    # 옮긴 뒤 앞뒤 순서가 바뀌거나 너무 붙으면 안 옮김
+        if t in drop:
+            continue
+        nt = move.get(t, t)
+        if nt <= prev + 0.03:
+            nt = t
+            move.pop(t, None)
+        final[t] = nt
+        prev = nt
+    groups = {}
+    for n in notes:
+        groups.setdefault(round(float(n["t"]), 3), []).append(n)
+    out, last = [], {}
+    for t in ts:
+        if t not in final:
+            continue
+        nt = final[t]
+        if nt != t and any(int(n["l"]) in last and nt - last[int(n["l"])] < SNAP_LANE_GAP for n in groups[t]):
+            nt = t                                  # 같은 줄이 너무 붙으면 원래 자리 (동시치기는 같이)
+        final[t] = nt
+        for n in groups[t]:
+            d = float(n.get("d", 0) or 0)
+            m = dict(n, t=nt)
+            if d > 0:
+                m["d"] = round(max(0.0, t + d - nt), 3)   # 롱노트 끝은 그대로
+            out.append(m)
+            last[int(n["l"])] = nt + float(m.get("d", 0) or 0)
+    out.sort(key=lambda n: (n["t"], n["l"]))
+    moved = sum(1 for t in final if final[t] != t)
+    return out, moved, len(drop)
+
+
+def snap_all(chosen, stems):
+    """난이도마다 snap_to_sound → (chosen, {난이도: [옮긴 수, 뺀 수]})"""
+    import chartgen
+    sounds = sound_times(stems)
+    if not sounds:
+        return chosen, {}
+    out, info = {}, {}
+    for d, c in chosen.items():
+        notes, moved, dropped = snap_to_sound(c[1], sounds)
+        info[d] = [moved, dropped]
+        out[d] = (chartgen.star_rating(notes, 4), notes, c[2] + (f"·소리맞춤{moved}/{dropped}" if moved or dropped else ""))
+    return out, info
 
 
 def phrases_of(stems, duration):
@@ -1022,10 +1138,12 @@ def choose_consist(cands, targets, duration, stems, ref=None):
     phrases = phrases_of(stems or {}, duration)
     if not phrases:
         return base, None
-    main_c = [c for c in cands if not c[2].endswith("_i")] or cands
+    main_c = [c for c in cands if not c[2].endswith(SIDE_TAGS)] or cands
     inst_c = [c for c in cands if c[2].endswith("_i") and len(c[1]) >= 50]
     active = active_secs(main_c, duration)
     pool = [c for c in main_c if coverage(c[1], active) >= MIN_COVER]
+    if INST_IN_POOL:      # 반주만(_i)·피아노 쪽 소리만(_o) 듣고 쓴 후보도 구간 갈아 끼우기에 씀 → 악기가 이끄는 구간은 그 소리를 더 잘 따라감
+        pool += [c for c in cands if c[2].endswith(SIDE_TAGS) and len(c[1]) >= 50 and coverage(c[1], active) >= INST_COVER]
     byname = {c[2]: c for c in cands}
     scores = lead_scores(stems, phrases)
     labels, groups = lead_labels(stems, phrases, scores)
@@ -1125,12 +1243,22 @@ def separate(wav, folder):
         except Exception as e:
             traceback.print_exc()
             say(f"  ⚠ 소리별 분석을 건너뛰어요: {e}")
+        if stems is not None:
+            try:
+                stems["fine"] = fine_onsets_of(ys)        # 노트를 소리에 붙일 때 쓰는 촘촘한 소리 시작 위치
+            except Exception as e:
+                traceback.print_exc()
+                say(f"  ⚠ 촘촘한 소리 위치 찾기를 건너뛰어요: {e}")
+        other_path = None
+        if "other" in ys:                                 # 피아노·기타 등 '나머지' 소리만 → AI가 그 리듬만 듣고 쓴 후보(_o)
+            other_path = folder / "other.wav"
+            soundfile.write(str(other_path), ys["other"].astype(np.float32), 22050)
         merged = []
         for t in onsets:                              # 20ms 안에 겹치면 하나로
             if not merged or t - merged[-1] > 0.02:
                 merged.append(round(t, 3))
         say(f"  소리 분리 끝: 소리 위치 {len(merged)}개")
-        return {"inst": inst_path, "onsets": merged[:20000], "stems": stems}
+        return {"inst": inst_path, "other": other_path, "onsets": merged[:20000], "stems": stems}
     except Exception as e:
         traceback.print_exc()
         say(f"  ⚠ 소리 분리를 건너뛰어요: {e}")
@@ -1156,6 +1284,13 @@ def make_charts(vid, wav, targets, title, artist, duration, mode="", ref=None):
         variants.append((sep["inst"], {}, "i"))
         onsets = sep["onsets"]
     made = mug.generate(variants, odir, SR_PROMPTS, seed=seed, title=title, artist=artist)
+    if sep and sep.get("other") and OTHER_VARIANT:   # 피아노·기타 등 '나머지' 소리만 듣고 쓴 후보 (따로 돌려서 그래픽카드 메모리는 그대로)
+        try:
+            say("  피아노·기타 쪽 소리만 듣고 한 번 더 써요")
+            mug.generate([(sep["other"], {}, "o")], odir, SR_PROMPTS, seed=seed, title=title, artist=artist)
+        except Exception as e:
+            traceback.print_exc()
+            say(f"  ⚠ 피아노·기타 쪽 후보는 건너뛰어요: {e}")
     cands = load_cands(odir, duration)
     if not cands:
         raise RuntimeError("AI가 채보를 제대로 만들지 못했어요.")
@@ -1171,7 +1306,13 @@ def make_charts(vid, wav, targets, title, artist, duration, mode="", ref=None):
             except Exception as e:
                 traceback.print_exc()
                 say(f"  ⚠ 일관성 방식에서 문제가 생겨서 평소 방식으로 만들어요: {e}")
+    snap = {}
+    if sep and sep.get("stems"):
+        chosen, snap = snap_all(chosen, sep["stems"])
+        if snap:
+            say("  소리에 붙이기: " + " · ".join(f"{DIFF_KO[d]} {m}개 옮김/{k}개 뺌" for d, (m, k) in snap.items()))
     if log:
+        log["snap"] = snap
         (odir / "sections.json").write_text(json.dumps(log, ensure_ascii=False, indent=1), encoding="utf-8")
     say(f"  {len(cands)}개 만들었어요 ({time.time() - t0:.0f}초)")
     body = {"charts": {d: c[1] for d, c in chosen.items()}, "by": f"MuG Diffusion v{mug.version}", "style": "rc"}
@@ -1275,7 +1416,7 @@ def rebuild(srv, vid):
                       targets, chosen, cands, mode="consist" if log else "")
         return body
     byname = {c[2]: c for c in cands}
-    main_c = [c for c in cands if not c[2].endswith("_i")] or cands
+    main_c = [c for c in cands if not c[2].endswith(SIDE_TAGS)] or cands
     inst_c = [c for c in cands if c[2].endswith("_i") and len(c[1]) >= 50]
     active = active_secs(main_c, duration)
     keep, redo = {}, []
@@ -1529,6 +1670,10 @@ def repick(srv, vid):
         chosen, log = choose_consist(cands, targets, duration, stems, ref=ref)
     else:
         chosen = choose(cands, targets, duration, ref=ref)
+    if stems:
+        chosen, snap = snap_all(chosen, stems)     # 촘촘한 소리 위치가 있는 곡(새로 만든 곡)만
+        if log is not None:
+            log["snap"] = snap
     if log:
         (odir / "sections.json").write_text(json.dumps(log, ensure_ascii=False, indent=1), encoding="utf-8")
     old = json.loads(up.read_text(encoding="utf-8"))
