@@ -76,16 +76,21 @@ def prompts(a, desc="", use_look=True):
     g, look = tags(a)
     parts = [p for p in (f"({desc}:1.15)" if desc else "", look if use_look else "") if p]   # 설정 반영을 끄면 예전 캐릭터 칸은 안 씀
     who = ", ".join(parts) or "original character"
-    illust = (f"{g}, solo, {who}, upper body, looking at viewer, music, rhythm game, dynamic pose, "
+    # 일러스트: 가슴 위 초상 + 손은 화면 밖 (애니 모델이 손을 자주 망가뜨려서 손이 안 나오는 구도로)
+    illust = (f"{g}, solo, {who}, portrait, upper body, hands out of frame, looking at viewer, music, "
               f"colorful, vibrant, gradient background, safe, {QUALITY}")
+    illust_neg = NEG + (", bad hands, extra hands, extra arms, deformed hands, malformed hands, fused fingers, too many fingers, "
+                        "holding, hand up, hands up, v, peace sign")
     key = key_color(who)
-    chibi = (f"{g}, solo, chibi, super deformed, 2 heads tall, big head, large detailed eyes, clear facial features, expressive face, "
+    # 꼬마: 머리만 크게 나오지 않게 (전신이 그림 가운데에 작게, 머리·몸 비율은 보통 꼬마 정도)
+    chibi = (f"{g}, solo, chibi, super deformed, wide shot, small character, detailed eyes, clear facial features, expressive face, "
              f"cute, {who}, full body, standing, front view, arms at sides, "
              f"game sprite, simple background, ({key} background:1.45), solid color background, flat background, thick outline, "
              f"flat color, cel shading, safe, {QUALITY}")
     chibi_neg = NEG + (", shadow, drop shadow, ground, floor, white background, gradient background, detailed background, scenery, "
-                       "border, frame, multiple views, character sheet, reference sheet, close-up, portrait, cropped feet, text")
-    return (illust, NEG, 896, 1152), (chibi, chibi_neg, 1024, 1024), key
+                       "border, frame, multiple views, character sheet, reference sheet, close-up, portrait, upper body, bust, "
+                       "head only, oversized head, cropped, cropped legs, cropped feet, text")
+    return (illust, illust_neg, 896, 1152), (chibi, chibi_neg, 1024, 1024), key
 
 
 KEY_HUE = {"green": 120, "blue": 220, "pink": 315}
@@ -183,7 +188,7 @@ def desc_to_tags(desc, comfy_root):
 
 
 def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0, base=None, denoise=1.0, ref_end=1.0,
-             face=None, face_w=0.0, face_end=0.6):
+             face=None, face_w=0.0, face_end=0.6, ref_start=0.0, face_start=0.0):
     wf = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": CKPT}},
         "2": {"class_type": "CLIPTextEncode", "inputs": {"text": pos, "clip": ["1", 1]}},
@@ -201,7 +206,7 @@ def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0, base=None, denoi
         wf["10"] = {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": CLIPV_FILE}}
         wf["11"] = {"class_type": "IPAdapterAdvanced", "inputs": {"model": ["1", 0], "ipadapter": ["9", 0], "image": ["8", 0],
                                                                  "clip_vision": ["10", 0], "weight": ref_w, "weight_type": "linear",
-                                                                 "combine_embeds": "concat", "start_at": 0.0, "end_at": ref_end,
+                                                                 "combine_embeds": "concat", "start_at": ref_start, "end_at": ref_end,
                                                                  "embeds_scaling": "V only"}}
         wf["5"]["inputs"]["model"] = ["11", 0]
     if face and face_w > 0:     # 얼굴 고정: 일러스트 얼굴을 IP-Adapter 얼굴 전용(SDXL)으로 — 약하게·앞부분만 (꼬마 비율·표정은 주문대로)
@@ -212,7 +217,7 @@ def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0, base=None, denoi
         wf["16"] = {"class_type": "IPAdapterAdvanced", "inputs": {"model": wf["5"]["inputs"]["model"], "ipadapter": ["15", 0],
                                                                  "image": ["14", 0], "clip_vision": ["10", 0], "weight": face_w,
                                                                  "weight_type": "linear", "combine_embeds": "concat",
-                                                                 "start_at": 0.0, "end_at": face_end, "embeds_scaling": "V only"}}
+                                                                 "start_at": face_start, "end_at": face_end, "embeds_scaling": "V only"}}
         wf["5"]["inputs"]["model"] = ["16", 0]
     if base:                    # 동작 그림: 기본 자세 그림에서 출발 (같은 구도·같은 색)
         wf["12"] = {"class_type": "LoadImage", "inputs": {"image": base}}
@@ -656,6 +661,45 @@ def _fg_mask(im, S=256):
     return _keep_big(~bg)
 
 
+def chibi_check(png, key=None, ai_model=None, S=128):
+    """꼬마 그림 구도 검사: 전신이 그림 가운데에 작게 들어갔는지 (얼굴만 화면 가득 그리면 도트가 망가짐)
+    → (괜찮은지, 이유)"""
+    import numpy as np
+    from PIL import Image
+    im = Image.open(io.BytesIO(png)).convert("RGB")
+    m = None
+    if ai_model:
+        try:
+            m = ai_mask(im, ai_model, S)
+        except Exception:
+            m = None
+    if m is None and key in KEY_HUE:
+        bg = _key_bg(im, key, S)
+        if bg.mean() > 0.2:             # 바탕이 정말 크로마키 색일 때만
+            m = ~bg
+    if m is None:
+        small = np.asarray(im.resize((S, S), Image.LANCZOS)).astype(np.float32)
+        border = np.concatenate([small[:2].reshape(-1, 3), small[-2:].reshape(-1, 3), small[:, :2].reshape(-1, 3), small[:, -2:].reshape(-1, 3)])
+        if border.std(axis=0).mean() > 18:      # 테두리가 한 가지 바탕색이 아님 → 캐릭터가 그림 밖으로 넘친 것
+            return False, "얼굴·몸이 그림 밖으로 넘쳤어요"
+        m = _fg_mask(im, S)
+    frac = m.mean()
+    edge = 3
+    sides = [m[:edge].mean(), m[-edge:].mean(), m[:, :edge].mean(), m[:, -edge:].mean()]   # 위·아래·왼·오른 테두리에 캐릭터가 닿은 정도
+    touch = sum(1 for v in sides if v > 0.12)
+    ys, xs = np.where(m)
+    if not len(ys):
+        return False, "캐릭터가 없어요"
+    hh, ww = (ys.max() - ys.min() + 1) / S, (xs.max() - xs.min() + 1) / S
+    if frac > 0.62 or touch >= 3 or (touch >= 2 and sides[0] > 0.12):
+        return False, "얼굴·몸이 그림 밖으로 넘쳤어요"
+    if frac < 0.04 or hh < 0.4:
+        return False, "캐릭터가 너무 작아요"
+    if hh < ww * 0.85:
+        return False, "전신이 아니에요"
+    return True, ""
+
+
 def shrink_keep_lines(img, size, eye_band=None):
     """작게 줄이기: 보통은 평균색, 선(진한 곳·색이 확 바뀌는 경계)이 칸의 1/5 이상이면 그 선 색을 더 진하게
     (평균으로 줄이면 눈 테두리·입·얼굴 경계가 흐려져서 표정이 안 보임) — 줄이기 전에 대비를 살짝 올리고 선명하게"""
@@ -719,7 +763,7 @@ def pixel_sheet(pngs, height=128, colors=32, key=None, ai_model=None):
             am = [ai_mask(im, ai_model, S) for im in ims]
             border = np.concatenate([am[0][0], am[0][-1], am[0][:, 0], am[0][:, -1]])
             frac = am[0].mean()
-            if border.mean() < 0.25 and 0.03 < frac < 0.8:
+            if border.mean() < 0.4 and 0.03 < frac < 0.85:
                 if key in KEY_HUE:      # 가장자리에 같이 잡힌 바탕색(초록 테두리)은 빼기
                     am = [m & ~_key_bg(im, key, S) for m, im in zip(am, ims)]
                 masks = [_keep_big(m) for m in am]
@@ -868,16 +912,34 @@ def main():
             W0, H0 = im0.size
             crop = out / "illust_crop.png"
             im0.crop((int(W0 * 0.14), int(H0 * 0.04), int(W0 * 0.86), int(H0 * 0.74))).save(crop)
-            ch_ref, ch_w8, ch_end = comfy.upload(crop, "linkbeat_ref_illust"), 0.5, 0.55
+            ch_ref, ch_w8, ch_end = comfy.upload(crop, "linkbeat_ref_illust"), 0.6, 0.85
             fcrop = out / "illust_face.png"      # 얼굴 부분만 (얼굴 고정용 — 기본 자세에만, 동작 그림은 기본 자세에서 이어짐)
             im0.crop((int(W0 * 0.22), int(H0 * 0.06), int(W0 * 0.78), int(H0 * 0.52))).save(fcrop)
             face_name = comfy.upload(fcrop, "linkbeat_ref_face") if use_face else None
         else:
             ch_ref, ch_w8 = ref_name, rw[1]
             face_name = None
-        say("도트용 꼬마 캐릭터 그리는 중..." + (" (일러스트 얼굴을 따라)" if face_name else ""))
-        ch = comfy.run(workflow(ch_p, ch_n, ch_w, ch_h, seed + 1, "linkbeat_avatar/chibi", ch_ref, ch_w8, ref_end=ch_end,
-                                face=face_name, face_w=FACE_W), "꼬마 캐릭터")
+        # 그림 앞부분(전체 구도가 정해지는 단계)은 글('전신 꼬마')대로, 그다음부터 일러스트·얼굴을 따라감
+        # → 일러스트가 얼굴 클로즈업이어도 꼬마는 전신으로. 구도가 이상하면 더 약하게 → 글로만 다시
+        isnet = ensure_isnet(spec.get("isnet"))
+        tries = [dict(ref=ch_ref, w=ch_w8, rs=0.3, re=ch_end, face=face_name, fs=0.35),
+                 dict(ref=ch_ref, w=ch_w8 * 0.75, rs=0.5, re=ch_end, face=None, fs=0),
+                 dict(ref=None, w=0, rs=0, re=1, face=None, fs=0)]
+        ch = None
+        for n, t in enumerate(tries):
+            if n and not t["ref"] and not tries[n - 1]["ref"]:
+                continue
+            say("도트용 꼬마 캐릭터 그리는 중..." + (" (일러스트 얼굴을 따라)" if t["face"] else "") + (f" (다시 {n})" if n else ""))
+            img = comfy.run(workflow(ch_p, ch_n, ch_w, ch_h, seed + 1 + n * 7, "linkbeat_avatar/chibi", t["ref"], t["w"],
+                                     ref_start=t["rs"], ref_end=t["re"], face=t["face"], face_w=FACE_W,
+                                     face_start=t["fs"], face_end=0.85), "꼬마 캐릭터")
+            ch = img                       # 끝까지 안 되면 마지막(가장 약하게 따라간) 그림
+            ok, why = chibi_check(img, key, isnet)
+            if ok:
+                break
+            if n < len(tries) - 1:
+                say(f"꼬마 그림 구도가 이상해서 다시 그려요 ({why})")
+
         base_file = out / "chibi_base.png"
         base_file.write_bytes(ch)
         base_name = comfy.upload(base_file, "linkbeat_ref_base")
@@ -891,7 +953,7 @@ def main():
             except Exception as e:
                 say(f"동작 하나를 못 그렸어요 ({str(e)[:60]}) — 기본 자세로 대신해요")
                 poses.append(ch)
-        one, sheet = pixel_sheet([ch] + poses, key=key, ai_model=ensure_isnet(spec.get("isnet")))
+        one, sheet = pixel_sheet([ch] + poses, key=key, ai_model=isnet)
         (out / "pixel.png").write_bytes(one)
         (out / "sheet.png").write_bytes(sheet)
         say("완성!")
