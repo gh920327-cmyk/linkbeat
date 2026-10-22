@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.2.12"
+VERSION = "1.2.13"
 
 # 가상환경의 실행 파일 폴더(deno 등)를 PATH 앞에 → yt-dlp가 JS 런타임을 찾을 수 있게
 os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
@@ -297,6 +297,9 @@ def run_avatar_job(api, job):
             sh = Path(td) / "sheet.png"
             if sh.exists():
                 images["sheet"] = base64.b64encode(sh.read_bytes()).decode()
+            sk = Path(td) / "sticker.webp"          # SD 스티커 표정 줄
+            if sk.exists():
+                images["sticker"] = base64.b64encode(sk.read_bytes()).decode()
         progress("올리는 중...")
         r = api.call("worker/done", {"jobId": jid, "images": images, "version": VERSION}, timeout=120)
         status("ready", f"캐릭터 완성: {title}" if r.get("ok") else f"캐릭터 저장 실패: {r.get('msg', '')}")

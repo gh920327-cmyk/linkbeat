@@ -1,12 +1,12 @@
 """
 링크비트 AI 캐릭터 그리기 — 호스트 PC의 ComfyUI(파이썬)로 실행돼요 (채보 엔진 worker.py가 부름)
  - 캐릭터 설정(머리·옷·액세서리…) → 애니풍 일러스트 1장 + 꼬마 전신 1장을 ComfyUI로 그림
- - 꼬마 전신은 배경을 지우고 작게 줄여서 도트(픽셀) 캐릭터로 만듦
+ - 꼬마 전신은 배경을 지우고 흰 테두리 스티커로, 얼굴만 다시 그려 표정 6가지 (기본·웃음·신남·놀람·슬픔·깜빡임)
  - ComfyUI가 이미 켜져 있으면(8188) 그걸 쓰고, 아니면 잠깐 따로 켰다가(8190) 끝나면 끔
  - 기존 워크플로·설정은 건드리지 않음 (그림은 API로만 요청하고, 만든 파일은 가져온 뒤 지움)
 
 사용: python avatar_gen.py --comfy <ComfyUI_windows_portable 폴더> --spec spec.json --out <폴더>
-진행 상황은 한 줄 JSON {"p": "..."} 로 출력, 끝나면 <폴더>/illust.webp · pixel.png
+진행 상황은 한 줄 JSON {"p": "..."} 로 출력, 끝나면 <폴더>/illust.webp · sticker.webp · pixel.png(작은 그림)
 """
 import argparse
 import io
@@ -83,14 +83,14 @@ def prompts(a, desc="", use_look=True):
                         "holding, hand up, hands up, v, peace sign")
     key = key_color(who)
     # 꼬마: 머리만 크게 나오지 않게 (전신이 그림 가운데에 작게, 머리·몸 비율은 보통 꼬마 정도)
-    chibi = (f"{g}, solo, chibi, super deformed, wide shot, small character, detailed eyes, clear facial features, expressive face, "
+    chibi = (f"{g}, solo, chibi, super deformed, detailed eyes, beautiful detailed face, clear facial features, "
              f"cute, {who}, full body, standing, front view, arms at sides, "
              f"game sprite, simple background, ({key} background:1.45), solid color background, flat background, thick outline, "
              f"flat color, cel shading, safe, {QUALITY}")
     chibi_neg = NEG + (", shadow, drop shadow, ground, floor, white background, gradient background, detailed background, scenery, "
                        "border, frame, multiple views, character sheet, reference sheet, close-up, portrait, upper body, bust, "
                        "head only, oversized head, cropped, cropped legs, cropped feet, text")
-    return (illust, illust_neg, 896, 1152), (chibi, chibi_neg, 1024, 1024), key
+    return (illust, illust_neg, 896, 1152), (chibi, chibi_neg, 832, 1216), key
 
 
 KEY_HUE = {"green": 120, "blue": 220, "pink": 315}
@@ -188,7 +188,7 @@ def desc_to_tags(desc, comfy_root):
 
 
 def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0, base=None, denoise=1.0, ref_end=1.0,
-             face=None, face_w=0.0, face_end=0.6, ref_start=0.0, face_start=0.0):
+             face=None, face_w=0.0, face_end=0.6, ref_start=0.0, face_start=0.0, mask=None):
     wf = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": CKPT}},
         "2": {"class_type": "CLIPTextEncode", "inputs": {"text": pos, "clip": ["1", 1]}},
@@ -225,12 +225,16 @@ def workflow(pos, neg, w, h, seed, prefix, ref=None, ref_w=0.0, base=None, denoi
         wf["5"]["inputs"]["latent_image"] = ["13", 0]
         wf["5"]["inputs"]["denoise"] = denoise
         del wf["4"]
+        if mask:                # 마스크(투명한 곳)만 다시 그림 — 표정 바꾸기
+            wf["17"] = {"class_type": "LoadImage", "inputs": {"image": mask}}
+            wf["18"] = {"class_type": "SetLatentNoiseMask", "inputs": {"samples": ["13", 0], "mask": ["17", 1]}}
+            wf["5"]["inputs"]["latent_image"] = ["18", 0]
     return wf
 
 
 IPA_FILE = "ip-adapter-plus_sdxl_vit-h.safetensors"
 IPA_FACE_FILE = "ip-adapter-plus-face_sdxl_vit-h.safetensors"   # 얼굴 전용 (애니 얼굴에도 잘 맞음)
-FACE_W = 0.4
+FACE_W = 0.45
 CLIPV_FILE = "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
 REF_WEIGHT = {"low": (0.45, 0.2), "mid": (0.65, 0.3), "high": (0.85, 0.4)}   # (일러스트, 꼬마 도트 — 사진 바탕색이 묻어나지 않게 약하게)
 
@@ -463,11 +467,14 @@ def _solid(fg):
 _ORT = {}
 
 
-def ai_mask(im, model, S=256):
-    """배경 제거 AI(isnet-anime, onnx): 캐릭터 부분 마스크 (S×S, True=캐릭터)"""
+def ai_prob(im, model):
+    """배경 제거 AI(isnet-anime, onnx): 캐릭터일 확률 그림 (L, 1024×1024 — rembg와 같은 방식)"""
     import numpy as np
     import onnxruntime as ort
     from PIL import Image
+    key = (str(model), id(im))
+    if _ORT.get("last", (None,))[0] == key:
+        return _ORT["last"][1]
     sess = _ORT.get(model)
     if sess is None:
         sess = _ORT[model] = ort.InferenceSession(str(model), providers=["CPUExecutionProvider"])
@@ -477,7 +484,16 @@ def ai_mask(im, model, S=256):
     x = x.transpose(2, 0, 1)[None].astype(np.float32)
     pred = sess.run(None, {sess.get_inputs()[0].name: x})[0][:, 0, :, :]
     pred = (pred - pred.min()) / max(float(pred.max() - pred.min()), 1e-6)
-    m = Image.fromarray((np.squeeze(pred) * 255).astype("uint8"), "L").resize((S, S), Image.LANCZOS)
+    out = Image.fromarray((np.squeeze(pred) * 255).astype("uint8"), "L")
+    _ORT["last"] = (key, out)
+    return out
+
+
+def ai_mask(im, model, S=256):
+    """배경 제거 AI: 캐릭터 부분 마스크 (S×S, True=캐릭터)"""
+    import numpy as np
+    from PIL import Image
+    m = ai_prob(im, model).resize((S, S), Image.LANCZOS)
     return np.asarray(m) > 80          # 밝은 머리·피부처럼 애매하게 잡히는 곳도 캐릭터로
 
 
@@ -861,6 +877,215 @@ def pixelize(png, height=128, colors=32):
     return pixel_sheet([png], height, colors)[0]
 
 
+# ------------------------------------------------------------------ SD 스티커 (도트 대신: 매끈한 꼬마 그림 한 장 + 표정 여러 개)
+# 표정 순서 = 화면에서 쓰는 순서 (static/avatar.js 의 STK_EXPR 과 같게)
+EXPR = (("idle", None, 0.0),
+        ("smile", "(smile, closed eyes, happy, ^_^:1.3)", 0.62),
+        ("cheer", "(open mouth, big smile, excited, sparkling eyes:1.3)", 0.62),
+        ("oops", "(surprised, open mouth, wide-eyed, sweatdrop:1.3)", 0.6),
+        ("sad", "(sad, frown, teary eyes, closed mouth:1.3)", 0.6),
+        ("blink", "(closed eyes, light smile, closed mouth:1.3)", 0.58))
+STICKER_H = 512          # 표정 한 칸 높이 (흰 테두리 포함)
+STICKER_B = 7            # 흰 스티커 테두리 두께
+
+
+def cut_alpha(im, key=None, ai_model=None):
+    """배경 제거 → 원래 크기의 부드러운 알파(0~1). 캐릭터 안쪽 구멍은 메우고, 팔·다리 사이 바탕색은 투명하게"""
+    import numpy as np
+    from PIL import Image, ImageFilter
+    W, H = im.size
+    S = 256
+    prob, m = None, None
+    if ai_model:
+        try:
+            pr = ai_prob(im, ai_model)
+            am = np.asarray(pr.resize((S, S), Image.LANCZOS)) > 80
+            border = np.concatenate([am[0], am[-1], am[:, 0], am[:, -1]])
+            if border.mean() < 0.4 and 0.03 < am.mean() < 0.85:
+                prob, m = pr, am
+                if key in KEY_HUE:
+                    m = m & ~_key_bg(im, key, S)
+                m = _keep_big(m)
+        except Exception as e:
+            say(f"배경 제거 AI를 못 써서 다른 방법으로 지워요 ({str(e)[:80]})")
+    if m is None and key in KEY_HUE:
+        km = _key_mask(im, key, S)
+        border = np.concatenate([km[0], km[-1], km[:, 0], km[:, -1]])
+        if border.mean() < 0.3 and km.sum() > S * S * 0.04 and _solid(km):
+            m = km
+    if m is None:
+        m = _fg_mask(im, S)
+    solid = fill_holes(m)
+    gaps = _bg_gaps(im, solid, key, S)
+    solid = solid & ~gaps
+    up = lambda b: np.asarray(Image.fromarray((b * 255).astype("uint8")).resize((W, H), Image.BILINEAR)).astype(np.float32) / 255
+    solid_f = up(solid)
+    if prob is not None:        # AI 확률로 가장자리를 부드럽게 + 안쪽은 꽉 차게
+        pf = np.asarray(prob.resize((W, H), Image.LANCZOS)).astype(np.float32) / 255
+        a = np.clip((pf - 0.25) / 0.5, 0, 1)
+        inner = np.asarray(Image.fromarray(((solid_f > 0.5) * 255).astype("uint8")).filter(ImageFilter.MinFilter(9))) > 0
+        a = np.maximum(a, inner.astype(np.float32))
+        a = np.minimum(a, np.clip(solid_f * 1.6, 0, 1))          # 구멍 메움·빈 곳 자르기 결과 밖으로는 안 나가게
+    else:
+        a = np.asarray(Image.fromarray((np.clip(solid_f, 0, 1) * 255).astype("uint8")).filter(ImageFilter.GaussianBlur(1.2))).astype(np.float32) / 255
+        a = np.clip((a - 0.3) / 0.4, 0, 1)
+    if key in KEY_HUE:          # 테두리와 이어진 바탕색(크로마키)은 확실히 지움
+        bgk = up(_key_bg(im, key, S)) > 0.5
+        hsv = np.asarray(im.convert("HSV")).astype(np.float32)
+        dh = np.abs((hsv[:, :, 0] * 360 / 255 - KEY_HUE[key] + 180) % 360 - 180)
+        keyish = (dh < 32) & (hsv[:, :, 1] > 95) & (hsv[:, :, 2] > 55)
+        a[bgk & keyish] = 0
+    return a
+
+
+def face_box(arr, a):
+    """얼굴(눈·입) 자리 찾기: 캐릭터 위쪽의 피부색 덩어리 중 '앞을 보고 선 꼬마의 얼굴 자리'에 가장 가깝고 큰 것
+    → (가운데 x, y, 가로 반지름, 세로 반지름). 못 찾으면 꼬마 비율로 어림"""
+    import numpy as np
+    from collections import deque
+    from PIL import Image
+    H, W = a.shape
+    ys, xs = np.where(a > 0.5)
+    if not len(ys):
+        return None
+    y0, y1, x0, x1 = ys.min(), ys.max(), xs.min(), xs.max()
+    hc, wc = y1 - y0, x1 - x0
+    band = (a > 0.5)[y0 + int(hc * 0.15):y0 + int(hc * 0.45)]
+    bx = np.where(band)[1]
+    px0 = float(np.median(bx)) if len(bx) else (x0 + x1) / 2     # 머리 가운데 (양갈래·소품이 있어도 가운데 쪽)
+    py0 = y0 + hc * 0.3
+    guess = (px0, py0, max(wc * 0.2, hc * 0.1), hc * 0.12)
+    hsv = np.asarray(Image.fromarray(arr).convert("HSV")).astype(np.float32)
+    hue, sat, val = hsv[:, :, 0] * 360 / 255, hsv[:, :, 1] / 255, hsv[:, :, 2] / 255
+    head = np.zeros(a.shape, dtype=bool)
+    head[y0:y0 + int(hc * 0.55)] = True
+    S = 160
+    k = W / S
+    for smin, smax, vmin in ((0.05, 0.36, 0.55), (0.1, 0.62, 0.25)):     # 밝은 피부 → 어두운 피부
+        skin = head & (a > 0.5) & (((hue >= 0) & (hue <= 42)) | (hue >= 342)) & (sat >= smin) & (sat <= smax) & (val >= vmin)
+        sm = np.asarray(Image.fromarray((skin * 255).astype("uint8")).resize((S, max(1, int(S * H / W))), Image.BOX)) > 100
+        seen = np.zeros_like(sm)
+        best, best_score = None, 0.0
+        for yy, xx in zip(*np.where(sm)):
+            if seen[yy, xx]:
+                continue
+            q, pts = deque([(yy, xx)]), []
+            seen[yy, xx] = True
+            while q:
+                cy, cx = q.popleft()
+                pts.append((cy, cx))
+                for ny, nx in ((cy - 1, cx), (cy + 1, cx), (cy, cx - 1), (cy, cx + 1)):
+                    if 0 <= ny < sm.shape[0] and 0 <= nx < S and sm[ny, nx] and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        q.append((ny, nx))
+            if len(pts) < 25:
+                continue
+            py, px = np.array(pts).T
+            fx0, fx1, fy0, fy1 = px.min() * k, (px.max() + 1) * k, py.min() * k, (py.max() + 1) * k
+            fw, fh = fx1 - fx0, fy1 - fy0
+            if fw < wc * 0.1 or fw > wc * 0.8 or fh < hc * 0.05 or fh > hc * 0.4:
+                continue
+            dist = np.hypot((fx0 + fx1) / 2 - px0, (fy0 + fy1) / 2 - py0) / max(wc, 1)
+            score = len(pts) / (1 + 4 * dist)
+            if score > best_score:
+                best, best_score = (fx0, fx1, fy0, fy1), score
+        if best:
+            fx0, fx1, fy0, fy1 = best
+            fw, fh = fx1 - fx0, fy1 - fy0
+            return (fx0 + fx1) / 2, fy0 + fh * 0.48, fw * 0.6, fh * 0.62
+    return guess
+
+
+def face_mask(size, box, grow=1.0):
+    """얼굴 타원 마스크 (0~1, 가장자리 부드럽게)"""
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter
+    W, H = size
+    cx, cy, rx, ry = (float(v) for v in box)
+    rx, ry = rx * grow, ry * grow
+    m = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(m).ellipse((cx - rx, cy - ry, cx + rx, cy + ry), fill=255)
+    m = m.filter(ImageFilter.GaussianBlur(max(2, min(rx, ry) * 0.18)))
+    return np.asarray(m).astype(np.float32) / 255
+
+
+def expr_ok(base, new, fm, key):
+    """다시 그린 표정이 쓸 만한지: 얼굴 둘레 색이 크게 바뀌지 않았고, 바탕색·검은 얼룩이 없음"""
+    import numpy as np
+    from PIL import Image
+    ring = (fm > 0.15) & (fm < 0.6)
+    core = fm > 0.6
+    if not ring.any() or not core.any():
+        return False
+    d = np.abs(base.astype(np.float32) - new.astype(np.float32)).mean(axis=2)
+    if d[ring].mean() > 42:
+        return False
+    if key in KEY_HUE:          # 얼굴에 바탕색(크로마키)이 새로 생겼으면 실패 (원래 그 색 눈이면 그만큼은 괜찮음)
+        def keyfrac(x):
+            hsv = np.asarray(Image.fromarray(x).convert("HSV")).astype(np.float32)
+            dh = np.abs((hsv[:, :, 0] * 360 / 255 - KEY_HUE[key] + 180) % 360 - 180)
+            return ((dh < 32) & (hsv[:, :, 1] > 95))[core].mean()
+        if keyfrac(new) > keyfrac(base) + 0.03:
+            return False
+    lb, ln = base[core].mean(), new[core].mean()
+    return ln > lb - 70
+
+
+def despill_frames(frames, a, key):
+    """가장자리(반투명·테두리 근처)에 번진 크로마키 바탕색 빼기 — 표정 그림 모두 같게"""
+    import numpy as np
+    from PIL import Image, ImageFilter
+    if key not in KEY_HUE:
+        return frames
+    inner = np.asarray(Image.fromarray(((a > 0.5) * 255).astype("uint8")).filter(ImageFilter.MinFilter(17))) > 0
+    edge = (a > 0.01) & ~inner
+    return [_despill(np.ascontiguousarray(f), key, edge) for f in frames]
+
+
+def sticker_sheet(frames, a):
+    """표정 그림들(같은 크기 RGB 배열) + 알파 → 흰 테두리 스티커 표정 줄 (webp) · 작은 그림 (png)"""
+    import numpy as np
+    from PIL import Image, ImageFilter
+    H, W = a.shape
+    ys, xs = np.where(a > 0.1)
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    pad_out = STICKER_B + 5
+    f = (STICKER_H - pad_out * 2) / (y1 - y0)
+    m = pad_out / f
+    box = (int(x0 - m), int(y0 - m), int(x1 + m), int(y1 + m))
+    cw = round((box[2] - box[0]) * f)
+    big = lambda im: im.crop(box).resize((cw, STICKER_H), Image.LANCZOS)
+    al = big(Image.fromarray((a * 255).astype("uint8")))
+    av = np.asarray(al).astype(np.float32) / 255
+    # 흰 테두리: 알파를 둥글게 불림
+    d = np.asarray(al.filter(ImageFilter.GaussianBlur(STICKER_B * 0.55))).astype(np.float32) / 255
+    border = np.clip((d - 0.035) * 14, 0, 1)
+    d2 = np.asarray(Image.fromarray((border * 255).astype("uint8")).filter(ImageFilter.GaussianBlur(1.6))).astype(np.float32) / 255
+    rim = np.clip(d2 * 1.4 - border, 0, 1) * 0.55        # 테두리 바깥의 옅은 진한 선 (밝은 테마에서도 보이게)
+    def over(dc, da, sc, sa):          # 겹쳐 그리기 (아래 dc·da 위에 sc·sa)
+        oa = sa + da * (1 - sa)
+        oc = (sc * sa[:, :, None] + dc * (da * (1 - sa))[:, :, None]) / np.maximum(oa, 1e-6)[:, :, None]
+        return oc, oa
+    ink = np.broadcast_to(np.array([24, 18, 40], dtype=np.float32), (STICKER_H, cw, 3))
+    white = np.full((STICKER_H, cw, 3), 255, dtype=np.float32)
+    base_c, base_a = over(np.zeros((STICKER_H, cw, 3), np.float32), np.zeros((STICKER_H, cw), np.float32), ink, rim)
+    base_c, base_a = over(base_c, base_a, white, border)
+    outs = []
+    for fr in frames:
+        rgb = np.asarray(big(Image.fromarray(fr))).astype(np.float32)
+        oc, oa = over(base_c, base_a, rgb, av)      # 진한 선 → 흰 테두리 → 캐릭터
+        outs.append(Image.fromarray(np.dstack([np.clip(oc, 0, 255), np.clip(oa * 255, 0, 255)]).astype("uint8"), "RGBA"))
+    sheet = Image.new("RGBA", (cw * len(outs), STICKER_H), (0, 0, 0, 0))
+    for i, fr in enumerate(outs):
+        sheet.paste(fr, (i * cw, 0))
+    buf = io.BytesIO()
+    sheet.save(buf, "WEBP", quality=90, alpha_quality=100, method=5)
+    th = outs[0].resize((max(8, round(cw * 192 / STICKER_H)), 192), Image.LANCZOS)
+    b2 = io.BytesIO()
+    th.save(b2, "PNG", optimize=True)
+    return buf.getvalue(), b2.getvalue()
+
+
 def to_webp(png, quality=88):
     from PIL import Image
     buf = io.BytesIO()
@@ -912,7 +1137,7 @@ def main():
             W0, H0 = im0.size
             crop = out / "illust_crop.png"
             im0.crop((int(W0 * 0.14), int(H0 * 0.04), int(W0 * 0.86), int(H0 * 0.74))).save(crop)
-            ch_ref, ch_w8, ch_end = comfy.upload(crop, "linkbeat_ref_illust"), 0.6, 0.85
+            ch_ref, ch_w8, ch_end = comfy.upload(crop, "linkbeat_ref_illust"), 0.7, 0.9
             fcrop = out / "illust_face.png"      # 얼굴 부분만 (얼굴 고정용 — 기본 자세에만, 동작 그림은 기본 자세에서 이어짐)
             im0.crop((int(W0 * 0.22), int(H0 * 0.06), int(W0 * 0.78), int(H0 * 0.52))).save(fcrop)
             face_name = comfy.upload(fcrop, "linkbeat_ref_face") if use_face else None
@@ -922,7 +1147,7 @@ def main():
         # 그림 앞부분(전체 구도가 정해지는 단계)은 글('전신 꼬마')대로, 그다음부터 일러스트·얼굴을 따라감
         # → 일러스트가 얼굴 클로즈업이어도 꼬마는 전신으로. 구도가 이상하면 더 약하게 → 글로만 다시
         isnet = ensure_isnet(spec.get("isnet"))
-        tries = [dict(ref=ch_ref, w=ch_w8, rs=0.3, re=ch_end, face=face_name, fs=0.35),
+        tries = [dict(ref=ch_ref, w=ch_w8, rs=0.25, re=ch_end, face=face_name, fs=0.3),
                  dict(ref=ch_ref, w=ch_w8 * 0.75, rs=0.5, re=ch_end, face=None, fs=0),
                  dict(ref=None, w=0, rs=0, re=1, face=None, fs=0)]
         ch = None
@@ -932,7 +1157,7 @@ def main():
             say("도트용 꼬마 캐릭터 그리는 중..." + (" (일러스트 얼굴을 따라)" if t["face"] else "") + (f" (다시 {n})" if n else ""))
             img = comfy.run(workflow(ch_p, ch_n, ch_w, ch_h, seed + 1 + n * 7, "linkbeat_avatar/chibi", t["ref"], t["w"],
                                      ref_start=t["rs"], ref_end=t["re"], face=t["face"], face_w=FACE_W,
-                                     face_start=t["fs"], face_end=0.85), "꼬마 캐릭터")
+                                     face_start=t["fs"], face_end=0.9), "꼬마 캐릭터")
             ch = img                       # 끝까지 안 되면 마지막(가장 약하게 따라간) 그림
             ok, why = chibi_check(img, key, isnet)
             if ok:
@@ -942,20 +1167,43 @@ def main():
 
         base_file = out / "chibi_base.png"
         base_file.write_bytes(ch)
-        base_name = comfy.upload(base_file, "linkbeat_ref_base")
-        poses = []
-        for k, (pkey, (pose, dn)) in enumerate(POSES.items()):     # 같은 캐릭터로 동작만 바꿔 그림 (생김새는 IP-Adapter로 붙잡음)
-            say(f"동작 그리는 중... ({k + 1}/{len(POSES)})")
-            pp = ch_p.replace("full body, standing, front view, arms at sides", "full body, " + pose)
-            try:
-                poses.append(comfy.run(workflow(pp, ch_n, ch_w, ch_h, seed + 1, f"linkbeat_avatar/pose_{pkey}",
-                                                base_name if use_ipa else None, 0.8, base=base_name, denoise=dn), "동작"))
-            except Exception as e:
-                say(f"동작 하나를 못 그렸어요 ({str(e)[:60]}) — 기본 자세로 대신해요")
-                poses.append(ch)
-        one, sheet = pixel_sheet([ch] + poses, key=key, ai_model=isnet)
-        (out / "pixel.png").write_bytes(one)
-        (out / "sheet.png").write_bytes(sheet)
+        # ---- 스티커: 배경을 지우고, 얼굴만 다시 그려 표정 여러 개 (몸·머리·옷은 그대로라 표정을 바꿔 끼워도 같은 캐릭터)
+        import numpy as np
+        from PIL import Image
+        say("배경 지우는 중...")
+        base_im = Image.open(io.BytesIO(ch)).convert("RGB")
+        base_arr = np.asarray(base_im)
+        alpha = cut_alpha(base_im, key, isnet)
+        box = face_box(base_arr, alpha)
+        frames = [base_arr]
+        if box:
+            W, H = base_im.size
+            fm = face_mask((W, H), box)
+            mpng = out / "face_mask.png"            # 얼굴은 투명(=다시 그릴 곳), 나머지는 불투명
+            hole = face_mask((W, H), box, grow=1.15)
+            Image.fromarray(np.dstack([np.zeros((H, W, 3), "uint8"), ((1 - (hole > 0.05)) * 255).astype("uint8")]), "RGBA").save(mpng)
+            base_name = comfy.upload(base_file, "linkbeat_ref_base")
+            mask_name = comfy.upload(mpng, "linkbeat_ref_mask")
+            for k, (name, tags_, dn) in enumerate(EXPR[1:]):
+                say(f"표정 그리는 중... ({k + 1}/{len(EXPR) - 1})")
+                try:
+                    img = comfy.run(workflow(f"{tags_}, {ch_p}", ch_n, ch_w, ch_h, seed + 31 + k, f"linkbeat_avatar/expr_{name}",
+                                             base=base_name, denoise=dn, mask=mask_name), "표정")
+                    new = np.asarray(Image.open(io.BytesIO(img)).convert("RGB").resize((W, H), Image.LANCZOS))
+                    mix = (base_arr * (1 - fm[:, :, None]) + new * fm[:, :, None]).astype("uint8")   # 얼굴 밖은 기본 그림 그대로
+                    if expr_ok(base_arr, mix, fm, key):
+                        frames.append(mix)
+                        continue
+                    say(f"'{name}' 표정이 어색해서 기본 얼굴로 대신해요")
+                except Exception as e:
+                    say(f"표정 하나를 못 그렸어요 ({str(e)[:60]}) — 기본 얼굴로 대신해요")
+                frames.append(base_arr)
+        else:
+            frames += [base_arr] * (len(EXPR) - 1)
+        frames = despill_frames(frames, alpha, key)
+        sheet, thumb = sticker_sheet(frames, alpha)
+        (out / "sticker.webp").write_bytes(sheet)
+        (out / "pixel.png").write_bytes(thumb)          # 목록·작은 칸용 (예전 이름 그대로)
         say("완성!")
     finally:
         comfy.cleanup()
