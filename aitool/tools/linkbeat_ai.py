@@ -1173,6 +1173,34 @@ def cmd_undo(vid=None):
     say(f"AI 채보 {len(ids)}곡을 서버에서 지웠어요. 기본 채보와 기록은 그대로예요.")
 
 
+def cmd_spectro(link, diffs):
+    """채보 점검 그림: 노래 소리(스펙트로그램·소리별 시작 위치·박) 위에 AI·기존 채보를 겹쳐 그림 → spectro\\<곡ID>\\*.png"""
+    import spectro
+    srv = get_server(need_key=True)
+    vid = parse_vid(link) or link
+    song = srv.call("GET", f"songs/{vid}")
+    say(f"채보 점검 그림: {song.get('title', vid)}")
+    wdir = WORK / ("spec_" + vid)
+    try:
+        wav, _ = download_audio(vid, wdir)
+        stems = None
+        sf = OUT / vid / "stems.json"
+        if sf.exists():
+            stems = json.loads(sf.read_text(encoding="utf-8"))
+        else:
+            sep = separate(wav, WORK / ("sep_" + vid))
+            stems = sep.get("stems") if sep else None
+        say("  그림 그리는 중...")
+        out = ROOT / "spectro" / vid
+        if out.exists():
+            shutil.rmtree(out, ignore_errors=True)
+        files = spectro.render(wav, song, out, [d for d in diffs if d in DIFF_ORDER] or ["hard"], stems, song.get("title", ""))
+        say(f"\n만들었어요: {out} ({len(files)}장)")
+    finally:
+        shutil.rmtree(wdir, ignore_errors=True)
+        shutil.rmtree(WORK / ("sep_" + vid), ignore_errors=True)
+
+
 BACKUP = ROOT / "backup"     # 시험 전 AI 채보 보관 (되돌리기용)
 
 
@@ -1289,6 +1317,8 @@ def main():
     ap.add_argument("--restore-test", nargs="*", default=None, help="되돌리기 (곡 링크/ID, 없으면 전체 새로 만들기로 만든 곡)")
     ap.add_argument("--remake-all", action="store_true", help="곡 전부 새로 만들기 (--skip 곡 빼고)")
     ap.add_argument("--skip", nargs="*", default=[])
+    ap.add_argument("--spectro", default="", help="채보 점검 그림 (곡 링크/ID)")
+    ap.add_argument("--diffs", default="hard,extreme", help="점검 그림 난이도 (쉼표로)")
     ap.add_argument("link", nargs="?", default="")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--undo", action="store_true")
@@ -1306,7 +1336,7 @@ def main():
     # 유튜브 ID가 '-'로 시작하면(예: -tKVN2mAKRI) 옵션으로 오해하지 않게 '--gen=ID' 꼴로 바꿈
     argv = sys.argv[1:]
     for i, x in enumerate(argv[:-1]):
-        if x in ("--gen", "--upload", "--title", "--artist") and argv[i + 1].startswith("-"):
+        if x in ("--gen", "--upload", "--title", "--artist", "--spectro") and argv[i + 1].startswith("-"):
             argv[i:i + 2] = [f"{x}={argv[i + 1]}"]
             break
     a = ap.parse_args(argv)
@@ -1316,6 +1346,9 @@ def main():
             return
         if a.check:
             sys.exit(0 if cmd_check() else 1)
+        if a.spectro:
+            cmd_spectro(a.spectro, [x.strip() for x in a.diffs.split(",") if x.strip()])
+            return
         if a.consist:
             cmd_consist(a.consist)
             return
