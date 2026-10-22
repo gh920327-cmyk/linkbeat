@@ -13,6 +13,7 @@ import io
 import json
 import os
 import random
+import re
 import subprocess
 import sys
 import time
@@ -72,16 +73,18 @@ def clean_tags(text, limit=30):
     return ", ".join(out[:limit])
 
 
-def prompts(a, desc="", use_look=True):
+def prompts(a, desc="", use_look=True, extra=""):
     g, look = tags(a)
     parts = [p for p in (f"({desc}:1.15)" if desc else "", look if use_look else "") if p]   # 설정 반영을 끄면 예전 캐릭터 칸은 안 씀
-    who = ", ".join(parts) or "original character"
+    who = ", ".join(parts) or ("" if extra else "original character")
     # 일러스트: 가슴 위 초상 + 손은 화면 밖 (애니 모델이 손을 자주 망가뜨려서 손이 안 나오는 구도로)
     illust = (f"{g}, solo, {who}, portrait, upper body, hands out of frame, looking at viewer, music, "
               f"colorful, vibrant, gradient background, safe, {QUALITY}")
     illust_neg = NEG + (", bad hands, extra hands, extra arms, deformed hands, malformed hands, fused fingers, too many fingers, "
                         "holding, hand up, hands up, v, peace sign")
-    key = key_color(who)
+    key = key_color(f"{extra}, {who}")
+    if extra:           # 일러스트에서 읽은 생김새 (머리 길이·색, 눈 색, 옷, 장식) → 꼬마가 일러스트를 닮게
+        who = f"({extra}:1.2)" + (f", {who}" if who else "")
     # 꼬마: 머리만 크게 나오지 않게 (전신이 그림 가운데에 작게, 머리·몸 비율은 보통 꼬마 정도)
     chibi = (f"{g}, solo, chibi, super deformed, detailed eyes, beautiful detailed face, clear facial features, "
              f"cute, {who}, full body, standing, front view, arms at sides, "
@@ -533,6 +536,91 @@ def ensure_isnet(path):
     except Exception as e:
         say(f"배경 제거 AI를 받지 못했어요 ({str(e)[:80]}) — 다른 방법으로 지워요")
         return None
+
+
+# ------------------------------------------------------------------ 그림 → 생김새 태그 (WD 태거, onnx · 처음 한 번만 받음 약 380MB)
+TAGGER_URL = "https://huggingface.co/SmilingWolf/wd-vit-tagger-v3/resolve/main/"
+LOOK_KEEP = re.compile(r"(hair|bangs|sidelocks|ahoge|twintails|ponytail|braid|\bbun\b|drill|eyes$|heterochromia|dress|shirt|hoodie|jacket|coat|"
+                       r"sweater|cardigan|skirt|shorts|pants|kimono|yukata|uniform|serafuku|sailor|necktie|bowtie|ribbon|\bbow\b|sleeves|gloves|"
+                       r"thighhighs|pantyhose|socks|boots|shoes|\bhat\b|beret|\bcap\b|\bhood\b|scarf|cape|capelet|apron|vest|frills|choker|necklace|"
+                       r"earrings|jewelry|glasses|eyewear|headphones|headband|halo|wings|horns|ears$|tail$|mask|freckles|mole|hairclip|flower|crown|tiara)")
+LOOK_DROP = re.compile(r"(closed eyes|half-closed|looking|eyes visible|hair over|hair between|grab|holding|hand|finger|\barm|\bleg|thigh|breast|"
+                       r"cleavage|navel|midriff|shoulder|collarbone|skin|see-through|underwear|\bbra\b|panties|nude|naked|wet|blood|background|"
+                       r"sky|cloud|water|tree|field|petals|indoors|outdoors|text|signature|watermark|sweat|tears|blush|smile|mouth|teeth|tongue|"
+                       r"\bopen|from |upper body|portrait|close-up|cowboy|full body|sitting|standing|lying|wind|floating|messy|strap slip|off shoulder)")
+
+
+def ensure_tagger(path):
+    """생김새 읽는 AI(WD 태거) 준비: 없으면 한 번만 받음 — 실패하면 None (그러면 그냥 그림)"""
+    if not path:
+        return None
+    import importlib.util
+    if importlib.util.find_spec("onnxruntime") is None:
+        return None
+    d = Path(path)
+    need = ("model.onnx", "selected_tags.csv")       # 다 받은 뒤에만 이 이름으로 바꿔 둠 (받다 끊기면 .part로 남음)
+    if all((d / f).is_file() and (d / f).stat().st_size > 100 for f in need):
+        return d
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        for f in need:
+            if (d / f).is_file() and (d / f).stat().st_size > 100:
+                continue
+            tmp = d / (f + ".part")
+            say(f"생김새 읽는 AI 받는 중... (처음 한 번만, 약 380MB) {f}")
+            with urllib.request.urlopen(TAGGER_URL + f, timeout=60) as r, open(tmp, "wb") as fo:
+                n = int(r.headers.get("Content-Length") or 0)
+                got, last = 0, 0
+                while True:
+                    b = r.read(1 << 20)
+                    if not b:
+                        break
+                    fo.write(b)
+                    got += len(b)
+                    if got - last > 40 << 20:
+                        last = got
+                        say(f"생김새 읽는 AI 받는 중... {got >> 20}MB")
+            if (n and tmp.stat().st_size != n) or tmp.stat().st_size < (50_000_000 if f.endswith(".onnx") else 10_000):
+                raise RuntimeError("파일을 다 받지 못했어요.")
+            tmp.replace(d / f)
+        return d
+    except Exception as e:
+        say(f"생김새 읽는 AI를 받지 못했어요 ({str(e)[:80]}) — 그냥 그려요")
+        return None
+
+
+def look_tags(image_bytes, tagger_dir, thresh=0.35, limit=14):
+    """그림에서 생김새 태그만 뽑기 (머리 길이·색, 눈 색, 옷, 장식) — 표정·자세·배경·노출은 뺌"""
+    import csv
+    import numpy as np
+    import onnxruntime as ort
+    from PIL import Image
+    d = Path(tagger_dir)
+    sess = _ORT.get(str(d))
+    if sess is None:
+        sess = _ORT[str(d)] = ort.InferenceSession(str(d / "model.onnx"), providers=["CPUExecutionProvider"])
+    size = sess.get_inputs()[0].shape[1]
+    size = size if isinstance(size, int) else 448
+    im = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+    bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
+    bg.alpha_composite(im)
+    im = bg.convert("RGB")
+    m = max(im.size)
+    sq = Image.new("RGB", (m, m), (255, 255, 255))
+    sq.paste(im, ((m - im.width) // 2, (m - im.height) // 2))
+    x = np.asarray(sq.resize((size, size), Image.BICUBIC), dtype=np.float32)[:, :, ::-1]      # BGR, 0~255
+    pred = sess.run([sess.get_outputs()[0].name], {sess.get_inputs()[0].name: np.ascontiguousarray(x[None])})[0][0]
+    with open(d / "selected_tags.csv", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    got = []
+    for row, pv in zip(rows, pred):
+        if str(row.get("category")) != "0" or pv < thresh:
+            continue
+        name = row["name"].replace("_", " ")
+        if LOOK_KEEP.search(name) and not LOOK_DROP.search(name):
+            got.append((float(pv), name))
+    got.sort(reverse=True)
+    return clean_tags(", ".join(n for _, n in got[:limit]))
 
 
 def _shift_or(m, r):
@@ -1129,6 +1217,18 @@ def main():
             il_file.write_bytes(il)
         elif spec.get("illust") and Path(spec["illust"]).is_file():
             il_file = Path(spec["illust"])          # 도트만 다시: 지금 일러스트를 참고 그림으로
+        # 일러스트에서 생김새(머리 길이·색, 눈 색, 옷, 장식)를 글로 읽어서 꼬마 그림 설명에 넣음 → 꼬마가 일러스트를 닮게
+        if il_file:
+            tg = ensure_tagger(spec.get("tagger"))
+            if tg:
+                try:
+                    say("일러스트 생김새 읽는 중...")
+                    il_tags = look_tags(Path(il_file).read_bytes(), tg)
+                    if il_tags:
+                        say(f"일러스트 생김새: {il_tags[:120]}")
+                        _, (ch_p, ch_n, ch_w, ch_h), key = prompts(av, desc, spec.get("useLook", True) is not False, extra=il_tags)
+                except Exception as e:
+                    say(f"생김새를 읽지 못했어요 ({str(e)[:80]}) — 그냥 그려요")
         # 꼬마 도트는 일러스트를 보고 그림 (머리·옷·색이 일러스트를 따라감). 일러스트가 없으면 참고 사진을 약하게
         ch_end = 1.0
         if il_file and use_ipa:     # 일러스트의 캐릭터 부분만 잘라서, 그림 앞부분에만 약하게 (바탕·분위기까지 따라가지 않게)
