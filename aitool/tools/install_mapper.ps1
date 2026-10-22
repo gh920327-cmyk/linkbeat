@@ -79,7 +79,7 @@ if ($LASTEXITCODE -ne 0) { Write-Host '  (torchaudio 는 건너뛰어요 — 없
 # 4. 나머지 부품 (그림 화면·학습용은 빼고 채보 만들기에 필요한 것만)
 Step 4 '나머지 부품 설치 중'
 & $Uv pip install --python $Py "torch==$tv" 'accelerate==1.12.0' 'pydub==0.25.1' 'nnAudio==0.3.4' 'PyYAML==6.0.3' 'transformers==4.57.3' `
-  'hydra-core==1.3.2' "slider @ https://codeload.github.com/OliBomby/slider/zip/$SliderCommit" 'matplotlib==3.10.8' 'pandas==2.3.3' `
+  'hydra-core==1.3.2' "slider @ https://github.com/OliBomby/slider/archive/$SliderCommit.zip" 'matplotlib==3.10.8' 'pandas==2.3.3' `
   'pyarrow==22.0.0' 'einops==0.8.1' 'rich==14.2.0' 'peft==0.18.1' 'rosu-pp-py==3.1.0' 'datasets==4.8.3' 'huggingface-hub==0.36.2' `
   'hf-xet==1.4.2' 'wandb==0.24.2' 'scipy' 'tqdm' 'packaging' 'safetensors'
 if ($LASTEXITCODE -ne 0) { Fail '부품 설치에 실패했어요. 다시 실행해 주세요.' }
