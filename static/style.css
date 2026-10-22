@@ -461,6 +461,8 @@ dialog::backdrop { background: rgba(0, 0, 0, .65); backdrop-filter: blur(3px); }
 .ai-badge { display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 3px; font-size: 10px; font-weight: 800; line-height: 16px; vertical-align: 1px;
   background: linear-gradient(135deg, #3ee6c1, #2fa8ff); color: #031014; letter-spacing: .5px; }
 .ai-badge.old { background: #3a4458; color: #b9c3d6; }
+.ai-badge.mug { background: #4a4f5c; color: #d3d8e2; letter-spacing: 0; }   /* 예전 AI(MuG)로 만든 곡 */
+.ai-chip.on.mug { background: linear-gradient(135deg, #e6e9ef, #9aa3b5); color: #10131a; box-shadow: none; }
 .ai-chip.on.old { filter: saturate(.35) brightness(.9); }
 .ai-tag { background: linear-gradient(135deg, #3ee6c1, #2fa8ff); color: #031014; }
 #confetti { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 30; }
