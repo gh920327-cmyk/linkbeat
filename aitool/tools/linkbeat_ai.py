@@ -1010,7 +1010,17 @@ def cmd_gen(vid, audio, targets_file, out_file, title="", artist="", duration=90
     try:
         say("AI: 오디오 준비 중...")
         wav = to_wav(Path(audio), wdir)
-        body, _ = make_charts(vid, wav, targets, title, artist, duration, mode="consist")   # 8번(전체 새로 만들기)과 같은 방식
+        body = None
+        try:                                   # 새 AI(Mapperatorinator)가 깔려 있으면 그걸로 (문제가 생기면 MuG로)
+            import mapper_test
+            if mapper_test.ready():
+                body = mapper_test.make_body(vid, wav, targets, duration, title)
+        except Exception as e:
+            traceback.print_exc()
+            say(f"AI: 새 AI에서 문제가 생겨서 MuG로 만들어요: {e}")
+            body = None
+        if body is None:
+            body, _ = make_charts(vid, wav, targets, title, artist, duration, mode="consist")   # 8번(전체 새로 만들기)과 같은 방식
         Path(out_file).write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
         say("AI: 완료")
     finally:
