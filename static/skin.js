@@ -124,8 +124,8 @@ class SkinPreview {
       ctx.fillText('FEVER x2', 0, 0);
       ctx.restore();
     }
-    drawCombo(L, this.combo, this.comboPop, now);
-    drawMilestone(L, this.fx, now);
+    drawCombo(L, this.combo, this.comboPop, now, judgeY);
+    drawMilestone(L, this.fx, now, judgeY);
     drawJudgePopup(L, this.popup, now, judgeY);
     ctx.restore();
     if (this.combo > 400) this.reset();

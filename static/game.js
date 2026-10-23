@@ -633,13 +633,13 @@ function fxAccent(fx, lane, kind, now = performance.now()) {
 }
 
 /* 50콤보마다 축하 연출 */
-function drawMilestone(L, fx, now) {
+function drawMilestone(L, fx, now, judgeY = judgeLineY(L.h)) {
   const m = fx.mile;
   if (!m || !settings.skin.combo) return;
   const e = (now - m.at) / 900;
   if (e >= 1) { fx.mile = null; return; }
   const { ctx, h, x0, fieldW } = L;
-  const cx = x0 + fieldW / 2, cy = hudY(L);
+  const cx = x0 + fieldW / 2, cy = comboY(L, judgeY);
   // 기어를 가로지르는 빛 띠
   const sweepX = x0 - fieldW * 0.3 + fieldW * 1.6 * Math.min(1, e * 1.6);
   const g = ctx.createLinearGradient(sweepX - 80, 0, sweepX + 80, 0);
@@ -681,11 +681,16 @@ function comboColor(combo) {
 
 /* 콤보·판정 글자 자리: 기어 가운데보다 조금 위 (노트 뒤에 그려서 노트를 가리지 않음) */
 function hudY(L) { return L.h * 0.33; }
+/* 콤보 숫자 높이: '판정선 가까이'면 판정 글자 바로 위 (콤보·판정을 한 묶음으로), '위쪽'이면 예전 자리 */
+function comboY(L, judgeY) {
+  if (settings.skin.judgePos === 'top') return hudY(L);
+  return judgePopY(L, judgeY) - judgeFs(L) * 0.55 - 6 - comboSize(L) * 0.5;
+}
 function comboSize(L) { return Math.round(Math.min(60, L.laneW * 0.62 + 22)); }
-function drawCombo(L, combo, popAt, now) {
+function drawCombo(L, combo, popAt, now, judgeY = judgeLineY(L.h)) {
   if (!settings.skin.combo || combo < 2) return;
   const { ctx, x0, fieldW } = L;
-  const cx = x0 + fieldW / 2, cy = hudY(L), fs = comboSize(L);
+  const cx = x0 + fieldW / 2, cy = comboY(L, judgeY), fs = comboSize(L);
   const p = clamp((now - popAt) / 140, 0, 1);
   const sc = 1 + 0.14 * punchK() * (1 - p) * (1 - p);
   const cc = comboColor(combo);
@@ -719,7 +724,7 @@ function judgeFs(L) { return Math.round((L.laneW < 60 ? 24 : 30) * (settings.ski
 /* 판정 글자 높이: 기본은 판정선 위 (노트를 치는 곳 가까이 — 눈을 덜 움직이게), '위쪽'이면 예전처럼 콤보 바로 아래 */
 function judgePopY(L, judgeY) {
   if (settings.skin.judgePos === 'top') return hudY(L) + (settings.skin.combo ? comboSize(L) * 0.5 + judgeFs(L) * 0.75 : 0);
-  return judgeY - Math.max(judgeY * 0.42, 140);
+  return judgeY - Math.max(judgeY * 0.45, 150);
 }
 function drawJudgePopup(L, popup, now, judgeY = judgeLineY(L.h)) {
   const mode = settings.skin.judgeText;
@@ -1466,8 +1471,8 @@ class Game {
       ctx.restore();
       plainFont(ctx);
     }
-    drawCombo(L, this.fcAt ? 0 : this.combo, this.comboPop, now);   // 풀콤보 글자가 뜨면 콤보 숫자는 숨김 (글자 아래에 콤보 수 표시)
-    drawMilestone(L, this.fx, now);
+    drawCombo(L, this.fcAt ? 0 : this.combo, this.comboPop, now, judgeY);   // 풀콤보 글자가 뜨면 콤보 숫자는 숨김 (글자 아래에 콤보 수 표시)
+    drawMilestone(L, this.fx, now, judgeY);
     drawJudgePopup(L, this.popup, now, judgeY);
 
     // 노트
@@ -1544,7 +1549,7 @@ class Game {
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.fillText(this.acc().toFixed(2) + '%', sx, outside ? sy + 4 + sfs : 30);
     plainFont(ctx);
-    if (this.ghost && settings.ghost !== false && this.phase !== 'loading' && this.phase !== 'ready') this.drawGhost(ctx, sx, outside ? sy + 60 : 50, outside, roomR || !outside);
+    if (this.ghost && settings.ghost !== false && this.phase !== 'loading' && this.phase !== 'ready') this.drawGhost(ctx, sx, outside ? sy + 60 : 50, outside, roomR);   // 기어 안이면 오른쪽 맞춤 (잘리지 않게)
 
     const cx = x0 + fieldW / 2;
     if (this.stage) this.stage.draw({ beat: Math.max(0, Math.floor((gt - off) / bl)), fever: inFever && settings.skin.fever, label: settings.nick || '', cxr: this.ilOn ? 0.3 : 0.5 });
