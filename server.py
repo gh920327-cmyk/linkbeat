@@ -922,7 +922,9 @@ def av_status(headers):
         key, pr, _ = profile_find(headers, profiles)
     mine = sorted((j for j in AVJOBS.values() if j["pid"] == key), key=lambda j: -j["created"])
     ai = pr.get("aiAvatar") if isinstance(pr.get("aiAvatar"), dict) else {}
+    pend = pr.get("aiAvatarNew") if isinstance(pr.get("aiAvatarNew"), dict) else {}
     return {"job": av_job_public(mine[0]) if mine else None, "token": ai.get("token"),
+            "pending": pend.get("token") if AV_TOKEN_RE.match(str(pend.get("token") or "")) else None,
             "worker": {"online": worker_online(), "avatar": WORKER.get("avatar", False)}}
 
 
@@ -978,32 +980,72 @@ def av_finish(j, images):
         (AVATARS / f"{tok}_s.png").write_bytes(sh)     # 동작 그림 (기본·치기 왼·오른·점프·슬픔) — 예전 도트 방식
     if sk:
         (AVATARS / f"{tok}_x.webp").write_bytes(sk)    # SD 스티커 표정 줄 (기본·웃음·신남·놀람·슬픔·깜빡임)
-    old = None
+    drop = None
     with FILE_LOCK:
         profiles = load_profiles()
         pr = profiles.get(j["pid"])
         if pr is not None:
             prev = pr.get("aiAvatar") if isinstance(pr.get("aiAvatar"), dict) else {}
-            old = prev.get("token")
-            pr["aiAvatar"] = {"token": tok, "at": time.time()}
+            ot = str(prev.get("token") or "")
+            if AV_TOKEN_RE.match(ot) and any((AVATARS / f"{ot}_{suf}").is_file() for suf in ("x.webp", "p.png", "i.webp")):
+                # 예전 캐릭터가 있으면 바로 바꾸지 않음 → 본인이 예전 것·새 것을 나란히 보고 고름 (av_choose)
+                pend = pr.get("aiAvatarNew") if isinstance(pr.get("aiAvatarNew"), dict) else {}
+                drop = pend.get("token")          # 아직 안 고른 예전 '새 그림'은 이번 것으로 바뀜
+                pr["aiAvatarNew"] = {"token": tok, "at": time.time()}
+            else:
+                pr["aiAvatar"] = {"token": tok, "at": time.time()}
             save_profiles(profiles)
-    # 예전 그림은 지움 (방 목록에서 잠깐 예전 걸 쓰는 친구가 있어도 하루 정도는 남겨 둠)
-    if old and AV_TOKEN_RE.match(old):
-        try:
-            for f in AVATARS.glob("*_old_*"):
-                if time.time() - f.stat().st_mtime > 86400:
-                    f.unlink()
-            for suf in ("i.webp", "p.png", "s.png", "x.webp"):
-                src = AVATARS / f"{old}_{suf}"
-                if src.exists():
-                    src.rename(AVATARS / f"{old}_old_{suf}")
-        except OSError:
-            pass
+    av_retire(drop)
     av_drop_ref(j)
-    j.update(stage="done", msg="완성!", token=tok, finished=time.time())
+    with FILE_LOCK:
+        picking = bool((load_profiles().get(j["pid"]) or {}).get("aiAvatarNew"))
+    j.update(stage="done", msg="완성! 예전 캐릭터와 비교해서 골라 주세요" if picking else "완성!", token=tok, finished=time.time())
     save_avqueue()
     notify_all({"type": "avjobs"})
     log("AI 캐릭터 완성:", j["name"])
+
+
+def av_retire(tok):
+    """안 쓰게 된 캐릭터 그림 정리 (방 목록에서 잠깐 그 그림을 쓰는 친구가 있어도 하루 정도는 남겨 둠)"""
+    if not tok or not AV_TOKEN_RE.match(str(tok)):
+        return
+    try:
+        for f in AVATARS.glob("*_old_*"):
+            if time.time() - f.stat().st_mtime > 86400:
+                f.unlink()
+        for suf in ("i.webp", "p.png", "s.png", "x.webp"):
+            src = AVATARS / f"{tok}_{suf}"
+            if src.exists():
+                src.rename(AVATARS / f"{tok}_old_{suf}")
+    except OSError:
+        pass
+
+
+def av_choose(headers, data):
+    """새로 그린 캐릭터를 쓸지(new), 예전 캐릭터를 그대로 둘지(old) → 남은 그림 토큰"""
+    pick = data.get("pick")
+    if pick not in ("new", "old"):
+        raise HttpError(400, "new 나 old 중에 골라 주세요.")
+    with FILE_LOCK:
+        profiles = load_profiles()
+        key, pr, _ = profile_find(headers, profiles)
+        pend = pr.get("aiAvatarNew") if isinstance(pr.get("aiAvatarNew"), dict) else {}
+        new = pend.get("token")
+        cur = (pr.get("aiAvatar") or {}).get("token") if isinstance(pr.get("aiAvatar"), dict) else None
+        if not new or not AV_TOKEN_RE.match(str(new)):
+            pr.pop("aiAvatarNew", None)
+            save_profiles(profiles)
+            return {"ok": True, "token": cur}
+        pr.pop("aiAvatarNew", None)
+        if pick == "new":
+            pr["aiAvatar"] = {"token": new, "at": pend.get("at") or time.time()}
+            drop, keep = cur, new
+        else:
+            drop, keep = new, cur
+        save_profiles(profiles)
+    av_retire(drop)
+    log("AI 캐릭터 고름:", pr.get("id", key), "새 것" if pick == "new" else "예전 것")
+    return {"ok": True, "token": keep}
 
 
 def serve_avatar(path):
@@ -2253,6 +2295,10 @@ async def api(method, path, headers, body):
         busy = any(r.players for r in ROOMS.values())
         return {"ok": True, "busy": busy, "clients": len(CLIENTS), "cloud": CLOUD}
 
+    if parts == ["avatar", "ai", "choose"] and method == "POST":
+        if not CLOUD:
+            raise HttpError(400, "클라우드 서버에서만 쓰는 기능이에요.")
+        return av_choose(headers, json_body(body) if body else {})
     if parts == ["avatar", "ai"]:
         if not CLOUD:
             raise HttpError(400, "클라우드 서버에서만 쓰는 기능이에요.")

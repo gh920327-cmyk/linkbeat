@@ -1097,6 +1097,230 @@ def face_mask(size, box, grow=1.0):
     return np.asarray(m).astype(np.float32) / 255
 
 
+# ---- 애니 얼굴 찾기: lbpcascade_animeface (MIT, nagadomi) 를 numpy로 돌림 (OpenCV 5에는 이 기능이 없어서 직접)
+LBP_FILE = Path(__file__).resolve().parent / "lbpcascade_animeface.xml"
+_LBP = {}
+
+
+def lbp_load(path=LBP_FILE):
+    import re
+    import numpy as np
+    if "c" in _LBP:
+        return _LBP["c"]
+    t = Path(path).read_text(encoding="utf-8")
+    cw = int(re.search(r"<width>(\d+)</width>", t).group(1))
+    ch = int(re.search(r"<height>(\d+)</height>", t).group(1))
+    feats = np.array([[int(v) for v in m.split()] for m in re.findall(r"<rect>\s*([^<]+)</rect>", t)], np.int64)
+    stages = []
+    body = t.split("<stages>")[1].split("</stages>")[0]
+    for sm in re.finditer(r"<stageThreshold>([^<]+)</stageThreshold>\s*<weakClassifiers>(.*?)</weakClassifiers>", body, re.S):
+        nodes = [[int(v) for v in m.split()] for m in re.findall(r"<internalNodes>\s*([^<]+)</internalNodes>", sm.group(2))]
+        leaves = [[float(v) for v in m.split()] for m in re.findall(r"<leafValues>\s*([^<]+)</leafValues>", sm.group(2))]
+        stages.append((float(sm.group(1)), [n[2] for n in nodes],
+                       (np.array([n[3:11] for n in nodes], np.int64) & 0xFFFFFFFF), np.array(leaves, np.float32)))
+    _LBP["c"] = (cw, ch, feats, stages)
+    return _LBP["c"]
+
+
+def lbp_detect(gray, scale=1.08, min_size=40):
+    """얼굴일 것 같은 칸 전부 [(x, y, w, h)] (OpenCV detectMultiScale 과 같은 계산, 묶기 전)"""
+    import numpy as np
+    from PIL import Image
+    cw, ch, feats, stages = lbp_load()
+    hist = np.bincount(gray.ravel(), minlength=256).cumsum()     # equalizeHist
+    lo = hist[hist > 0][0]
+    gray = np.clip(np.round((hist - lo) * 255.0 / max(1, hist[-1] - lo)), 0, 255).astype(np.uint8)[gray]
+    H0, W0 = gray.shape
+    out, f = [], min_size / cw
+    while cw * f <= min(W0, H0):
+        w, h = int(round(W0 / f)), int(round(H0 / f))
+        g = np.asarray(Image.fromarray(gray).resize((w, h), Image.BILINEAR)).astype(np.int64)
+        I = np.zeros((h + 1, w + 1), np.int64)
+        I[1:, 1:] = g.cumsum(0).cumsum(1)
+        yy, xx = np.meshgrid(np.arange(h - ch + 1), np.arange(w - cw + 1), indexing="ij")
+        yy, xx = yy.ravel(), xx.ravel()
+        for thr, fis, sub, leaves in stages:
+            if not len(yy):
+                break
+            sc = np.zeros(len(yy), np.float32)
+            for k, fi in enumerate(fis):
+                fx, fy, fw, fh = feats[fi]
+                b = [[None] * 3 for _ in range(3)]
+                for i in range(3):
+                    for j in range(3):
+                        y0, x0 = yy + fy + i * fh, xx + fx + j * fw
+                        b[i][j] = I[y0 + fh, x0 + fw] - I[y0, x0 + fw] - I[y0 + fh, x0] + I[y0, x0]
+                c = b[1][1]
+                code = ((b[0][0] >= c) * 128 | (b[0][1] >= c) * 64 | (b[0][2] >= c) * 32 | (b[1][2] >= c) * 16 |
+                        (b[2][2] >= c) * 8 | (b[2][1] >= c) * 4 | (b[2][0] >= c) * 2 | (b[1][0] >= c) * 1).astype(np.int64)
+                bit = (sub[k][code >> 5] >> (code & 31)) & 1
+                sc += np.where(bit == 1, leaves[k][0], leaves[k][1])
+            keep = sc >= thr
+            yy, xx = yy[keep], xx[keep]
+        out += [(x * f, y * f, cw * f, ch * f) for y, x in zip(yy, xx)]
+        f *= scale
+    return out
+
+
+def anime_face(arr, a):
+    """캐릭터 위쪽에서 애니 얼굴 칸 (x, y, w, h) — 여러 크기로 잡힌 칸 중 가장 많이 겹친 무리의 작은 쪽 평균. 못 찾으면 None"""
+    import numpy as np
+    from PIL import Image
+    H, W = a.shape
+    k = 512 / max(W, H)
+    try:
+        if not LBP_FILE.exists():
+            return None
+        R = np.array(lbp_detect(np.asarray(Image.fromarray(arr).convert("L").resize((int(W * k), int(H * k)), Image.LANCZOS)))) / k
+    except Exception as e:
+        say(f"얼굴 찾기를 못 써서 다른 방법으로 찾아요 ({str(e)[:60]})")
+        return None
+    if not len(R):
+        return None
+    ys = np.where(a > 0.5)[0]
+    c = R[:, :2] + R[:, 2:] / 2
+    ok = (c[:, 1] < ys.min() + (ys.max() - ys.min()) * 0.7) & \
+         (a[np.clip(c[:, 1].astype(int), 0, H - 1), np.clip(c[:, 0].astype(int), 0, W - 1)] > 0.5)
+    R, c = R[ok], c[ok]
+    best = None
+    for j in range(len(R)):
+        mem = np.hypot(*(c - c[j]).T) < 0.35 * np.minimum(R[:, 2], R[j, 2])
+        if best is None or mem.sum() > best.sum():
+            best = mem
+    if best is None or best.sum() < 2:
+        return None
+    M = R[best]
+    return tuple(M[M[:, 2] <= np.percentile(M[:, 2], 30)].mean(axis=0))
+
+
+def face_find(arr, a):
+    """다시 그릴 얼굴: (가운데 x, y, 가로 반지름, 세로 반지름), 얼굴 자리 True/False
+    애니 얼굴 칸에서 눈·입이 들어가는 타원 (턱 아래 목·옷은 뺌). 못 찾으면 예전 방법(피부색 덩어리)"""
+    import numpy as np
+    from collections import deque
+    from PIL import Image, ImageDraw
+    H, W = a.shape
+    fb = anime_face(arr, a)
+    if fb is None:
+        box = face_box(arr, a)
+        return (box, face_skin(arr, a, box)) if box else (None, None)
+    bx, by, bw, bh = fb
+    cx, cy, rx, ry = bx + bw * 0.5, by + bh * 0.52, bw * 0.4, bh * 0.37
+    e = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(e).ellipse((cx - rx, cy - ry, cx + rx, cy + ry), fill=255)
+    m = (np.asarray(e) > 127) & (a > 0.5)
+    # 턱 찾기: 칸 아래 가운데의 피부색과 이어진 덩어리의 맨 아래
+    px0, px1, py0, py1 = int(bx + bw * 0.3), int(bx + bw * 0.7), int(by + bh * 0.5), int(by + bh * 0.8)
+    patch = arr[py0:py1, px0:px1].reshape(-1, 3).astype(np.float32)
+    if len(patch):
+        lum = patch @ np.array([0.299, 0.587, 0.114], np.float32)
+        tone = np.median(patch[lum >= np.percentile(lum, 40)], axis=0)
+        ex0, ex1 = int(max(0, bx - bw * 0.15)), int(min(W, bx + bw * 1.15))
+        ey0, ey1 = int(max(0, by)), int(min(H, by + bh * 1.2))
+        S = 4
+        sk = ((np.sqrt(((arr[ey0:ey1, ex0:ex1].astype(np.float32) - tone) ** 2).sum(-1)) < 40) & (a[ey0:ey1, ex0:ex1] > 0.5))[::S, ::S]
+        seed = ((py0 + py1) // 2 - ey0) // S, ((px0 + px1) // 2 - ex0) // S
+        cand = np.argwhere(sk)
+        if len(cand):
+            st = tuple(cand[np.argmin(np.hypot(cand[:, 0] - seed[0], cand[:, 1] - seed[1]))])
+            seen = np.zeros_like(sk)
+            seen[st] = True
+            q = deque([st])
+            while q:
+                y, x = q.popleft()
+                for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                    if 0 <= ny < sk.shape[0] and 0 <= nx < sk.shape[1] and sk[ny, nx] and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        q.append((ny, nx))
+            chin = ey0 + (np.where(seen.any(axis=1))[0].max() + 1) * S + bh * 0.04
+            if chin > cy + ry * 0.3:
+                m[int(chin):] = False
+    if m.sum() < 400:
+        box = face_box(arr, a)
+        return (box, face_skin(arr, a, box)) if box else (None, None)
+    return (cx, cy, rx, ry), m
+
+
+FACE_RES = 1024          # 표정: 얼굴 둘레만 잘라 이 크기로 키워서 다시 그림 (작은 얼굴을 통째 그림에서 그리면 뭉개지고 뿌예짐)
+
+
+def face_prompt(pos, neg):
+    """표정용 글: 얼굴만 크게 잘라 그리니 '전신·서 있음'은 빼고 '얼굴 클로즈업'으로, 뿌연 막은 싫다고"""
+    import re
+    for t in ("full body, standing, front view, arms at sides, ", "game sprite, ", "simple background, ",
+              "solid color background, ", "flat background, "):
+        pos = pos.replace(t, "")
+    pos = re.sub(r"\(\w+ background:[\d.]+\), ", "", pos)      # 바탕색(크로마키)을 세게 말하면 다시 그린 얼굴에 그 색이 번짐
+    for t in ("close-up, portrait, upper body, bust, head only, oversized head, cropped, cropped legs, cropped feet, ",):
+        neg = neg.replace(t, "")
+    return (f"close-up, face, looking at viewer, {pos}",
+            f"{neg}, blurry, washed out, faded, low contrast, white overlay, haze, fog, veil, glare")
+
+
+def face_crop(box, W, H):
+    """얼굴을 가운데 둔 정사각형 자르기 칸 (x0, y0, x1, y1)"""
+    cx, cy, rx, ry = (float(v) for v in box)
+    side = int(min(max(4.2 * max(rx, ry), 160), W, H))       # 얼굴 둘레까지 넉넉히 (머리·옷을 보고 이어서 그리게)
+    x0 = max(0, min(W - side, int(round(cx - side / 2))))
+    y0 = max(0, min(H - side, int(round(cy - side / 2))))
+    return x0, y0, x0 + side, y0 + side
+
+
+def face_skin(arr, a, box):
+    """얼굴 피부 자리(눈·입·눈썹 구멍은 메움) True/False — 앞머리·옆머리·옷은 빼서, 다시 그린 얼굴이 머리와 겹쳐 뿌옇게 되지 않게
+    피부를 잘 못 찾으면 얼굴 타원을 조금 줄여서 씀"""
+    import numpy as np
+    from PIL import Image
+    H, W = a.shape
+    ell = face_mask((W, H), box, grow=1.05) > 0.5
+    hsv = np.asarray(Image.fromarray(arr).convert("HSV")).astype(np.float32)
+    hue, sat, val = hsv[:, :, 0] * 360 / 255, hsv[:, :, 1] / 255, hsv[:, :, 2] / 255
+    warm = ((hue >= 0) & (hue <= 42)) | (hue >= 342)
+    skin = ell & (a > 0.5) & warm & (((sat >= 0.04) & (sat <= 0.62) & (val >= 0.25)) | ((sat < 0.04) & (val >= 0.85)))
+    # 구멍 메우기: 타원 안의 '피부 아닌 곳' 중 타원 밖과 이어지지 않은 곳(눈·입) = 얼굴
+    free = ~skin
+    reach = free & ~ell
+    for _ in range(max(H, W)):
+        g = reach.copy()
+        g[1:, :] |= reach[:-1, :]
+        g[:-1, :] |= reach[1:, :]
+        g[:, 1:] |= reach[:, :-1]
+        g[:, :-1] |= reach[:, 1:]
+        g &= free
+        if (g == reach).all():
+            break
+        reach = g
+    filled = skin | (free & ~reach & ell)
+    if filled.sum() < 0.35 * max(1, ell.sum()):
+        return face_mask((W, H), box, grow=0.85) > 0.5
+    return filled
+
+
+def _feather(m, r):
+    import numpy as np
+    from PIL import Image, ImageFilter
+    return np.asarray(Image.fromarray((m * 255).astype("uint8")).filter(ImageFilter.GaussianBlur(max(0.6, r)))).astype(np.float32) / 255
+
+
+def _grow(m, r):
+    import numpy as np
+    from PIL import Image, ImageFilter
+    k = max(3, int(r) * 2 + 1)
+    return np.asarray(Image.fromarray((m * 255).astype("uint8")).filter(ImageFilter.MaxFilter(k))) > 127
+
+
+def face_paste(base_crop, new_crop, pm):
+    """다시 그린 얼굴을 원래 그림에 붙임: 얼굴 가장자리(피부)의 색이 원래와 같게 맞춘 뒤, 부드럽게 섞음"""
+    import numpy as np
+    b, n = base_crop.astype(np.float32), new_crop.astype(np.float32)
+    ring = (pm > 0.15) & (pm < 0.85)
+    if ring.sum() > 30:
+        delta = b[ring].mean(axis=0) - n[ring].mean(axis=0)       # 피부 톤이 밝아지거나 어두워졌으면 되돌림
+        if np.abs(delta).max() < 45:
+            n = n + delta[None, None, :]
+    return np.clip(b * (1 - pm[:, :, None]) + n * pm[:, :, None], 0, 255).astype("uint8")
+
+
 def expr_ok(base, new, fm, key):
     """다시 그린 표정이 쓸 만한지: 얼굴 둘레 색이 크게 바뀌지 않았고, 바탕색·검은 얼룩이 없음"""
     import numpy as np
@@ -1116,7 +1340,58 @@ def expr_ok(base, new, fm, key):
         if keyfrac(new) > keyfrac(base) + 0.03:
             return False
     lb, ln = base[core].mean(), new[core].mean()
-    return ln > lb - 70
+    if ln < lb - 70:
+        return False
+    lum = lambda x: (x.astype(np.float32) @ np.array([0.299, 0.587, 0.114], dtype=np.float32))
+    (b1, b50), (n1, n50) = np.percentile(lum(base)[core], [1, 50]), np.percentile(lum(new)[core], [1, 50])
+    veil = n1 > b1 + 40 and (n50 - n1) < 0.75 * (b50 - b1)
+    return not veil       # 하얀 막: 눈·입 선까지 옅어져서 얼굴 대비가 확 줄어듦 (눈 감은 표정은 선이 남아서 괜찮음)
+
+
+def make_faces(comfy, base_im, base_arr, alpha, key, ch_p, ch_n, seed, out):
+    """기본 그림 → 표정 그림들 (EXPR 순서, 첫 장은 기본 그림). 얼굴 둘레만 잘라 크게 다시 그리고 얼굴 자리에만 붙임"""
+    import numpy as np
+    from PIL import Image
+    say("얼굴 찾는 중...")
+    box, face = face_find(base_arr, alpha)
+    frames = [base_arr]
+    if box:
+        W, H = base_im.size
+        x0, y0, x1, y1 = face_crop(box, W, H)
+        side = x1 - x0
+        skin = face[y0:y1, x0:x1]
+        pm = _feather(skin, side * 0.012)                       # 붙일 곳: 얼굴 자리만 (가장자리 살짝 부드럽게)
+        hole = _grow(skin, side * 0.03)                         # 다시 그릴 곳: 붙일 곳보다 조금 넓게 (이음새가 자연스럽게)
+        big = lambda x: x.resize((FACE_RES, FACE_RES), Image.LANCZOS)
+        cfile = out / "face_crop.png"
+        big(base_im.crop((x0, y0, x1, y1))).save(cfile)
+        mpng = out / "face_mask.png"            # 얼굴은 투명(=다시 그릴 곳), 나머지는 불투명
+        hm = np.asarray(big(Image.fromarray((hole * 255).astype("uint8")))) > 127
+        Image.fromarray(np.dstack([np.zeros((FACE_RES, FACE_RES, 3), "uint8"), ((~hm) * 255).astype("uint8")]), "RGBA").save(mpng)
+        base_name = comfy.upload(cfile, "linkbeat_ref_base")
+        mask_name = comfy.upload(mpng, "linkbeat_ref_mask")
+        fm = np.zeros((H, W), np.float32)
+        fm[y0:y1, x0:x1] = pm
+        fp, fn = face_prompt(ch_p, ch_n)
+        base_crop = base_arr[y0:y1, x0:x1]
+        for k, (name, tags_, dn) in enumerate(EXPR[1:]):
+            say(f"표정 그리는 중... ({k + 1}/{len(EXPR) - 1})")
+            try:
+                img = comfy.run(workflow(f"{tags_}, {fp}", fn, FACE_RES, FACE_RES, seed + 31 + k,
+                                         f"linkbeat_avatar/expr_{name}", base=base_name, denoise=dn, mask=mask_name), "표정")
+                new_crop = np.asarray(Image.open(io.BytesIO(img)).convert("RGB").resize((side, side), Image.LANCZOS))
+                mix = base_arr.copy()
+                mix[y0:y1, x0:x1] = face_paste(base_crop, new_crop, pm)     # 얼굴 자리 밖은 기본 그림 그대로
+                if expr_ok(base_arr, mix, fm, key):
+                    frames.append(mix)
+                    continue
+                say(f"'{name}' 표정이 어색해서 기본 얼굴로 대신해요")
+            except Exception as e:
+                say(f"표정 하나를 못 그렸어요 ({str(e)[:60]}) — 기본 얼굴로 대신해요")
+            frames.append(base_arr)
+    else:
+        frames += [base_arr] * (len(EXPR) - 1)
+    return frames
 
 
 def despill_frames(frames, a, key):
@@ -1274,32 +1549,7 @@ def main():
         base_im = Image.open(io.BytesIO(ch)).convert("RGB")
         base_arr = np.asarray(base_im)
         alpha = cut_alpha(base_im, key, isnet)
-        box = face_box(base_arr, alpha)
-        frames = [base_arr]
-        if box:
-            W, H = base_im.size
-            fm = face_mask((W, H), box)
-            mpng = out / "face_mask.png"            # 얼굴은 투명(=다시 그릴 곳), 나머지는 불투명
-            hole = face_mask((W, H), box, grow=1.15)
-            Image.fromarray(np.dstack([np.zeros((H, W, 3), "uint8"), ((1 - (hole > 0.05)) * 255).astype("uint8")]), "RGBA").save(mpng)
-            base_name = comfy.upload(base_file, "linkbeat_ref_base")
-            mask_name = comfy.upload(mpng, "linkbeat_ref_mask")
-            for k, (name, tags_, dn) in enumerate(EXPR[1:]):
-                say(f"표정 그리는 중... ({k + 1}/{len(EXPR) - 1})")
-                try:
-                    img = comfy.run(workflow(f"{tags_}, {ch_p}", ch_n, ch_w, ch_h, seed + 31 + k, f"linkbeat_avatar/expr_{name}",
-                                             base=base_name, denoise=dn, mask=mask_name), "표정")
-                    new = np.asarray(Image.open(io.BytesIO(img)).convert("RGB").resize((W, H), Image.LANCZOS))
-                    mix = (base_arr * (1 - fm[:, :, None]) + new * fm[:, :, None]).astype("uint8")   # 얼굴 밖은 기본 그림 그대로
-                    if expr_ok(base_arr, mix, fm, key):
-                        frames.append(mix)
-                        continue
-                    say(f"'{name}' 표정이 어색해서 기본 얼굴로 대신해요")
-                except Exception as e:
-                    say(f"표정 하나를 못 그렸어요 ({str(e)[:60]}) — 기본 얼굴로 대신해요")
-                frames.append(base_arr)
-        else:
-            frames += [base_arr] * (len(EXPR) - 1)
+        frames = make_faces(comfy, base_im, base_arr, alpha, key, ch_p, ch_n, seed, out)
         frames = despill_frames(frames, alpha, key)
         sheet, thumb = sticker_sheet(frames, alpha)
         (out / "sticker.webp").write_bytes(sheet)

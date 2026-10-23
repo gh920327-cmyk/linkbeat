@@ -911,6 +911,33 @@ html[data-theme] #screen-game, html[data-theme] #screen-calib { background: #040
 .av-ai-opts .dim { opacity: .5; }
 .av-ai-opts .opt-row button { padding: 4px 10px; font-size: 12px; }
 .av-ai-opts .check-row { margin: 0; }
+.av-ai-pend { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--cyan);
+  background: color-mix(in srgb, var(--cyan) 12%, transparent); font-size: 13px; }
+.av-ai-pend.hidden { display: none; }
+/* AI 캐릭터 고르기 (예전 것 · 새 것) */
+#avPickDlg { width: 760px; }
+.avp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.avp-card { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--line2); background: var(--panel2); }
+.avp-card.new { border-color: var(--cyan); box-shadow: 0 0 0 1px color-mix(in srgb, var(--cyan) 35%, transparent) inset; }
+.avp-tag { font-weight: 800; letter-spacing: .5px; }
+.avp-card.new .avp-tag { color: var(--cyan); }
+.avp-imgs { display: flex; gap: 10px; align-items: flex-end; min-height: 200px; }
+.avp-il { width: 46%; aspect-ratio: 896 / 1152; object-fit: cover; border: 1px solid var(--line2); background: var(--panel); }
+.avp-il.hidden { display: none; }
+.avp-big { flex: 1; background-repeat: no-repeat; background-position: 0 0; }
+.avp-faces { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; min-height: 8px; }
+.avp-face { display: block; width: 100%; border: 1px solid var(--line2); background-color: var(--panel); background-repeat: no-repeat; cursor: pointer; }
+.avp-face.on { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan) inset; }
+.avp-go { width: 100%; }
+.avp-note { margin: 10px 0 0; }
+@media (max-width: 640px) {
+  #avPickDlg { width: calc(100vw - 16px); }
+  .avp-grid { gap: 8px; }
+  .avp-card { padding: 8px; gap: 8px; }
+  .avp-imgs { flex-direction: column; align-items: stretch; min-height: 0; }
+  .avp-il { width: 100%; }
+  .avp-faces { grid-template-columns: repeat(3, 1fr); }
+}
 
 /* 곡 선택 화면 '내 캐릭터' 칸 */
 .my-char { position: relative; flex: 1 1 auto; min-height: 170px; margin: 2px 6px 0; border: 1px solid var(--line); background: radial-gradient(120% 90% at 50% 100%, color-mix(in srgb, var(--cyan) 14%, transparent), transparent 70%), var(--panel2); overflow: hidden; cursor: pointer; }

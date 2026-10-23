@@ -544,6 +544,7 @@
           </div>
           <div class="av-ai-btns"><button id="avAiGo" class="primary skew" type="button">✦ AI로 그리기</button><button id="avAiPx" class="skew hidden" type="button" title="일러스트는 그대로 두고 꼬마 캐릭터(표정)만 새로 그려요">캐릭터만 다시 그리기</button><button id="avAiUse" class="chip hidden" type="button">AI 그림 쓰기</button></div>
           <div id="avAiMsg" class="small muted"></div>
+          <div id="avAiPend" class="av-ai-pend hidden"><span>✦ 새 캐릭터가 완성됐어요. 예전 것과 비교해서 골라 주세요.</span><button id="avAiPick" class="primary small-btn" type="button">고르기</button></div>
         </section>
         <section><h4>피부</h4><div class="av-sws" id="avSkin"></div></section>
         <section><h4>머리 모양</h4><div class="opt-row" id="avHair"></div></section>
@@ -555,6 +556,31 @@
         <p class="small muted">플레이 중에는 오른쪽 칸에서 박자에 맞춰 까딱이고, 콤보 50마다 점프, 피버 때 춤춰요. 멀티에서는 친구들에게도 보여요.</p>
       </div>
     </div>
+  </div>
+</dialog>
+
+<!-- AI 캐릭터: 예전 것·새 것 고르기 -->
+<dialog id="avPickDlg">
+  <div class="skin-box">
+    <div class="skin-head">
+      <h3>NEW CHARACTER<small>새 캐릭터가 완성됐어요 · 마음에 드는 쪽을 골라 주세요</small></h3>
+      <button id="avPickLater" class="ghost small-btn" type="button">나중에</button>
+    </div>
+    <div class="avp-grid">
+      <div class="avp-card" data-pick="old">
+        <div class="avp-tag">예전 캐릭터</div>
+        <div class="avp-imgs"><img class="avp-il" alt=""><div class="avp-big"></div></div>
+        <div class="avp-faces"></div>
+        <button class="avp-go skew" type="button">예전 것 그대로</button>
+      </div>
+      <div class="avp-card new" data-pick="new">
+        <div class="avp-tag">새 캐릭터</div>
+        <div class="avp-imgs"><img class="avp-il" alt=""><div class="avp-big"></div></div>
+        <div class="avp-faces"></div>
+        <button class="avp-go primary skew" type="button">새 것으로 바꾸기</button>
+      </div>
+    </div>
+    <p class="small muted avp-note">고르지 않은 쪽은 지워져요. 표정은 플레이 중에 콤보·미스에 따라 바뀌어요.</p>
   </div>
 </dialog>
 
