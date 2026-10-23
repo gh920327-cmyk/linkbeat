@@ -60,7 +60,7 @@ const LINE_COLORS = { red: '#ff3b55', cyan: '#4de1ff', gold: '#ffc83d', white: '
 const DEFAULT_SKIN = {
   theme: 'classic', colors: { a: '#eef3ff', b: '#3f8cff', c: '#ffc83d' },
   note: 'bar', noteH: 16, laneScale: 1, gearPos: 'center', line: 'red', judgeY: 110,
-  effect: 'flash', hitSound: 'off', hitVol: 60, judgeText: 'normal', earlyLate: true, combo: true, fever: true,
+  effect: 'flash', hitSound: 'off', hitVol: 60, judgeText: 'normal', judgePos: 'low', earlyLate: true, combo: true, fever: true,
   punch: 'mid', shake: true,   // 타격감 강도, 화면 흔들림
   chorusFx: true,              // 후렴(하이라이트)에 들어갈 때 연출
   applause: true,              // 풀콤보·올퍼펙트 박수
