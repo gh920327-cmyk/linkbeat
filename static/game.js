@@ -719,7 +719,7 @@ function judgeFs(L) { return Math.round((L.laneW < 60 ? 24 : 30) * (settings.ski
 /* 판정 글자 높이: 기본은 판정선 위 (노트를 치는 곳 가까이 — 눈을 덜 움직이게), '위쪽'이면 예전처럼 콤보 바로 아래 */
 function judgePopY(L, judgeY) {
   if (settings.skin.judgePos === 'top') return hudY(L) + (settings.skin.combo ? comboSize(L) * 0.5 + judgeFs(L) * 0.75 : 0);
-  return judgeY - Math.max(judgeY * 0.3, 110);
+  return judgeY - Math.max(judgeY * 0.42, 140);
 }
 function drawJudgePopup(L, popup, now, judgeY = judgeLineY(L.h)) {
   const mode = settings.skin.judgeText;
