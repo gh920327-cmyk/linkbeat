@@ -1811,10 +1811,34 @@ $('#siArtist').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.
 
 /* ============================================================ 화면 테마 */
 function renderThemeRow() {
-  const cur = settings.uiTheme || 'neon';
+  const cur = (UI_THEMES.find((x) => x.id === settings.uiTheme) || UI_THEMES[0]).id;
   $('#themeRow').innerHTML = UI_THEMES.map((t) => `<button type="button" data-t="${t.id}" class="${t.id === cur ? 'on' : ''}"><i style="background:${t.sw}"></i>${t.name}</button>`).join('');
   const t = UI_THEMES.find((x) => x.id === cur) || UI_THEMES[0];
-  $('#btnTheme').title = `화면 테마: ${t.name} (누를 때마다 다음 테마)`;
+  $('#btnTheme').title = `화면 테마: ${t.name} (눌러서 고르기)`;
+  // 고르기 창: 작은 미리보기(바탕 · 칸 · 고른 줄 · 글자)
+  for (const grid of document.querySelectorAll('#themeMenu .tm-grid')) {
+    grid.innerHTML = UI_THEMES.filter((x) => x.g === grid.dataset.g).map((x) => {
+      const [bg, p2, a1, a2, ink] = x.pv;
+      return `<button type="button" role="menuitemradio" aria-checked="${x.id === cur}" class="tm-item${x.id === cur ? ' on' : ''}" data-t="${x.id}">`
+        + `<span class="tm-prev" style="background:${bg};--p2:${p2};--a1:${a1};--a2:${a2}"><i></i><i></i><i></i><b style="color:${ink}">Aa</b></span>`
+        + `<span class="tm-name">${x.name}</span></button>`;
+    }).join('');
+  }
+}
+function themeMenuOpen() { return !$('#themeMenu').classList.contains('hidden'); }
+function closeThemeMenu() {
+  $('#themeMenu').classList.add('hidden');
+  $('#btnTheme').setAttribute('aria-expanded', 'false');
+}
+function openThemeMenu() {
+  const m = $('#themeMenu'), r = $('#btnTheme').getBoundingClientRect();
+  m.classList.remove('hidden');
+  const w = m.offsetWidth;
+  m.style.top = `${Math.round(r.bottom + 6)}px`;
+  m.style.left = `${Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)))}px`;
+  $('#btnTheme').setAttribute('aria-expanded', 'true');
+  const on = m.querySelector('.tm-item.on');
+  if (on) on.focus({ preventScroll: true });
 }
 function setUiTheme(id) {
   settings.uiTheme = id;
@@ -1824,10 +1848,22 @@ function setUiTheme(id) {
   if (typeof renderDetail === 'function') renderDetail();
 }
 $('#themeRow').addEventListener('click', (e) => { const b = e.target.closest('[data-t]'); if (b) setUiTheme(b.dataset.t); });
-$('#btnTheme').addEventListener('click', () => {
-  const i = UI_THEMES.findIndex((x) => x.id === (settings.uiTheme || 'neon'));
-  const t = UI_THEMES[(i + 1) % UI_THEMES.length];
-  setUiTheme(t.id);
-  if (typeof toast === 'function') toast(`화면 테마: ${t.name}`);
+$('#btnTheme').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (themeMenuOpen()) closeThemeMenu(); else openThemeMenu();
 });
+// 고르면 바로 바뀌고 창은 열린 채로 (여러 개를 눌러 보며 고를 수 있게) — 바깥을 누르거나 ESC·✕로 닫음
+$('#themeMenu').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const b = e.target.closest('[data-t]');
+  if (b) {
+    setUiTheme(b.dataset.t);
+    const on = $('#themeMenu').querySelector(`[data-t="${b.dataset.t}"]`);
+    if (on) on.focus({ preventScroll: true });
+  }
+});
+$('#tmClose').addEventListener('click', closeThemeMenu);
+document.addEventListener('click', () => { if (themeMenuOpen()) closeThemeMenu(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && themeMenuOpen()) { e.stopPropagation(); closeThemeMenu(); } }, true);
+window.addEventListener('resize', () => { if (themeMenuOpen()) closeThemeMenu(); });
 renderThemeRow();
