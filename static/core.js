@@ -81,20 +81,33 @@ function themeColors() {
 }
 if (!Array.isArray(settings.keys6) || settings.keys6.length !== 6) settings.keys6 = [...DEFAULT_KEYS6];
 /* 화면 테마 (곡 선택·결과·창): neon(기본) · sunshine · mint · cherry · sage · slate · latte · lavender */
+/* 화면 테마 — g: 고르기 창의 묶음 (dark 어두운 · light 밝은), tone: 밝은 바탕이면 별·판정 색을 진하게, 'dark'는 오른쪽 곡 카드도 어둡게
+   pv: 고르기 창 미리보기 [바탕, 칸, 강조1, 강조2, 글자] */
 const UI_THEMES = [
-  { id: 'neon', name: '네온', sw: 'linear-gradient(135deg,#04060d,#3f8cff)' },
-  { id: 'sunshine', name: '선샤인', sw: 'linear-gradient(135deg,#c8a646,#f07a2a)' },
-  { id: 'mint', name: '민트', sw: 'linear-gradient(135deg,#eefbf9,#1c94d0)' },
-  { id: 'cherry', name: '체리', sw: 'linear-gradient(135deg,#fff0f5,#f0457f)' },
-  { id: 'sage', name: '세이지', sw: 'linear-gradient(135deg,#283128,#8fae7a)' },
-  { id: 'slate', name: '슬레이트', sw: 'linear-gradient(135deg,#232a36,#7d96c4)' },
-  { id: 'latte', name: '라떼', sw: 'linear-gradient(135deg,#efe6da,#a9805a)' },
-  { id: 'lavender', name: '라벤더', sw: 'linear-gradient(135deg,#ebe9f1,#8b7ab8)' },
+  { id: 'neon', name: '네온', g: 'dark', tone: '', pv: ['#04060d', '#141c34', '#3f8cff', '#4de1ff', '#e9eefc'] },
+  { id: 'midnight', name: '미드나잇', g: 'dark', tone: 'dark', pv: ['#0b0a1a', '#1c1840', '#7a5cff', '#c06bff', '#ece8ff'] },
+  { id: 'ocean', name: '오션', g: 'dark', tone: 'dark', pv: ['#041a22', '#08333f', '#0f9fb5', '#22c9b8', '#e2f7fa'] },
+  { id: 'sunset', name: '선셋', g: 'dark', tone: 'dark', pv: ['#2b1238', '#3a1844', '#ff5f6d', '#ffa94d', '#fff0ea'] },
+  { id: 'retro', name: '레트로', g: 'dark', tone: 'dark', pv: ['#0c0a06', '#1c160b', '#ff9d00', '#ffc233', '#ffe6b0'] },
+  { id: 'sunshine', name: '선샤인', g: 'dark', tone: '', pv: ['#8c7535', '#6f5c25', '#f07a2a', '#ffab3d', '#fffaf0'] },
+  { id: 'sage', name: '세이지', g: 'dark', tone: 'dark', pv: ['#1f2620', '#313c32', '#6f8f5e', '#87a46f', '#e3e8dc'] },
+  { id: 'slate', name: '슬레이트', g: 'dark', tone: 'dark', pv: ['#1b2029', '#2b3342', '#56709e', '#6a86b3', '#dde3ee'] },
+  { id: 'graphite', name: '그라파이트', g: 'dark', tone: 'dark', pv: ['#151618', '#26282c', '#c9ced6', '#f2f4f7', '#ececee'] },
+  { id: 'snow', name: '스노우', g: 'light', tone: 'light', pv: ['#eef1f6', '#ffffff', '#2f6bff', '#3d8bff', '#1b2333'] },
+  { id: 'mint', name: '민트', g: 'light', tone: 'light', pv: ['#e6f6f5', '#ffffff', '#1fb2c6', '#1c94d0', '#12313a'] },
+  { id: 'cherry', name: '체리', g: 'light', tone: 'light', pv: ['#ffe8f0', '#ffffff', '#f0457f', '#ff7f6a', '#3a1a29'] },
+  { id: 'peach', name: '피치', g: 'light', tone: 'light', pv: ['#ffeee4', '#ffffff', '#ff6f4f', '#ff9e5c', '#3b2219'] },
+  { id: 'latte', name: '라떼', g: 'light', tone: 'light', pv: ['#ece3d6', '#f5efe6', '#a9805a', '#bd946a', '#4a3c2f'] },
+  { id: 'lavender', name: '라벤더', g: 'light', tone: 'light', pv: ['#e7e5ee', '#f3f2f8', '#8b7ab8', '#a194c8', '#3d3850'] },
 ];
+for (const t of UI_THEMES) t.sw = `linear-gradient(135deg,${t.pv[0]},${t.pv[2]})`;
 function applyUiTheme() {
-  const t = UI_THEMES.find((x) => x.id === settings.uiTheme) ? settings.uiTheme : 'neon';
-  if (t === 'neon') delete document.documentElement.dataset.theme;
-  else document.documentElement.dataset.theme = t;
+  const th = UI_THEMES.find((x) => x.id === settings.uiTheme) || UI_THEMES[0];
+  const el = document.documentElement;
+  if (th.id === 'neon') delete el.dataset.theme;
+  else el.dataset.theme = th.id;
+  if (th.tone) el.dataset.tone = th.tone;
+  else delete el.dataset.tone;
 }
 applyUiTheme();
 function saveSettings() {

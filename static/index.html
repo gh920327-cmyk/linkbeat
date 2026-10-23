@@ -53,7 +53,7 @@
       <nav class="tools">
         <button id="btnAch" class="tool ach-btn" type="button" title="업적 · 칭호"><i>🏆</i><span>업적</span></button>
         <button id="btnAvatar" class="tool av-btn" type="button" title="내 캐릭터"><canvas id="topAvatar" width="28" height="28"></canvas><span>내 캐릭터</span></button>
-        <button id="btnTheme" class="tool" type="button" title="화면 테마 바꾸기 (누를 때마다 다음 테마)"><i>🎨</i><span>테마</span></button>
+        <button id="btnTheme" class="tool" type="button" title="화면 테마 고르기" aria-haspopup="true" aria-expanded="false"><i>🎨</i><span>테마</span></button>
         <button id="btnSkin" class="tool" type="button" title="꾸미기 (레인 색·노트 모양·효과)"><i>✨</i><span>꾸미기</span></button>
         <button id="btnSettings" class="tool" type="button" title="설정"><i>⚙</i><span>설정</span></button>
       </nav>
@@ -712,6 +712,11 @@
 
 <div id="toast" class="toast"></div>
 
+  <div id="themeMenu" class="theme-menu hidden" role="menu" aria-label="화면 테마 고르기">
+    <div class="tm-head"><b>화면 테마</b><span class="muted">누르면 바로 바뀌어요</span><button type="button" id="tmClose" class="ghost tm-x" aria-label="닫기">✕</button></div>
+    <h5>어두운</h5><div class="tm-grid" data-g="dark"></div>
+    <h5>밝은</h5><div class="tm-grid" data-g="light"></div>
+  </div>
 <script src="/static/core.js"></script>
 <script src="/static/game.js"></script>
 <script src="/static/editor.js"></script>
