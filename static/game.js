@@ -715,19 +715,24 @@ function drawCombo(L, combo, popAt, now) {
   ctx.restore();
   plainFont(ctx);
 }
-function drawJudgePopup(L, popup, now) {
+function judgeFs(L) { return Math.round((L.laneW < 60 ? 24 : 30) * (settings.skin.judgeText === 'small' ? 0.68 : 1)); }
+/* 판정 글자 높이: 기본은 판정선 위 (노트를 치는 곳 가까이 — 눈을 덜 움직이게), '위쪽'이면 예전처럼 콤보 바로 아래 */
+function judgePopY(L, judgeY) {
+  if (settings.skin.judgePos === 'top') return hudY(L) + (settings.skin.combo ? comboSize(L) * 0.5 + judgeFs(L) * 0.75 : 0);
+  return judgeY - Math.max(judgeY * 0.3, 110);
+}
+function drawJudgePopup(L, popup, now, judgeY = judgeLineY(L.h)) {
   const mode = settings.skin.judgeText;
   if (!popup || mode === 'off') return;
   const age = (now - popup.at) / 1000;
   if (age >= 0.5) return;
-  const { ctx, h, laneW, x0, fieldW } = L;
+  const { ctx, x0, fieldW } = L;
   const small = mode === 'small';
   const pk = punchK();
   const big = (popup.kind === 'perfect' ? 0.3 : popup.kind === 'miss' ? 0.08 : 0.2) * Math.min(pk, 1.2);
   const sc = age < 0.08 ? 1 + big * (1 - age / 0.08) ** 2 : 1;
-  const fs = Math.round((laneW < 60 ? 24 : 30) * (small ? 0.68 : 1));
-  // 콤보가 보이면 그 바로 아래, 아니면 콤보 자리
-  const y = hudY(L) + (settings.skin.combo ? comboSize(L) * 0.5 + fs * 0.75 : 0);
+  const fs = judgeFs(L);
+  const y = judgePopY(L, judgeY);
   ctx.save();
   ctx.textAlign = 'center';
   ctx.globalAlpha = (age > 0.35 ? 1 - (age - 0.35) / 0.15 : 1) * 0.95;
@@ -745,10 +750,14 @@ function drawJudgePopup(L, popup, now) {
   ctx.shadowBlur = 0;
   if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
   plainFont(ctx);
-  if (popup.sub && settings.skin.earlyLate) {
-    ctx.font = `700 ${small ? 11 : 13}px "Noto Sans KR", sans-serif`;
-    ctx.fillStyle = 'rgba(255,255,255,0.78)';
-    ctx.fillText(popup.sub, 0, fs * 0.85);
+  if (popup.sub && settings.skin.earlyLate) {      // 빠름·느림 + 몇 ms (빠르면 파랑, 늦으면 주황)
+    const early = popup.ms != null ? popup.ms < 0 : popup.sub === '빠름';
+    const msTxt = popup.ms != null ? ` ${popup.ms > 0 ? '+' : popup.ms < 0 ? '−' : '±'}${Math.abs(popup.ms)}ms` : '';
+    ctx.font = `800 ${small ? 11 : 14}px "Noto Sans KR", sans-serif`;
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(3,6,16,0.6)';
+    ctx.strokeText(popup.sub + msTxt, 0, fs * 0.9);
+    ctx.fillStyle = early ? '#7fd4ff' : '#ffb36b';
+    ctx.fillText(popup.sub + msTxt, 0, fs * 0.9);
   }
   ctx.restore();
 }
@@ -1113,9 +1122,10 @@ class Game {
       fxShake(this.fx, 4, now);
     }
     if (!(tail && kind === 'perfect')) {
-      let sub = '';
-      if (!tail && (kind === 'great' || kind === 'good')) sub = dt < 0 ? '빠름' : '느림';
-      this.popup = { kind, sub, at: performance.now() };
+      // 친 노트는 판정과 함께 얼마나 빨랐는지·늦었는지 (ms) — 그냥 지나간 미스는 없음
+      const ms = !tail && dt ? Math.round(dt * 1000) : null;
+      const sub = ms == null ? '' : ms < 0 ? '빠름' : ms > 0 ? '느림' : '정확';
+      this.popup = { kind, sub, ms, at: performance.now() };
     }
   }
 
@@ -1458,7 +1468,7 @@ class Game {
     }
     drawCombo(L, this.fcAt ? 0 : this.combo, this.comboPop, now);   // 풀콤보 글자가 뜨면 콤보 숫자는 숨김 (글자 아래에 콤보 수 표시)
     drawMilestone(L, this.fx, now);
-    drawJudgePopup(L, this.popup, now);
+    drawJudgePopup(L, this.popup, now, judgeY);
 
     // 노트
     while (this.drawFrom < this.notes.length) {
@@ -1523,16 +1533,18 @@ class Game {
     const sfs = roomR ? fitR : roomL ? fitL : 20;
     ctx.textAlign = roomR ? 'left' : 'right';
     const sx = roomR ? x0 + fieldW + 18 : roomL ? x0 - 18 : x0 + fieldW - 10;
+    // 기어 옆 빈칸이 있으면 판정 글자와 같은 높이에 (노트를 가리지 않게), 없으면 기어 안 오른쪽 위
+    const sy = outside ? (settings.skin.judgePos === 'top' ? 4 : Math.max(4, judgePopY(L, judgeY) - sfs * 0.55)) : 8;
     numFont(ctx, 800, sfs, false);
     ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(3,6,16,0.55)';
-    ctx.strokeText(scoreTxt, sx, outside ? 4 : 8);
+    ctx.strokeText(scoreTxt, sx, sy);
     ctx.fillStyle = '#fff';
-    ctx.fillText(scoreTxt, sx, outside ? 4 : 8);
+    ctx.fillText(scoreTxt, sx, sy);
     numFont(ctx, 700, outside ? Math.max(13, sfs * 0.55) : 13, false);
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.fillText(this.acc().toFixed(2) + '%', sx, outside ? 8 + sfs : 30);
+    ctx.fillText(this.acc().toFixed(2) + '%', sx, outside ? sy + 4 + sfs : 30);
     plainFont(ctx);
-    if (this.ghost && settings.ghost !== false && this.phase !== 'loading' && this.phase !== 'ready') this.drawGhost(ctx, sx, outside ? 64 : 50, outside, roomR || !outside);
+    if (this.ghost && settings.ghost !== false && this.phase !== 'loading' && this.phase !== 'ready') this.drawGhost(ctx, sx, outside ? sy + 60 : 50, outside, roomR || !outside);
 
     const cx = x0 + fieldW / 2;
     if (this.stage) this.stage.draw({ beat: Math.max(0, Math.floor((gt - off) / bl)), fever: inFever && settings.skin.fever, label: settings.nick || '', cxr: this.ilOn ? 0.3 : 0.5 });

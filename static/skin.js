@@ -66,15 +66,15 @@ class SkinPreview {
         n.hit = true;
         const r = (n.t * 7.3) % 1;
         const kind = r < 0.8 ? 'perfect' : 'great';
-        const sub = kind === 'great' ? (r < 0.9 ? '빠름' : '느림') : '';
-        this.popup = { kind, sub, at: now };
+        const ms = kind === 'perfect' ? Math.round((r - 0.4) * 80) : (r < 0.9 ? -65 : 70);   // 미리보기용 가짜 오차
+        this.popup = { kind, sub: ms < 0 ? '빠름' : ms > 0 ? '느림' : '정확', ms, at: now };
         this.combo++;
         this.comboPop = now;
         this.fever = Math.min(100, this.fever + 4);
         fxHit(this.fx, n.l, now);
         fxBurst(this.fx, n.l, kind, now);
         if (kind === 'perfect') fxPerfect(this.fx, n.l, now);
-        (this.errHist || (this.errHist = [])).push({ dt: (kind === 'perfect' ? (r - 0.4) * 0.08 : (r < 0.9 ? -0.065 : 0.07)), kind, at: now });
+        (this.errHist || (this.errHist = [])).push({ dt: ms / 1000, kind, at: now });
         if (this.errHist.length > 30) this.errHist.shift();
         if (n.a) fxAccent(this.fx, n.l, kind, now);
         if (this.notes.some((m) => m !== n && m.t === n.t)) fxShake(this.fx, 2.2, now);
@@ -126,7 +126,7 @@ class SkinPreview {
     }
     drawCombo(L, this.combo, this.comboPop, now);
     drawMilestone(L, this.fx, now);
-    drawJudgePopup(L, this.popup, now);
+    drawJudgePopup(L, this.popup, now, judgeY);
     ctx.restore();
     if (this.combo > 400) this.reset();
   }
@@ -156,6 +156,7 @@ function renderSkin() {
   $('#hitSound').value = sk.hitSound;
   $('#hitVol').value = sk.hitVol; $('#hitVolVal').textContent = sk.hitVol;
   $('#judgeText').value = sk.judgeText;
+  $('#judgePos').value = sk.judgePos || 'low';
   $('#optEarly').checked = !!sk.earlyLate;
   $('#optCombo').checked = !!sk.combo;
   $('#optFever').checked = !!sk.fever;
@@ -232,6 +233,7 @@ $('#hitTest').addEventListener('click', () => {
   playHitDemo();
 });
 $('#judgeText').addEventListener('change', (e) => { settings.skin.judgeText = e.target.value; skinChanged(); });
+$('#judgePos').addEventListener('change', (e) => { settings.skin.judgePos = e.target.value; skinChanged(); });
 $('#optEarly').addEventListener('change', (e) => { settings.skin.earlyLate = e.target.checked; skinChanged(); });
 $('#optCombo').addEventListener('change', (e) => { settings.skin.combo = e.target.checked; skinChanged(); });
 $('#optFever').addEventListener('change', (e) => { settings.skin.fever = e.target.checked; skinChanged(); });
