@@ -119,6 +119,7 @@
         <button id="btnDel" class="ghost small-btn danger hidden">곡 삭제</button>
       </div>
       <div id="myChar" class="my-char" title="누르면 도트 ↔ 일러스트">
+        <button type="button" id="myCharBig" class="mc-big" title="크게 보기">⤢ 크게</button>
         <canvas id="myCharCv"></canvas>
         <img id="myCharIl" class="hidden" alt="">
         <div class="mc-tag"><b>내 캐릭터</b><span id="myCharMode"></span></div>
@@ -730,6 +731,16 @@
 
 <div id="toast" class="toast"></div>
 
+  <!-- 크게 보기: 일러스트 · 캐릭터(표정) — 다른 사람 카드·내 캐릭터·결과에서 -->
+  <div id="bigView" class="big-view hidden" role="dialog" aria-label="크게 보기">
+    <div class="bv-top">
+      <b class="bv-name"></b>
+      <div class="bv-tabs"><button type="button" data-v="il">일러스트</button><button type="button" data-v="char">캐릭터</button></div>
+      <button type="button" class="ghost bv-x" aria-label="닫기">✕</button>
+    </div>
+    <div class="bv-stage"><img class="bv-il hidden" alt=""><div class="bv-char hidden"></div><img class="bv-px hidden" alt=""><canvas class="bv-dot hidden" width="360" height="450"></canvas></div>
+    <div class="bv-faces"></div>
+  </div>
   <div id="verBanner" class="ver-banner hidden" role="status">
     <span>✨ 새 버전이 올라왔어요 · 새로고침하면 적용돼요 <small>(방에 있으면 새로고침해도 같은 방으로 돌아와요)</small></span>
     <button type="button" id="verReload" class="primary small-btn">새로고침</button>

@@ -522,6 +522,88 @@ async function aiAvRequest(mode) {
   } catch (e) { toast(e.message); }
   aiAvFetch();
 }
+/* ---------------- 크게 보기: 일러스트 · 캐릭터(표정 6개) — 화면 가득. 바깥·ESC·✕로 닫힘 (플레이 중에도 키를 막지 않게 창이 아닌 덮개) */
+const bigView = { a: null, view: 'char', face: 0, force: false };
+function bigHasIl(a, force) { return !!(a && a.ai && (force || a.aiUse !== 'off')); }
+function openBigView(a, view = 'char', name = '', { force = false, face = 0 } = {}) {
+  a = avatarValid(a);
+  Object.assign(bigView, { a, force, face });
+  const hasIl = bigHasIl(a, force);
+  bigView.view = view === 'il' && hasIl ? 'il' : 'char';
+  const box = $('#bigView');
+  $('.bv-name', box).textContent = name;
+  $$('.bv-tabs button', box).forEach((b) => { b.classList.toggle('hidden', !hasIl); });
+  box.classList.remove('hidden');
+  renderBigView();
+}
+function renderBigView() {
+  const box = $('#bigView'), a = bigView.a, hasIl = bigHasIl(a, bigView.force);
+  const il = $('.bv-il', box), ch = $('.bv-char', box), px = $('.bv-px', box), dot = $('.bv-dot', box), faces = $('.bv-faces', box);
+  $$('.bv-tabs button', box).forEach((b) => b.classList.toggle('on', b.dataset.v === bigView.view));
+  [il, ch, px, dot].forEach((x) => x.classList.add('hidden'));
+  faces.innerHTML = '';
+  if (bigView.view === 'il') {
+    il.onerror = () => il.classList.add('hidden');
+    il.src = `/avatars/${a.ai}_i.webp`;
+    il.classList.remove('hidden');
+    return;
+  }
+  if (hasIl) {        // AI 캐릭터: 스티커(표정 6개)가 있으면 그것, 없으면 예전 도트
+    const tok = a.ai, sk = new Image();
+    sk.onload = () => {
+      if (bigView.a !== a || bigView.view !== 'char') return;
+      const n = STK_EXPR.length, bg = `url('/avatars/${tok}_x.webp')`;
+      Object.assign(ch.style, { backgroundImage: bg, backgroundSize: `${n * 100}% 100%`, backgroundPosition: `${(bigView.face / (n - 1)) * 100}% 0`, aspectRatio: `${sk.width / n} / ${sk.height}` });
+      ch.classList.remove('hidden');
+      const names = { idle: '기본', smile: '웃음', cheer: '신남', oops: '놀람', sad: '슬픔', blink: '깜빡' };
+      faces.innerHTML = STK_EXPR.map((e, i) => `<span role="button" tabindex="0" class="bv-face${i === bigView.face ? ' on' : ''}" data-i="${i}" title="${names[e] || e}"
+        style="background-image:${bg};background-size:${n * 100}% 100%;background-position:${(i / (n - 1)) * 100}% 0;aspect-ratio:${sk.width / n} / ${sk.height}"></span>`).join('');
+    };
+    sk.onerror = () => {
+      if (bigView.a !== a || bigView.view !== 'char') return;
+      px.src = `/avatars/${tok}_p.png`;
+      px.classList.remove('hidden');
+    };
+    sk.src = `/avatars/${tok}_x.webp`;
+    return;
+  }
+  // 직접 꾸민 도트 캐릭터
+  const parts = Object.assign({}, a);
+  delete parts.ai;
+  dot.classList.remove('hidden');
+  const ctx = dot.getContext('2d');
+  ctx.clearRect(0, 0, dot.width, dot.height);
+  try { drawAvatar(ctx, parts, { pose: 'idle' }, dot.width / 2, dot.height - 10, 14); } catch { /* 무시 */ }
+}
+function closeBigView() { $('#bigView').classList.add('hidden'); }
+$('#bigView').addEventListener('click', (e) => {
+  const tab = e.target.closest('.bv-tabs button');
+  if (tab) { bigView.view = tab.dataset.v; renderBigView(); return; }
+  const f = e.target.closest('.bv-face');
+  if (f) {
+    bigView.face = +f.dataset.i;
+    const n = STK_EXPR.length;
+    $$('#bigView .bv-face').forEach((x) => x.classList.toggle('on', x === f));
+    $('#bigView .bv-char').style.backgroundPosition = `${(bigView.face / (n - 1)) * 100}% 0`;
+    return;
+  }
+  if (e.target.closest('.bv-x') || !e.target.closest('.bv-il, .bv-char, .bv-px, .bv-dot, .bv-top, .bv-faces')) closeBigView();
+});
+document.addEventListener('keydown', (e) => {
+  if ($('#bigView').classList.contains('hidden')) return;
+  if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); closeBigView(); return; }
+  if (bigView.view === 'char' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {     // 표정 넘기기
+    const fs = $$('#bigView .bv-face');
+    if (!fs.length) return;
+    e.stopPropagation(); e.preventDefault();
+    const i = (bigView.face + (e.key === 'ArrowRight' ? 1 : fs.length - 1)) % fs.length;
+    fs[i].click();
+  }
+}, true);
+// 내 캐릭터 창의 AI 일러스트·도트를 누르면 크게
+$('#avAiIllust').addEventListener('click', () => openBigView(settings.avatar, 'il', settings.nick || '내 캐릭터', { force: true }));
+$('#avAiPixel').addEventListener('click', () => openBigView(settings.avatar, 'char', settings.nick || '내 캐릭터', { force: true }));
+
 /* 예전 캐릭터 · 새 캐릭터 고르기: 일러스트 + 꼬마 캐릭터 + 표정 6개를 나란히 */
 function fillAvPick(card, tok) {
   const il = card.querySelector('.avp-il'), big = card.querySelector('.avp-big'), faces = card.querySelector('.avp-faces');
@@ -655,6 +737,10 @@ function renderMyChar() {
   };
   mcRaf = requestAnimationFrame(step);
 }
+$('#myCharBig').addEventListener('click', (e) => {
+  e.stopPropagation();
+  openBigView(settings.avatar, myCharView() === 'illust' ? 'il' : 'char', settings.nick || '내 캐릭터');
+});
 $('#myChar').addEventListener('click', () => {
   if (!aiIllustUrl(settings.avatar)) { openAvatar(); return; }
   settings.myCharView = myCharView() === 'illust' ? 'dot' : 'illust';
