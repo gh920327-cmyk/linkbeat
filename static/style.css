@@ -251,6 +251,11 @@ body.touch .game-info { padding-right: 62px; }
 .chat-log { height: 120px; overflow: auto; font-size: 13px; background: rgba(6, 10, 22, .8); border: 1px solid var(--line); padding: 8px; margin-bottom: 6px; }
 .chat-log div { margin-bottom: 3px; word-break: break-all; }
 .chat-log .sys { color: var(--muted); font-style: italic; }
+/* 테마 바탕에 맞게 (밝은 테마에서 어두운 채팅 칸에 어두운 글자가 겹쳐 안 보이던 것) */
+html[data-theme] .chat-log { background: var(--field); }
+html[data-tone="light"] .ai-note { color: var(--green); }
+html[data-tone="light"] .room-players li, html[data-tone="light"] .live-board li { background: color-mix(in srgb, var(--text) 6%, transparent); }
+#btnRoomStart:disabled { opacity: .8; }
 .chat-log .sug { padding: 6px 8px; margin: 4px 0; background: color-mix(in srgb, var(--gold) 12%, transparent); border-left: 3px solid var(--gold); word-break: keep-all; }
 .chat-log .sug-t { font-weight: 800; color: var(--gold); }
 .chat-log .sug-go { margin-left: 4px; padding: 2px 10px; font-size: 12px; }
