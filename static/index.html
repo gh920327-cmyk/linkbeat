@@ -211,6 +211,8 @@
             <div id="roomDiff" class="small"></div>
           </div>
           <button id="btnRoomStart" class="primary wide skew hidden">게임 시작</button>
+          <button id="btnRoomForce" class="ghost small-btn room-force hidden" type="button" title="준비하지 않은 사람이 있어도 시작">그냥 시작</button>
+          <button id="btnReady" class="wide skew ready-btn hidden" type="button">준비</button>
           <div id="roomWait" class="muted small center hidden">방장이 시작하길 기다리는 중...</div>
           <div class="chat">
             <div id="chatLog" class="chat-log"></div>
@@ -716,6 +718,7 @@
     <div class="pl-head"><span class="pl-av"></span><div class="pl-who"><span class="ptitle pl-title hidden"></span><b class="pl-name"></b></div><button type="button" class="ghost tm-x pl-x" aria-label="닫기">✕</button></div>
     <div class="pl-imgs"><img class="pl-il hidden" alt=""><div class="pl-big hidden"></div><canvas class="pl-dot hidden" width="120" height="150"></canvas></div>
     <div class="pl-faces"></div>
+    <div class="pl-acts hidden"><button type="button" class="small-btn pl-give">👑 방장 넘기기</button><button type="button" class="small-btn danger pl-kick">내보내기</button></div>
     <h5>자주 하는 노래 <span class="pl-sum muted"></span></h5>
     <ol class="pl-songs"></ol>
   </div>

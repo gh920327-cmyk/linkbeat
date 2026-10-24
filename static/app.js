@@ -1174,9 +1174,14 @@ function renderRoom() {
       const pk = p.keys === 6 ? 6 : 4, pd = p.diff || 'normal';
       const st = s ? ' ' + starHtml(starOf(s, pk, pd)) : '';
       plRemember(p);
-      return `<li class="${p.id === net.id ? 'me' : ''}" data-pl="${esc(p.id)}" title="눌러서 ${esc(p.name)} 님 캐릭터·자주 하는 노래 보기">${miniHtml(p.avatar)}${p.id === r.leader ? '<span class="crown">👑</span>' : ''}<span class="pn">${p.title ? `<span class="ptitle">${esc(p.title)}</span>` : ''}${esc(p.name)}</span>
+      // 게임 전엔 준비 여부 (방장은 '방장'), 게임 중엔 로딩·플레이 중 같은 상태
+      const lead = p.id === r.leader;
+      const tag = r.phase === 'lobby' && (p.state === 'idle' || !p.state)
+        ? (lead ? '<span class="rdy lead">방장</span>' : p.ready ? '<span class="rdy on">✓ 준비</span>' : '<span class="rdy">대기</span>')
+        : `<span class="muted small">${stateName[p.state] || ''}</span>`;
+      return `<li class="${p.id === net.id ? 'me' : ''}${!lead && p.ready ? ' ready' : ''}" data-pl="${esc(p.id)}" title="눌러서 ${esc(p.name)} 님 캐릭터·자주 하는 노래 보기">${miniHtml(p.avatar)}${lead ? '<span class="crown">👑</span>' : ''}<span class="pn">${p.title ? `<span class="ptitle">${esc(p.title)}</span>` : ''}${esc(p.name)}</span>
         <span class="pdiff"><span class="tag">${pk}K</span> ${DIFF_EN[pd] || ''}${st}</span>
-        <span class="muted small">${stateName[p.state] || ''}</span></li>`;
+        ${tag}</li>`;
     }).join('');
     paintMinis($('#roomPlayers'));
     $('#roomSong').textContent = r.songId ? r.songTitle : '방장이 곡을 고르는 중...';
@@ -1189,9 +1194,22 @@ function renderRoom() {
       select(r.songId, { auto: false });
     }
     const leader = net.isLeader();
+    const others = r.players.filter((p) => p.id !== r.leader), readyN = others.filter((p) => p.ready).length;
+    const allReady = readyN === others.length;
     $('#btnRoomStart').classList.toggle('hidden', !leader);
-    $('#btnRoomStart').disabled = !r.songId || r.phase !== 'lobby';
+    $('#btnRoomStart').disabled = !r.songId || r.phase !== 'lobby' || !allReady;
+    $('#btnRoomStart').textContent = !r.songId ? '게임 시작' : allReady ? '게임 시작' : `준비 기다리는 중 (${readyN}/${others.length})`;
+    $('#btnRoomForce').classList.toggle('hidden', !leader || !r.songId || allReady || r.phase !== 'lobby');
+    // 방장이 아니면 '준비' 버튼 (누를 때마다 준비 ↔ 취소)
+    const me = r.players.find((p) => p.id === net.id);
+    const imReady = !!(me && me.ready);
+    $('#btnReady').classList.toggle('hidden', leader || r.phase !== 'lobby');
+    $('#btnReady').classList.toggle('on', imReady);
+    $('#btnReady').classList.toggle('primary', !imReady);
+    $('#btnReady').textContent = imReady ? '✓ 준비 완료 · 누르면 취소' : '준비';
     $('#roomWait').classList.toggle('hidden', leader);
+    $('#roomWait').textContent = r.phase !== 'lobby' ? '게임 진행 중...' : !r.songId ? '방장이 곡을 고르는 중...'
+      : imReady ? '방장이 시작하길 기다리는 중...' : '곡을 확인하고 준비를 눌러 주세요';
   }
   renderSongs();
 }
@@ -1260,6 +1278,15 @@ async function openPlCard(id, anchor) {
   $('.pl-title', card).textContent = p.title || '';
   $('.pl-title', card).classList.toggle('hidden', !p.title);
   plFillChar(card, a);
+  // 방장이면 같은 방의 다른 사람에게: 방장 넘기기 · 내보내기 (게임 중에는 못 함)
+  const inRoom = net.room && net.room.players.some((x) => String(x.id) === String(id));
+  const canLead = inRoom && net.isLeader() && String(id) !== String(net.id);
+  $('.pl-acts', card).classList.toggle('hidden', !canLead);
+  $('.pl-acts', card).dataset.id = id;
+  $$('.pl-acts button', card).forEach((b) => { b.disabled = !!(net.room && net.room.phase !== 'lobby'); });
+  const kb = $('.pl-kick', card);
+  kb.classList.remove('sure');
+  kb.textContent = '내보내기';
   $('.pl-sum', card).textContent = '';
   $('.pl-songs', card).innerHTML = '<li class="muted pl-empty">불러오는 중...</li>';
   card.classList.remove('hidden');
@@ -1301,6 +1328,18 @@ $('#plCard').addEventListener('click', (e) => {
     $('#plCard .pl-big').style.backgroundPosition = `${(+f.dataset.i / (n - 1)) * 100}% 0`;
     return;
   }
+  const give = e.target.closest('.pl-give'), kick = e.target.closest('.pl-kick');
+  if (give || kick) {
+    const id = +$('#plCard .pl-acts').dataset.id;
+    if (kick && !kick.classList.contains('sure')) {      // 실수로 누르지 않게 한 번 더
+      kick.classList.add('sure');
+      kick.textContent = '정말 내보낼까요? 한 번 더 누르기';
+      return;
+    }
+    net.send({ type: give ? 'giveLeader' : 'kick', id });
+    closePlCard();
+    return;
+  }
   const li = e.target.closest('.pl-songs li.can');
   if (li && currentScreen === 'lobby') { select(li.dataset.sid); closePlCard(); }
 });
@@ -1328,6 +1367,11 @@ $('#btnJoin').addEventListener('click', () => {
 $('#joinCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btnJoin').click(); });
 $('#btnLeave').addEventListener('click', () => { net.send({ type: 'leave' }); $('#chatLog').innerHTML = ''; });
 $('#btnRoomStart').addEventListener('click', () => net.send({ type: 'start' }));
+$('#btnRoomForce').addEventListener('click', () => net.send({ type: 'start', force: true }));
+$('#btnReady').addEventListener('click', () => {
+  const me = net.room && net.room.players.find((p) => p.id === net.id);
+  net.send({ type: 'ready', on: !(me && me.ready) });
+});
 $('#chatInput').addEventListener('keydown', (e) => {
   if (e.key !== 'Enter' || e.isComposing) return;
   const t = e.target.value.trim();
@@ -1349,9 +1393,11 @@ net.on('room', () => {
     if (game.spec) game.spec.sync(net.room ? net.room.players : []);
   }
 });
-net.on('left', () => {
+net.on('left', (m) => {
   lastRoomSong = null;
   renderRoom();
+  if (m && m.kicked) toast('방장이 방에서 내보냈어요.', 3500);
+  if (plCardOpen()) closePlCard();
   if (game && game.multi && game.phase !== 'ended') {
     game.destroy();
     game = null;

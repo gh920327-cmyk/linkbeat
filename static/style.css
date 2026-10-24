@@ -237,6 +237,14 @@ body.touch .game-info { padding-right: 62px; }
 .room-players li .pdiff .tag { font-size: 9px; padding: 0 4px; }
 .room-players li .small { min-width: 34px; text-align: right; }
 .room-players li.me { border-left-color: var(--cyan); }
+.room-players li.ready { border-left-color: var(--green); }
+.room-players .rdy { min-width: 44px; text-align: right; font-size: 11px; font-weight: 800; color: var(--muted); white-space: nowrap; }
+.room-players .rdy.on { color: var(--green); }
+.room-players .rdy.lead { color: var(--gold); }
+.ready-btn { margin-top: 4px; }
+.ready-btn.on { border-color: var(--green); color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); }
+.room-force { display: block; margin: 4px auto 0; font-size: 12px; }
+.room-force.hidden, .ready-btn.hidden { display: none; }
 .room-song { margin-bottom: 12px; }
 .room-song-title { font-weight: 700; margin: 2px 0; }
 .chat { margin-top: 12px; }
@@ -925,6 +933,10 @@ html[data-theme] #screen-game, html[data-theme] #screen-calib { background: #040
 .pl-face { display: block; width: 100%; border: 1px solid var(--line2); background-color: var(--panel); background-repeat: no-repeat; }
 .pl-face.on { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan) inset; }
 .pl-card h5 { margin: 12px 0 6px; font-size: 12px; font-weight: 800; }
+.pl-acts { display: flex; gap: 8px; margin-top: 10px; }
+.pl-acts.hidden { display: none; }
+.pl-acts button { flex: 1; }
+.pl-kick.sure { background: color-mix(in srgb, var(--red) 22%, transparent); color: #fff; border-color: var(--red); }
 .pl-sum { font-weight: 500; font-size: 11px; }
 .pl-songs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .pl-songs li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto 56px; gap: 8px; align-items: center; padding: 6px 8px; background: color-mix(in srgb, var(--text) 5%, transparent); }
