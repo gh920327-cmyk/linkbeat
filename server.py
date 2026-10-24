@@ -2973,6 +2973,8 @@ class Room:
         self.ai = True              # AI 채보 사용 (곡에 있으면). 방장이 끄면 모두 기존 채보
         self.phase = "lobby"        # lobby | preparing | playing
         self.banned = set()         # 방장이 내보낸 사람 (연결 번호·이름) — 이 방에는 다시 못 들어옴
+        self.watchers = {}          # 게임 중에 들어와서 구경하는 사람 (id -> Client) — 판이 끝나면 같이 함
+        self.hl_range = None        # 지금 판의 하이라이트 구간 (구경하러 들어온 사람에게 보냄)
         self.game_no = 0
         self.timer = None
 
@@ -2982,6 +2984,7 @@ class Room:
             "songId": self.song_id, "songTitle": self.song_title, "diff": self.diff, "keys": self.keys, "hl": self.hl, "ai": self.ai,
             "players": [{"id": c.id, "name": c.name, "state": c.state, "avatar": c.avatar, "title": c.title,
                          "diff": c.diff, "keys": c.keys, "ready": c.ready} for c in self.players.values()],
+            "watchers": [{"id": c.id, "name": c.name, "avatar": c.avatar, "title": c.title} for c in self.watchers.values()],
         }
 
     def roster(self):
@@ -2989,9 +2992,19 @@ class Room:
                 for c in self.players.values()]
 
     def broadcast(self, obj, exclude=None):
-        for c in list(self.players.values()):
+        for c in list(self.players.values()) + list(self.watchers.values()):
             if c is not exclude:
                 c.send(obj)
+
+    def promote_watchers(self):
+        """구경하던 사람을 다음 판 플레이어로"""
+        for w in self.watchers.values():
+            w.state, w.ready, w.result = "idle", False, None
+            if w.pending:            # 구경하는 동안 바꿔 둔 난이도/키
+                w.diff, w.keys = w.pending
+                w.pending = None
+            self.players[w.id] = w
+        self.watchers.clear()
 
     def push(self):
         self.broadcast(self.state())
@@ -3009,19 +3022,30 @@ def leave_room(client, msg=None):
     if not room:
         return
     room.players.pop(client.id, None)
+    room.watchers.pop(client.id, None)
     client.room = None
     client.state = "idle"
     client.ready = False
     if client.pending:   # 게임 중에 바꿔 둔 난이도/키는 방을 나가면 바로 적용
         client.diff, client.keys = client.pending
         client.pending = None
-    if not room.players:
+    if not room.players and not room.watchers:
         if room.timer:
             room.timer.cancel()
         ROOMS.pop(room.code, None)
         log(f"방 {room.code} 닫힘")
         return
-    if room.leader == client.id:
+    if not room.players:         # 플레이하던 사람이 다 나가고 구경하던 사람만 남음 → 판을 끝내고 같이 하게
+        if room.phase == "playing":
+            room.leader = next(iter(room.watchers))
+            finish_game(room)
+        else:
+            if room.timer:
+                room.timer.cancel()
+                room.timer = None
+            room.phase = "lobby"
+            room.promote_watchers()
+    if room.leader not in room.players:
         room.leader = next(iter(room.players))
         room.players[room.leader].ready = False
     room.broadcast({"type": "chat", "system": True, "text": msg or f"{client.name} 님이 나갔어요."})
@@ -3081,6 +3105,10 @@ def finish_game(room):
     results.sort(key=lambda r: -r.get("score", 0))
     room.broadcast({"type": "results", "results": results, "songTitle": room.song_title, "diff": room.diff, "keys": room.keys,
                     "hl": room.cur_hl})
+    if room.watchers:
+        names = ", ".join(w.name for w in room.watchers.values())
+        room.promote_watchers()
+        room.broadcast({"type": "chat", "system": True, "text": f"{names} 님도 이제 같이 해요."})
     room.push()
 
 
@@ -3145,22 +3173,26 @@ def handle_msg(c, m):
         if not r:
             c.send({"type": "error", "msg": "그런 방이 없어요."})
             return
-        if r.phase != "lobby":
-            c.send({"type": "error", "msg": "게임이 진행 중이에요. 끝나면 다시 들어와 주세요."})
-            return
         if c.id in r.banned or c.name.lower() in r.banned:
             c.send({"type": "error", "msg": "방장이 내보낸 방이라 다시 들어갈 수 없어요."})
             return
-        if len(r.players) >= 8:
+        if len(r.players) + len(r.watchers) >= 8:
             c.send({"type": "error", "msg": "방이 꽉 찼어요 (최대 8명)."})
             return
         if c.room is r:
             r.push()
             return
         leave_room(c)
-        r.players[c.id] = c
         c.room = r
         c.ready = False
+        if r.phase != "lobby":       # 게임 중: 구경하다가 판이 끝나면 같이
+            r.watchers[c.id] = c
+            r.broadcast({"type": "chat", "system": True, "text": f"{c.name} 님이 구경하러 들어왔어요. 다음 판부터 같이 해요."})
+            r.push()
+            c.send({"type": "watch", "songId": r.song_id, "songTitle": r.song_title, "players": r.roster(),
+                    "hl": r.hl_range, "ai": r.ai, "game": r.game_no})
+            return
+        r.players[c.id] = c
         r.broadcast({"type": "chat", "system": True, "text": f"{c.name} 님이 들어왔어요."})
         r.push()
         return
@@ -3204,15 +3236,24 @@ def handle_msg(c, m):
         room.hl = bool(m.get("on"))
         room.push()
         return
+    if t == "suggest" and room.leader != c.id:
+        sid = str(m.get("songId", ""))
+        song = load_song(sid) if VID_RE.match(sid) else None
+        now = time.time()
+        if not song or now - getattr(c, "suggest_at", 0) < 3:
+            return
+        c.suggest_at = now
+        room.broadcast({"type": "suggest", "id": c.id, "name": c.name, "songId": sid, "title": song.get("title", sid)})
+        return
     if t in ("kick", "giveLeader") and room.leader == c.id:
         try:
             tid = int(m.get("id"))
         except (TypeError, ValueError):
             return
-        target = room.players.get(tid)
+        target = room.players.get(tid) or (room.watchers.get(tid) if t == "kick" else None)
         if not target or target is c:
             return
-        if room.phase != "lobby":
+        if room.phase != "lobby" and target.id not in room.watchers:
             c.send({"type": "error", "msg": "게임이 끝난 뒤에 할 수 있어요."})
             return
         if t == "giveLeader":
@@ -3249,6 +3290,7 @@ def handle_msg(c, m):
                 return
         room.phase = "preparing"
         room.cur_hl = bool(hl_range)
+        room.hl_range = hl_range
         room.game_no += 1
         for p in room.players.values():
             p.state = "loading"
@@ -3263,6 +3305,8 @@ def handle_msg(c, m):
         g = room.game_no
         room.timer = loop.call_later(25, lambda: room.game_no == g and start_game(room))
         return
+    if t in ("loaded", "progress", "finish", "ready") and c.id not in room.players:
+        return                       # 구경하는 사람은 게임 메시지를 보내지 않음
     if t == "loaded" and room.phase == "preparing":
         c.state = "loaded" if not m.get("error") else "error"
         room.push()

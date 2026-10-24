@@ -7,14 +7,15 @@ const SPEC_PPS = 1.15;     // 미니 기어 높이 대비 초당 스크롤 (화�
 const SPEC_LOOK = 0.75;    // 판정선 위로 보여줄 시간(초)
 
 class Spectator {
-  constructor(game, roster) {
+  constructor(game, roster, ui = {}) {
     this.game = game;
     this.song = game.song;
-    this.box = $('#specGrid');
+    this.ui = Object.assign({ box: '#specGrid', panel: '#specPanel', count: '#specCount' }, ui);
+    this.box = $(this.ui.box);
     this.views = new Map();
     this.raf = 0;
     this.sync(roster || []);
-    $('#specPanel').classList.remove('hidden');
+    $(this.ui.panel).classList.remove('hidden');
     this.start();
   }
 
@@ -36,8 +37,8 @@ class Spectator {
       this.renderHead(v);
     }
     this.box.className = 'spec-grid n' + Math.min(7, this.views.size);
-    $('#specPanel').classList.toggle('hidden', !this.views.size);
-    $('#specCount').textContent = this.views.size ? `${this.views.size}명` : '';
+    $(this.ui.panel).classList.toggle('hidden', !this.views.size);
+    $(this.ui.count).textContent = this.views.size ? `${this.views.size}명` : '';
   }
 
   makeView(p) {
@@ -223,6 +224,6 @@ class Spectator {
     cancelAnimationFrame(this.raf);
     this.box.innerHTML = '';
     this.views.clear();
-    $('#specPanel').classList.add('hidden');
+    $(this.ui.panel).classList.add('hidden');
   }
 }

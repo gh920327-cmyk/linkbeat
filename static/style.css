@@ -235,7 +235,7 @@ body.touch .game-info { padding-right: 62px; }
 .room-players li .pn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .room-players li .pdiff { margin-left: auto; font-family: var(--head); font-size: 10px; letter-spacing: .5px; white-space: nowrap; color: var(--muted); }
 .room-players li .pdiff .tag { font-size: 9px; padding: 0 4px; }
-.room-players li .small { min-width: 34px; text-align: right; }
+.room-players li .small { min-width: 34px; text-align: right; white-space: nowrap; }
 .room-players li.me { border-left-color: var(--cyan); }
 .room-players li.ready { border-left-color: var(--green); }
 .room-players .rdy { min-width: 44px; text-align: right; font-size: 11px; font-weight: 800; color: var(--muted); white-space: nowrap; }
@@ -251,6 +251,23 @@ body.touch .game-info { padding-right: 62px; }
 .chat-log { height: 120px; overflow: auto; font-size: 13px; background: rgba(6, 10, 22, .8); border: 1px solid var(--line); padding: 8px; margin-bottom: 6px; }
 .chat-log div { margin-bottom: 3px; word-break: break-all; }
 .chat-log .sys { color: var(--muted); font-style: italic; }
+.chat-log .sug { padding: 6px 8px; margin: 4px 0; background: color-mix(in srgb, var(--gold) 12%, transparent); border-left: 3px solid var(--gold); word-break: keep-all; }
+.chat-log .sug-t { font-weight: 800; color: var(--gold); }
+.chat-log .sug-go { margin-left: 4px; padding: 2px 10px; font-size: 12px; }
+.room-players li.watch { opacity: .8; border-left-style: dashed; }
+.room-players .rdy.watch { color: var(--cyan); }
+/* 구경 창 */
+.watch-dlg { width: min(1100px, calc(100vw - 24px)); }
+.watch-body { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 12px; align-items: start; }
+.watch-body .spec-grid.n1 .spec-field, .watch-body .spec-grid.n2 .spec-field { height: 420px; }
+.watch-body .spec-grid.n3 .spec-field, .watch-body .spec-grid.n4 .spec-field { height: 300px; }
+.watch-body .live { padding: 10px; }
+.watch-body .live h4 { margin: 0 0 8px; }
+@media (max-width: 820px) {
+  .watch-body { grid-template-columns: 1fr; }
+  .watch-dlg .spec:not(.hidden) { display: block !important; }
+  .watch-body .spec-grid .spec-field { height: 220px !important; }
+}
 .chat input { width: 100%; }
 .help ul { padding-left: 18px; margin: 8px 0 0; line-height: 1.8; }
 .keys-help { display: flex; gap: 6px; flex-wrap: wrap; }
