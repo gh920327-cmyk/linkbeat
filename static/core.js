@@ -639,6 +639,7 @@ const net = {
 let currentScreen = 'lobby';
 function showScreen(name) {
   currentScreen = name;
+  if (typeof onScreenChange === 'function') { try { onScreenChange(name); } catch { /* 무시 */ } }
   $$('.screen').forEach((s) => s.classList.toggle('active', s.id === 'screen-' + name));
   const slot = { game: '#slotGame', editor: '#slotEditor', calib: '#slotCalib' }[name];
   const slotEl = slot ? $(slot) : null;

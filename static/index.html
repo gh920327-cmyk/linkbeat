@@ -47,6 +47,7 @@
     <div class="top-right">
       <div class="who">
         <span id="connDot" class="dot" title="서버 연결 상태"></span>
+        <button id="btnOnline" class="ghost on-btn" type="button" title="지금 접속 중인 사람" aria-haspopup="true">👥 <b id="onCount">-</b></button>
         <button id="btnProfile" class="ghost pf-btn" type="button"></button>
         <span id="myTitle" class="ptitle my-title hidden" title="내 칭호"></span>
       </div>
@@ -753,6 +754,11 @@
     <div class="pl-acts hidden"><button type="button" class="small-btn pl-give">👑 방장 넘기기</button><button type="button" class="small-btn danger pl-kick">내보내기</button></div>
     <h5>자주 하는 노래 <span class="pl-sum muted"></span></h5>
     <ol class="pl-songs"></ol>
+  </div>
+  <div id="onMenu" class="on-menu hidden" role="dialog" aria-label="지금 접속 중">
+    <div class="tm-head"><b>지금 접속 중</b><span class="muted" id="onSum"></span><button type="button" id="onClose" class="ghost tm-x" aria-label="닫기">✕</button></div>
+    <ul id="onList" class="on-list"></ul>
+    <p class="small muted on-tip">이름을 누르면 캐릭터·자주 하는 노래, '같이 하기'를 누르면 그 방에 들어가요.</p>
   </div>
   <div id="themeMenu" class="theme-menu hidden" role="menu" aria-label="화면 테마 고르기">
     <div class="tm-head"><b>화면 테마</b><span class="muted">누르면 바로 바뀌어요</span><button type="button" id="tmClose" class="ghost tm-x" aria-label="닫기">✕</button></div>

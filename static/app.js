@@ -1332,7 +1332,7 @@ async function openPlCard(id, anchor) {
 }
 document.addEventListener('click', (e) => {
   const t = e.target.closest('[data-pl]');
-  if (t && !e.target.closest('#plCard')) { e.stopPropagation(); openPlCard(t.dataset.pl, t); return; }
+  if (t && !e.target.closest('#plCard') && !e.target.closest('button')) { e.stopPropagation(); openPlCard(t.dataset.pl, t); return; }   // 줄 안의 버튼(같이 하기 등)은 그 버튼 일을
   if (!plCardOpen() || e.target.closest('#plCard')) return;
   closePlCard();
 }, true);
@@ -1390,6 +1390,76 @@ $('#chatLog').addEventListener('click', (e) => {
     net.send({ type: 'select', songId: s.id, diff: settings.diff, keys: settings.mode, ai: soloPick(s) });
   }
 });
+
+/* ============================================================ 지금 접속 중인 사람 */
+const ON_KIND = { lobby: '로비', room: '방', multi: '멀티 플레이 중', watch: '구경 중', solo: '혼자 플레이 중', edit: '채보 편집 중', calib: '싱크 맞추는 중' };
+let onTimer = 0;
+function onMenuOpen() { return !$('#onMenu').classList.contains('hidden'); }
+function closeOnMenu() { $('#onMenu').classList.add('hidden'); clearInterval(onTimer); }
+function onStatusHtml(st) {
+  const k = ON_KIND[st.kind] || '';
+  if (st.kind === 'room') return `방 <b>${esc(st.room)}</b>${st.leader ? ' · 방장' : ''}${st.n ? ` · ${st.n}명` : ''}${st.song ? ` · ${esc(st.song)}` : ''}`;
+  if (st.kind === 'multi' || st.kind === 'watch') return `${k} · 방 <b>${esc(st.room)}</b>${st.song ? ` · ${esc(st.song)}` : ''}`;
+  return k + (st.song ? ` · ${esc(st.song)}` : '');
+}
+async function loadOnline() {
+  try {
+    const r = await fetch('/api/online');
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.status);
+    $('#onCount').textContent = j.n;
+    $('#onSum').textContent = `${j.n}명`;
+    const myRoom = net.room && net.room.code;
+    $('#onList').innerHTML = j.people.map((p) => {
+      plRemember(p);
+      const me = String(p.id) === String(net.id);
+      const st = p.status || {};
+      const can = !me && st.room && st.room !== myRoom;
+      return `<li class="${me ? 'me' : ''}" data-pl="${esc(p.id)}">${miniHtml(p.avatar, 30)}<span class="on-who">`
+        + `<span class="on-name">${p.title ? `<span class="ptitle">${esc(p.title)}</span>` : ''}${esc(p.name)}${me ? ' <small>(나)</small>' : ''}</span>`
+        + `<span class="on-st on-${esc(st.kind || 'lobby')}">${onStatusHtml(st)}</span></span>`
+        + (can ? `<button type="button" class="small-btn on-join" data-room="${esc(st.room)}">${st.kind === 'room' ? '같이 하기' : '구경하기'}</button>` : '')
+        + '</li>';
+    }).join('') || '<li class="muted">아무도 없어요.</li>';
+    paintMinis($('#onList'));
+  } catch (e) {
+    $('#onList').innerHTML = `<li class="muted">불러오지 못했어요 (${esc(e.message)})</li>`;
+  }
+}
+function openOnMenu() {
+  const m = $('#onMenu'), r = $('#btnOnline').getBoundingClientRect();
+  m.classList.remove('hidden');
+  const w = m.offsetWidth;
+  m.style.top = `${Math.round(r.bottom + 6)}px`;
+  m.style.left = `${Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, r.left)))}px`;
+  loadOnline();
+  clearInterval(onTimer);
+  onTimer = setInterval(loadOnline, 5000);
+}
+$('#btnOnline').addEventListener('click', (e) => { e.stopPropagation(); if (onMenuOpen()) closeOnMenu(); else openOnMenu(); });
+$('#onClose').addEventListener('click', closeOnMenu);
+$('#onList').addEventListener('click', (e) => {
+  const b = e.target.closest('.on-join');
+  if (!b) return;
+  e.stopPropagation();
+  if (currentScreen === 'game' && game && game.phase === 'playing') { toast('지금 하는 곡이 끝난 뒤에 들어가 주세요.'); return; }
+  net.send({ type: 'join', code: b.dataset.room });
+  closeOnMenu();
+  if (closePlCard) closePlCard();
+  const tg = $('#listTabs [data-side="multi"]');
+  if (tg && !tg.classList.contains('on') && currentScreen === 'lobby') tg.click();
+});
+document.addEventListener('click', (e) => {
+  if (onMenuOpen() && !e.target.closest('#onMenu, #plCard, #bigView, #btnOnline')) closeOnMenu();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && onMenuOpen() && !plCardOpen()) { e.stopPropagation(); closeOnMenu(); } }, true);
+net.on('online', (m) => { $('#onCount').textContent = m.n; if (onMenuOpen()) loadOnline(); });
+// 혼자 하는 곡·편집 중을 서버에 알려 둠 ('접속 중' 목록에 보이게)
+function onScreenChange(name) {
+  const what = name === 'game' && game && !game.multi ? 'solo' : name === 'editor' ? 'edit' : name === 'calib' ? 'calib' : 'lobby';
+  net.send({ type: 'activity', what, song: what === 'solo' && game ? game.song.title : what === 'edit' && editor && editor.song ? editor.song.title : '' });
+}
+net.on('status', (on) => { if (on) onScreenChange(currentScreen); });
 
 /* ============================================================ 구경 (게임 중인 방에 들어왔을 때) */
 const watch = { spec: null, peers: {}, game: 0 };
