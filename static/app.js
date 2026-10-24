@@ -1014,6 +1014,9 @@ function startConfetti(big) {
   confettiRaf = requestAnimationFrame(step);
 }
 
+/* 결과 화면 내 일러스트·캐릭터를 누르면 크게 */
+$('#rIllust').addEventListener('click', () => openBigView(settings.avatar, 'il', settings.nick || '내 캐릭터'));
+$('#rAvatar').addEventListener('click', () => openBigView(settings.avatar, 'char', settings.nick || '내 캐릭터'));
 /* 결과 화면 캐릭터: 등급에 따라 환호 / 보통 / 아쉬움 */
 let resultAvRaf = 0;
 function startResultAvatar(r) {
@@ -1236,6 +1239,7 @@ function plLookup(id) {
   return plSeen[id] || null;
 }
 let plReq = 0;
+let plShown = null;     // 카드에 보이는 사람 (크게 보기용)
 function plCardOpen() { return !$('#plCard').classList.contains('hidden'); }
 function closePlCard() { $('#plCard').classList.add('hidden'); plReq++; }
 function plFillChar(card, a) {
@@ -1284,6 +1288,7 @@ async function openPlCard(id, anchor) {
   const p = plLookup(id);
   if (!p) return;
   const card = $('#plCard'), a = avatarValid(p.avatar);
+  plShown = { avatar: a, name: p.name };
   $('.pl-av', card).innerHTML = miniHtml(a, 34);
   paintMinis($('.pl-av', card));
   $('.pl-name', card).textContent = p.name + (String(id) === String(net.id) ? ' (나)' : '');
@@ -1333,6 +1338,12 @@ document.addEventListener('click', (e) => {
 }, true);
 $('#plCard').addEventListener('click', (e) => {
   if (e.target.closest('.pl-x')) { closePlCard(); return; }
+  const big = e.target.closest('.pl-il, .pl-big, .pl-dot');
+  if (big && plShown) {        // 일러스트·캐릭터를 누르면 크게
+    const on = $('#plCard .pl-face.on');
+    openBigView(plShown.avatar, big.classList.contains('pl-il') ? 'il' : 'char', plShown.name, { face: on ? +on.dataset.i : 0 });
+    return;
+  }
   const f = e.target.closest('.pl-face');
   if (f) {
     const n = STK_EXPR.length;
