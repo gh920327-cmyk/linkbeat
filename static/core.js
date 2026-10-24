@@ -246,6 +246,18 @@ const sfx = {
 };
 /* 타격감 소리 (직접 합성): 강타 · 롱노트 마무리 · 콤보 끊김 — 음량은 전체 음량을 따름 */
 sfx.fxVol = function (k) { return clamp((settings.volume ?? 80) / 100, 0, 1) * k; };
+/* 방: 모두 준비됐을 때 방장에게 '띵-동' */
+sfx.ding = function () {
+  const ctx = this.ensure();
+  if (!ctx) return;
+  const t = ctx.currentTime, v = this.fxVol(0.22);
+  [[880, 0], [1318.5, 0.13]].forEach(([f, d]) => {
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(f, t + d);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t + d); g.gain.exponentialRampToValueAtTime(v, t + d + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.45);
+    o.connect(g).connect(ctx.destination); o.start(t + d); o.stop(t + d + 0.5);
+  });
+};
 sfx.accent = function () {
   if (settings.skin.accentSound === false) return;
   const ctx = this.ensure();

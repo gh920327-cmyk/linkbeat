@@ -211,6 +211,9 @@
             <div id="roomDiff" class="small"></div>
           </div>
           <button id="btnRoomStart" class="primary wide skew hidden">게임 시작</button>
+          <button id="btnRoomForce" class="ghost small-btn room-force hidden" type="button" title="준비하지 않은 사람이 있어도 시작">그냥 시작</button>
+          <button id="btnReady" class="wide skew ready-btn hidden" type="button">준비</button>
+          <button id="btnWatch" class="wide skew hidden" type="button">👀 구경하기</button>
           <div id="roomWait" class="muted small center hidden">방장이 시작하길 기다리는 중...</div>
           <div class="chat">
             <div id="chatLog" class="chat-log"></div>
@@ -560,6 +563,21 @@
 </dialog>
 
 <!-- AI 캐릭터: 예전 것·새 것 고르기 -->
+<!-- 게임 중인 방에 들어왔을 때: 친구들 화면 구경 (판이 끝나면 다음 판부터 같이) -->
+<dialog id="watchDlg" class="watch-dlg">
+  <div class="skin-box">
+    <div class="skin-head">
+      <h3>WATCHING<small id="wTitle">구경 중</small></h3>
+      <button id="wClose" class="ghost small-btn" type="button">닫기</button>
+    </div>
+    <p class="small muted" id="wNote">게임이 끝나면 다음 판부터 같이 할 수 있어요.</p>
+    <div class="watch-body">
+      <div class="panel spec" id="wPanel"><h4>친구 화면 <span id="wCount" class="muted"></span></h4><div id="wGrid" class="spec-grid"></div></div>
+      <div class="panel live"><h4 id="wBoardHead">실시간 순위</h4><ol id="wBoard" class="live-board"></ol></div>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="avPickDlg">
   <div class="skin-box">
     <div class="skin-head">
@@ -712,6 +730,14 @@
 
 <div id="toast" class="toast"></div>
 
+  <div id="plCard" class="pl-card hidden" role="dialog" aria-label="플레이어 정보">
+    <div class="pl-head"><span class="pl-av"></span><div class="pl-who"><span class="ptitle pl-title hidden"></span><b class="pl-name"></b></div><button type="button" class="ghost tm-x pl-x" aria-label="닫기">✕</button></div>
+    <div class="pl-imgs"><img class="pl-il hidden" alt=""><div class="pl-big hidden"></div><canvas class="pl-dot hidden" width="120" height="150"></canvas></div>
+    <div class="pl-faces"></div>
+    <div class="pl-acts hidden"><button type="button" class="small-btn pl-give">👑 방장 넘기기</button><button type="button" class="small-btn danger pl-kick">내보내기</button></div>
+    <h5>자주 하는 노래 <span class="pl-sum muted"></span></h5>
+    <ol class="pl-songs"></ol>
+  </div>
   <div id="themeMenu" class="theme-menu hidden" role="menu" aria-label="화면 테마 고르기">
     <div class="tm-head"><b>화면 테마</b><span class="muted">누르면 바로 바뀌어요</span><button type="button" id="tmClose" class="ghost tm-x" aria-label="닫기">✕</button></div>
     <h5>어두운</h5><div class="tm-grid" data-g="dark"></div>

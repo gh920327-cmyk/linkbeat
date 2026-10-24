@@ -1578,10 +1578,10 @@ class Game {
       const me = p.id === net.id;
       const d = me ? { score: this.score(), combo: this.combo } : this.peers[p.id] || { score: 0, combo: 0 };
       const diff = me ? this.diff : p.diff, keys = me ? this.nl : p.keys;
-      return { name: p.name, me, avatar: p.avatar, diff, keys, ...d };
+      return { id: p.id, name: p.name, me, avatar: p.avatar, diff, keys, ...d };
     }).sort((a, b) => b.score - a.score);
     $('#liveBoard').innerHTML = rows.map((r) =>
-      `<li class="${r.me ? 'me' : ''}"><span class="n">${typeof miniHtml === 'function' ? miniHtml(r.avatar, 24) : ''} ${esc(r.name)}${r.diff ? ` <small class="ld">${r.keys || 4}K ${(typeof DIFF_EN !== 'undefined' && DIFF_EN[r.diff]) || ''}</small>` : ''}</span><span class="s">${String(r.score).padStart(7, '0')}</span><span class="c">${r.combo}x</span></li>`
+      `<li class="${r.me ? 'me' : ''}" data-pl="${esc(r.id)}" title="눌러서 캐릭터·자주 하는 노래 보기"><span class="n">${typeof miniHtml === 'function' ? miniHtml(r.avatar, 24) : ''} ${esc(r.name)}${r.diff ? ` <small class="ld">${r.keys || 4}K ${(typeof DIFF_EN !== 'undefined' && DIFF_EN[r.diff]) || ''}</small>` : ''}</span><span class="s">${String(r.score).padStart(7, '0')}</span><span class="c">${r.combo}x</span></li>`
     ).join('');
     if (typeof paintMinis === 'function') paintMinis($('#liveBoard'));
   }
