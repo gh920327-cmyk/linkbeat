@@ -957,6 +957,26 @@ html[data-theme] #screen-game, html[data-theme] #screen-calib { background: #040
 .pl-il, .pl-big, .pl-dot, #avAiIllust, #avAiPixel, #rIllust, #rAvatar { cursor: zoom-in; }
 .mc-big { position: absolute; right: 8px; top: 6px; z-index: 2; padding: 3px 9px; font-size: 11px; border: 1px solid var(--line2); background: color-mix(in srgb, var(--panel2) 80%, transparent); color: var(--muted); }
 .mc-big:hover:not(:disabled) { color: var(--text); }
+/* 지금 접속 중 */
+.on-btn { padding: 4px 10px; font-size: 13px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.on-btn b { color: var(--text); font-family: var(--head); }
+.on-menu { position: fixed; z-index: 80; width: 380px; max-width: calc(100vw - 16px); max-height: calc(100vh - 80px); overflow: auto; padding: 12px 12px 10px;
+  background: var(--dlg, var(--panel2)); border: 1px solid var(--line2); box-shadow: 0 18px 44px rgba(0, 0, 0, .38); color: var(--text); animation: tmIn .14s ease-out; }
+.on-menu.hidden { display: none; }
+.on-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.on-list li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; background: color-mix(in srgb, var(--text) 5%, transparent); border-left: 3px solid transparent; }
+.on-list li.me { border-left-color: var(--cyan); }
+.on-list li[data-pl]:hover { background: color-mix(in srgb, var(--cyan) 12%, transparent); }
+.on-list .mini-av { width: 30px; height: 30px; }
+.on-who { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.on-name { font-weight: 700; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.on-name small { color: var(--muted); font-weight: 500; }
+.on-st { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.on-st b { color: var(--text); font-family: var(--head); letter-spacing: 1px; }
+.on-st.on-multi, .on-st.on-solo { color: var(--green); }
+.on-st.on-room, .on-st.on-watch { color: var(--cyan); }
+.on-join { flex-shrink: 0; padding: 3px 10px; font-size: 12px; }
+.on-tip { margin: 8px 2px 0; }
 /* 새 버전 알림 띠 */
 .ver-banner { position: fixed; z-index: 90; left: 50%; top: 10px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center;
   max-width: calc(100vw - 16px); padding: 8px 12px; background: var(--dlg, var(--panel2)); color: var(--text); border: 1px solid var(--cyan);

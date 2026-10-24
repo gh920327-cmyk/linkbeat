@@ -2627,6 +2627,8 @@ async def api(method, path, headers, body):
         return await loop.run_in_executor(None, profile_logout, headers)
     if parts == ["scores"] and method == "POST":
         return submit_score(json_body(body))
+    if parts == ["online"] and method == "GET":
+        return online_list()
     if len(parts) == 2 and parts[0] == "player" and method == "GET":
         return await loop.run_in_executor(None, player_info, parts[1])
     if len(parts) == 2 and parts[0] == "scores" and method == "GET":
@@ -2876,6 +2878,8 @@ class Client:
         self.room = None
         self.state = "idle"     # idle | loading | loaded | playing | done
         self.ready = False      # 방에서 '준비' (방장은 필요 없음) — 곡이 바뀌거나 한 판이 끝나면 풀림
+        self.named = False      # 이름을 알려 준 사람만 '접속 중' 목록에 (첫 화면에서 로그인 전은 빼고)
+        self.act = None         # 혼자 하는 중인 것 {"what": solo|edit|calib|lobby, "song": 곡 제목}
         self.result = None
         self.live = {"score": 0, "combo": 0, "acc": 100.0}
         self.avatar = None
@@ -2962,6 +2966,8 @@ async def ws_session(reader, writer, headers):
         client.closed = True
         CLIENTS.pop(client.id, None)
         leave_room(client)
+        if client.named:
+            broadcast_online()
         try:
             writer.close()
         except Exception:
@@ -3148,6 +3154,38 @@ def set_my_diff(c, m):
     return changed
 
 
+def broadcast_online():
+    """접속 중인 사람 수가 바뀌면 모두에게 (위쪽 '접속 중 N명')"""
+    n = sum(1 for c in CLIENTS.values() if c.named and not c.closed)
+    for c in list(CLIENTS.values()):
+        if not c.closed:
+            c.send({"type": "online", "n": n})
+
+
+def online_list():
+    """지금 접속 중인 사람과 하는 일 (방·플레이 중인 곡·혼자 하는 곡)"""
+    out = []
+    for c in list(CLIENTS.values()):
+        if not c.named or c.closed:
+            continue
+        r = c.room
+        if r:
+            if c.id in r.watchers:
+                st = {"kind": "watch", "room": r.code, "song": r.song_title}
+            elif r.phase != "lobby":
+                st = {"kind": "multi", "room": r.code, "song": r.song_title}
+            else:
+                st = {"kind": "room", "room": r.code, "song": r.song_title if r.song_id else "", "n": len(r.players) + len(r.watchers),
+                      "leader": r.leader == c.id}
+        elif c.act:
+            st = {"kind": c.act["what"], "song": c.act.get("song", "")}
+        else:
+            st = {"kind": "lobby"}
+        out.append({"id": c.id, "name": c.name, "avatar": c.avatar, "title": c.title, "status": st})
+    out.sort(key=lambda x: x["name"].lower())
+    return {"n": len(out), "people": out}
+
+
 def _restore_song(room, sid):
     sid = str(sid or "")
     song = load_song(sid) if VID_RE.match(sid) else None
@@ -3166,6 +3204,9 @@ def handle_msg(c, m):
         name = str(m.get("name", "")).strip()[:16]
         if name:
             c.name = name
+            if not c.named:
+                c.named = True
+                broadcast_online()
         av = m.get("avatar")
         if isinstance(av, dict):   # 캐릭터: 짧은 값만 받아서 저장 (화면에서 다시 검사함)
             c.avatar = {str(k)[:12]: (v if isinstance(v, int) and 0 <= v < 100 else str(v)[:12])
@@ -3175,6 +3216,10 @@ def handle_msg(c, m):
         set_my_diff(c, m)
         if room:
             room.push()
+        return
+    if t == "activity":
+        what = str(m.get("what", ""))
+        c.act = {"what": what, "song": str(m.get("song", ""))[:60]} if what in ("solo", "edit", "calib") else None
         return
     if t == "mydiff":
         # 게임 중이면 기억해 뒀다가 판이 끝날 때 적용
