@@ -40,6 +40,7 @@ SONGS.mkdir(parents=True, exist_ok=True)
 SCORES = DATA / "scores"
 SCORES.mkdir(parents=True, exist_ok=True)
 REQ_FILE = DATA / "requests.json"
+PLAYS_FILE = DATA / "plays.json"         # 이름별 곡마다 플레이 횟수 (다른 사람을 누르면 '자주 하는 노래')
 PROFILES_FILE = DATA / "profiles.json"   # 친구들 프로필 (설정·기록 백업)
 MAIN_LOOP = None
 PORT = int(os.environ.get("PORT", "8800"))
@@ -449,11 +450,59 @@ def _submit_score(sid, diff, keys, name, data):
         if drop:
             sc["entries"] = [e for e in sc["entries"] if e not in drop]
     save_scores(sid, sc)
+    if not data.get("incomplete"):
+        try:
+            record_play(name, sid)
+        except Exception as e:
+            log("플레이 횟수 저장 실패:", e)
     board = sorted([e for e in sc["entries"] if _same_board(e, diff, keys, hl, ai)],
                    key=lambda e: -e["score"])
     mine = next((e for e in board if e["name"] == name), None)
     pos = (1 + sum(1 for e in board if e["score"] > mine["score"])) if mine else None   # 동점은 같은 순위
     return {"newBest": new_best, "position": pos, "total": len(board), "plays": sc["plays"]}
+
+
+def record_play(name, sid):
+    """끝까지 한 판마다 이름별·곡별 횟수 +1 (FILE_LOCK 안에서 부름)"""
+    d = read_json(PLAYS_FILE, {})
+    if not isinstance(d, dict):
+        d = {}
+    u = d.get(name) if isinstance(d.get(name), dict) else {}
+    c = u.get(sid)
+    cnt = int(c[0]) if isinstance(c, list) and c else 0
+    u[sid] = [cnt + 1, int(time.time())]
+    if len(u) > 300:            # 곡이 아주 많으면 적게·오래전에 한 곡부터 정리
+        u = dict(sorted(u.items(), key=lambda kv: (-kv[1][0], -kv[1][1]))[:300])
+    d[name] = u
+    if len(d) > 3000:           # 이름이 아주 많으면 오래 안 한 사람부터 정리
+        d = dict(sorted(d.items(), key=lambda kv: -max((v[1] for v in kv[1].values()), default=0))[:3000])
+    write_json_atomic(PLAYS_FILE, d)
+
+
+def player_info(name):
+    """다른 사람 정보: 자주 하는 노래 (플레이 횟수 순, 횟수를 세기 전 기록은 '기록 있음')"""
+    name = str(name or "").strip()[:16]
+    if not name:
+        raise HttpError(400, "이름이 없어요.")
+    with FILE_LOCK:
+        d = read_json(PLAYS_FILE, {})
+    mine = d.get(name) if isinstance(d, dict) and isinstance(d.get(name), dict) else {}
+    rows = []
+    for s in list_songs():
+        sid = s["id"]
+        ents = [e for e in s.get("board", []) if e.get("name") == name]
+        c = mine.get(sid)
+        cnt, last = (int(c[0]), int(c[1])) if isinstance(c, list) and len(c) == 2 else (0, 0)
+        if not ents and not cnt:
+            continue
+        best = max(ents, key=lambda e: e.get("score", 0)) if ents else None
+        last = max([last] + [int(e.get("at", 0)) for e in ents])
+        rows.append({
+            "id": sid, "title": s.get("title", sid), "artist": s.get("artist", ""), "plays": cnt, "last": last,
+            "best": {k: best.get(k) for k in ("score", "rank", "diff", "keys", "fc", "acc", "ai", "hl")} if best else None,
+        })
+    rows.sort(key=lambda r: (-r["plays"], -r["last"]))
+    return {"name": name, "songs": rows[:6], "songCount": len(rows), "totalPlays": sum(r["plays"] for r in rows)}
 
 
 # ============================================================ 채보 생성 작업
@@ -2564,6 +2613,8 @@ async def api(method, path, headers, body):
         return await loop.run_in_executor(None, profile_logout, headers)
     if parts == ["scores"] and method == "POST":
         return submit_score(json_body(body))
+    if len(parts) == 2 and parts[0] == "player" and method == "GET":
+        return await loop.run_in_executor(None, player_info, parts[1])
     if len(parts) == 2 and parts[0] == "scores" and method == "GET":
         if not VID_RE.match(parts[1]):
             raise HttpError(400, "잘못된 곡 ID")

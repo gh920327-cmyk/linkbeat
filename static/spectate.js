@@ -51,7 +51,7 @@ class Spectator {
       .sort((a, b) => a.t - b.t);
     const el = document.createElement('div');
     el.className = 'spec-card';
-    el.innerHTML = `<div class="spec-head"><span class="spec-av"></span><span class="spec-name"></span></div>
+    el.innerHTML = `<div class="spec-head" data-pl="${esc(p.id)}" title="눌러서 캐릭터·자주 하는 노래 보기"><span class="spec-av"></span><span class="spec-name"></span></div>
       <div class="spec-sub"><span class="spec-diff"></span><span class="spec-score">0000000</span></div>
       <div class="spec-field"><canvas></canvas><div class="spec-state"></div></div>`;
     const stars = starRating(notes, nl);

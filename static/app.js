@@ -1094,8 +1094,9 @@ function drawTiming(offsets) {
 const r_avatars = {};
 function renderMultiResults(m) {
   const avOf = (id) => ((net.room && net.room.players.find((p) => p.id === id)) || {}).avatar || r_avatars[id];
+  for (const r of m.results) plRemember({ id: r.id, name: r.name, title: r.title, avatar: avOf(r.id) || r.avatar });
   $('#rMultiList').innerHTML = m.results.map((r, i) =>
-    `<li class="${r.id === net.id ? 'me' : ''}"><span class="pos">${i + 1}</span><span class="n">${miniHtml(avOf(r.id) || r.avatar, 24)} ${r.title ? `<span class="ptitle">${esc(r.title)}</span>` : ''}${esc(r.name)}${r.diff ? ` <small class="ld"><span class="tag">${r.keys || 4}K</span> ${DIFF_EN[r.diff] || ''}</small>` : ''}</span>
+    `<li class="${r.id === net.id ? 'me' : ''}" data-pl="${esc(r.id)}"><span class="pos">${i + 1}</span><span class="n">${miniHtml(avOf(r.id) || r.avatar, 24)} ${r.title ? `<span class="ptitle">${esc(r.title)}</span>` : ''}${esc(r.name)}${r.diff ? ` <small class="ld"><span class="tag">${r.keys || 4}K</span> ${DIFF_EN[r.diff] || ''}</small>` : ''}</span>
       <span class="s">${(r.score || 0).toLocaleString()}</span><span class="a">${(r.acc || 0).toFixed(2)}%</span>
       <span class="rk rank-${esc(r.rank || '')}">${r.incomplete ? '포기' : esc(r.rank || '')}</span></li>`).join('');
   paintMinis($('#rMultiList'));
@@ -1172,7 +1173,8 @@ function renderRoom() {
     $('#roomPlayers').innerHTML = r.players.map((p) => {
       const pk = p.keys === 6 ? 6 : 4, pd = p.diff || 'normal';
       const st = s ? ' ' + starHtml(starOf(s, pk, pd)) : '';
-      return `<li class="${p.id === net.id ? 'me' : ''}">${miniHtml(p.avatar)}${p.id === r.leader ? '<span class="crown">👑</span>' : ''}<span class="pn">${p.title ? `<span class="ptitle">${esc(p.title)}</span>` : ''}${esc(p.name)}</span>
+      plRemember(p);
+      return `<li class="${p.id === net.id ? 'me' : ''}" data-pl="${esc(p.id)}" title="눌러서 ${esc(p.name)} 님 캐릭터·자주 하는 노래 보기">${miniHtml(p.avatar)}${p.id === r.leader ? '<span class="crown">👑</span>' : ''}<span class="pn">${p.title ? `<span class="ptitle">${esc(p.title)}</span>` : ''}${esc(p.name)}</span>
         <span class="pdiff"><span class="tag">${pk}K</span> ${DIFF_EN[pd] || ''}${st}</span>
         <span class="muted small">${stateName[p.state] || ''}</span></li>`;
     }).join('');
@@ -1193,6 +1195,116 @@ function renderRoom() {
   }
   renderSongs();
 }
+
+/* ============================================================ 다른 사람 카드: 방·실시간 순위·친구 화면·결과에서 누르면
+   그 사람이 쓰는 일러스트·캐릭터(표정)와 자주 하는 노래. 플레이 중에도 키 입력을 막지 않게 작은 창(바깥·ESC·✕로 닫힘) */
+const plSeen = {};      // id → {id, name, title, avatar} (방을 나간 뒤 결과 화면에서도 쓰게)
+function plRemember(p) { if (p && p.id) plSeen[p.id] = { id: p.id, name: p.name, title: p.title || '', avatar: p.avatar }; }
+function plLookup(id) {
+  const p = net.room && net.room.players.find((x) => String(x.id) === String(id));     // 방 번호표(id)는 숫자, 화면의 data-pl은 글자
+  if (p) plRemember(p);
+  return plSeen[id] || null;
+}
+let plReq = 0;
+function plCardOpen() { return !$('#plCard').classList.contains('hidden'); }
+function closePlCard() { $('#plCard').classList.add('hidden'); plReq++; }
+function plFillChar(card, a) {
+  const il = $('.pl-il', card), big = $('.pl-big', card), dot = $('.pl-dot', card), faces = $('.pl-faces', card);
+  faces.innerHTML = '';
+  big.classList.add('hidden'); big.removeAttribute('style');
+  dot.classList.add('hidden');
+  const url = aiIllustUrl(a);
+  il.classList.add('hidden');
+  if (url) { il.onload = () => il.classList.remove('hidden'); il.onerror = () => il.classList.add('hidden'); il.src = url; }
+  else il.removeAttribute('src');
+  if (a.ai && a.aiUse !== 'off') {
+    const tok = a.ai, sk = new Image();
+    sk.onload = () => {      // 스티커: 크게 + 표정 6개 (누르면 그 표정)
+      const n = STK_EXPR.length, bg = `url('/avatars/${tok}_x.webp')`;
+      big.classList.remove('hidden');
+      Object.assign(big.style, { backgroundImage: bg, backgroundSize: `${n * 100}% 100%`, backgroundPosition: '0 0', aspectRatio: `${sk.width / n} / ${sk.height}` });
+      const names = { idle: '기본', smile: '웃음', cheer: '신남', oops: '놀람', sad: '슬픔', blink: '깜빡' };
+      faces.innerHTML = STK_EXPR.map((e, i) => `<span role="button" tabindex="0" class="pl-face${i ? '' : ' on'}" data-i="${i}" title="${names[e] || e}"
+        style="background-image:${bg};background-size:${n * 100}% 100%;background-position:${(i / (n - 1)) * 100}% 0;aspect-ratio:${sk.width / n} / ${sk.height}"></span>`).join('');
+    };
+    sk.onerror = () => {     // 스티커가 없는 예전 AI 캐릭터 (도트)
+      big.classList.remove('hidden');
+      Object.assign(big.style, { backgroundImage: `url("/avatars/${tok}_p.png")`, backgroundSize: 'contain', backgroundPosition: 'center bottom', aspectRatio: '3 / 4', imageRendering: 'pixelated' });
+    };
+    sk.src = `/avatars/${tok}_x.webp`;
+    return;
+  }
+  // 직접 꾸민 도트 캐릭터
+  dot.classList.remove('hidden');
+  const ctx = dot.getContext('2d');
+  ctx.clearRect(0, 0, dot.width, dot.height);
+  try { drawAvatar(ctx, avatarValid(a), { pose: 'idle' }, dot.width / 2, dot.height - 6, 4.4); } catch { /* 무시 */ }
+}
+function plSongsHtml(j) {
+  if (!j.songs.length) return '<li class="muted pl-empty">아직 끝까지 한 곡이 없어요.</li>';
+  return j.songs.map((r, i) => {
+    const b = r.best, here = !!songById(r.id);
+    return `<li class="${here ? 'can' : ''}" data-sid="${esc(r.id)}" title="${here ? '눌러서 이 곡 고르기' : ''}"><span class="pl-n">${i + 1}</span>`
+      + `<span class="pl-t"><b>${esc(r.title)}</b><small>${esc(r.artist || '')}</small></span>`
+      + `<span class="pl-p">${r.plays ? `${r.plays}번` : '기록 있음'}</span>`
+      + `<span class="pl-b">${b ? `<span class="rk rank-${esc(b.rank || '')}">${esc(b.rank || '')}</span><small>${b.keys === 6 ? '6K' : '4K'} ${DIFF_EN[b.diff] || ''}</small>` : ''}</span></li>`;
+  }).join('');
+}
+async function openPlCard(id, anchor) {
+  const p = plLookup(id);
+  if (!p) return;
+  const card = $('#plCard'), a = avatarValid(p.avatar);
+  $('.pl-av', card).innerHTML = miniHtml(a, 34);
+  paintMinis($('.pl-av', card));
+  $('.pl-name', card).textContent = p.name + (String(id) === String(net.id) ? ' (나)' : '');
+  $('.pl-title', card).textContent = p.title || '';
+  $('.pl-title', card).classList.toggle('hidden', !p.title);
+  plFillChar(card, a);
+  $('.pl-sum', card).textContent = '';
+  $('.pl-songs', card).innerHTML = '<li class="muted pl-empty">불러오는 중...</li>';
+  card.classList.remove('hidden');
+  // 자리: 누른 줄 옆 (오른쪽 → 안 되면 왼쪽), 화면 밖으로 안 나가게
+  const r = anchor.getBoundingClientRect(), w = card.offsetWidth, h = card.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+  let x = r.right + 10;
+  if (x + w > vw - 8) x = r.left - w - 10;
+  if (x < 8) x = Math.max(8, Math.min(vw - w - 8, r.left));
+  const y = Math.max(8, Math.min(vh - h - 8, r.top - 20));
+  card.style.left = `${Math.round(x)}px`;
+  card.style.top = `${Math.round(y)}px`;
+  const my = ++plReq;
+  try {
+    const res = await fetch(`/api/player/${encodeURIComponent(p.name)}`);
+    const j = await res.json();
+    if (my !== plReq) return;
+    if (!res.ok) throw new Error(j.error || res.status);
+    $('.pl-songs', card).innerHTML = plSongsHtml(j);
+    $('.pl-sum', card).textContent = j.totalPlays ? `· 지금까지 ${j.totalPlays}판 · ${j.songCount}곡` : j.songCount ? `· ${j.songCount}곡` : '';
+  } catch (e) {
+    if (my === plReq) $('.pl-songs', card).innerHTML = '<li class="muted pl-empty">노래 기록을 불러오지 못했어요.</li>';
+  }
+  // 위치 다시 맞춤 (목록이 채워지며 길어졌을 때)
+  const h2 = card.offsetHeight;
+  card.style.top = `${Math.round(Math.max(8, Math.min(vh - h2 - 8, parseFloat(card.style.top))))}px`;
+}
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-pl]');
+  if (t && !e.target.closest('#plCard')) { e.stopPropagation(); openPlCard(t.dataset.pl, t); return; }
+  if (!plCardOpen() || e.target.closest('#plCard')) return;
+  closePlCard();
+}, true);
+$('#plCard').addEventListener('click', (e) => {
+  if (e.target.closest('.pl-x')) { closePlCard(); return; }
+  const f = e.target.closest('.pl-face');
+  if (f) {
+    const n = STK_EXPR.length;
+    $$('#plCard .pl-face').forEach((x) => x.classList.toggle('on', x === f));
+    $('#plCard .pl-big').style.backgroundPosition = `${(+f.dataset.i / (n - 1)) * 100}% 0`;
+    return;
+  }
+  const li = e.target.closest('.pl-songs li.can');
+  if (li && currentScreen === 'lobby') { select(li.dataset.sid); closePlCard(); }
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && plCardOpen()) { e.stopPropagation(); e.preventDefault(); closePlCard(); } }, true);
 
 function addChat(m) {
   const log = $('#chatLog');
