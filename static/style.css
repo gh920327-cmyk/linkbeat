@@ -931,6 +931,12 @@ html[data-theme] #screen-game, html[data-theme] #screen-calib { background: #040
 .theme-row button i { width: 34px; height: 22px; border-radius: 3px; border: 1px solid rgba(0, 0, 0, .2); }
 .theme-row button.on { border-color: var(--blue); box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 40%, transparent); }
 .nowrap { white-space: nowrap; }
+/* 새 버전 알림 띠 */
+.ver-banner { position: fixed; z-index: 90; left: 50%; top: 10px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center;
+  max-width: calc(100vw - 16px); padding: 8px 12px; background: var(--dlg, var(--panel2)); color: var(--text); border: 1px solid var(--cyan);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .4); font-size: 13px; animation: tmIn .2s ease-out; }
+.ver-banner small { color: var(--muted); }
+.ver-banner.hidden { display: none; }
 /* 다른 사람 카드 (방·실시간 순위·친구 화면·결과에서 이름을 누르면) */
 [data-pl] { cursor: pointer; }
 .room-players li[data-pl]:hover, .live-board li[data-pl]:hover, .r-multi-list li[data-pl]:hover { background: color-mix(in srgb, var(--cyan) 12%, transparent); }

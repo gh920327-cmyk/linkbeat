@@ -554,10 +554,21 @@ window.addEventListener('resize', () => placePlayer(ytSlot));
 window.addEventListener('scroll', () => placePlayer(ytSlot), true);
 
 /* ------------------------------------------------------------ 네트워크 (멀티) */
+/* 방에 있다가 연결이 끊기거나(서버 업데이트) 새로고침하면 같은 방 코드로 다시 들어감 — 3분 안이면 */
+const LAST_ROOM_MS = 180000;
+function loadLastRoom() {
+  try { const v = JSON.parse(sessionStorage.getItem('lb_lastRoom') || 'null'); return v && Date.now() - v.at < LAST_ROOM_MS ? v : null; } catch { return null; }
+}
 const net = {
   ws: null,
   id: null,
   room: null,
+  ver: null,            // 처음 받은 서버 코드 버전 (= 이 화면의 버전)
+  lastRoom: loadLastRoom(),
+  setLastRoom(v) {
+    this.lastRoom = v;
+    try { if (v) sessionStorage.setItem('lb_lastRoom', JSON.stringify(v)); else sessionStorage.removeItem('lb_lastRoom'); } catch { /* 무시 */ }
+  },
   offset: 0,
   samples: [],
   handlers: {},
@@ -572,6 +583,8 @@ const net = {
       this.open = true;
       this.samples = [];
       this.send({ type: 'hello', name: settings.nick || '', avatar: settings.avatar, title: typeof achTitle === 'function' ? achTitle() : '', diff: settings.diff, keys: settings.mode });
+      const lr = this.lastRoom && Date.now() - this.lastRoom.at < LAST_ROOM_MS ? this.lastRoom : null;
+      if (lr) { this.rejoining = true; this.send({ type: 'join', code: lr.code, rejoin: true, lead: lr.lead, songId: lr.songId }); }
       let n = 0;
       clearInterval(this.pingTimer);
       this.ping();
@@ -582,18 +595,27 @@ const net = {
       let m;
       try { m = JSON.parse(e.data); } catch { return; }
       if (m.type === 'pong') return this.onPong(m);
-      if (m.type === 'welcome') this.id = m.id;
-      if (m.type === 'room') this.room = m;
-      if (m.type === 'left') this.room = null;
+      if (m.type === 'welcome') {
+        this.id = m.id;
+        if (m.ver) { if (!this.ver) this.ver = m.ver; else if (m.ver !== this.ver) this.emit('newver', m); }
+      }
+      if (m.type === 'room') {
+        this.room = m;
+        this.setLastRoom({ code: m.code, lead: m.leader === this.id, songId: m.leader === this.id ? m.songId : null, at: Date.now() });
+        if (this.rejoining) { this.rejoining = false; this.emit('rejoined', m); }
+      }
+      if (m.type === 'left') { this.room = null; this.setLastRoom(null); }
+      if (m.type === 'error' && this.rejoining) { this.rejoining = false; this.setLastRoom(null); }
       this.emit(m.type, m);
     };
     ws.onclose = () => {
       this.open = false;
       clearInterval(this.pingTimer);
       const hadRoom = !!this.room;
+      if (hadRoom) this.setLastRoom(Object.assign({}, this.lastRoom, { at: Date.now() }));     // 다시 연결되면 이 방으로
       this.room = null;
       this.emit('status', false);
-      if (hadRoom) this.emit('left', {});
+      if (hadRoom) this.emit('left', { lost: true });
       setTimeout(() => this.connect(), 2000);
     };
   },
