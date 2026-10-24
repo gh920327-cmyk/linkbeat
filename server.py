@@ -31,6 +31,19 @@ import pipeline
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
+
+
+def _code_version():
+    """지금 켜진 코드의 버전 (화면·서버 파일 내용으로) — 바뀌면 열려 있는 화면에 '새 버전' 알림"""
+    h = hashlib.md5()
+    for f in sorted(list(STATIC.glob("*")) + [ROOT / "server.py"]):
+        if f.is_file():
+            h.update(f.name.encode())
+            h.update(f.read_bytes())
+    return h.hexdigest()[:10]
+
+
+CODE_VER = _code_version()
 DATA = Path(os.environ.get("LB_DATA") or (ROOT / "data"))
 # 클라우드 모드: 인터넷 서버에 24시간 켜 두는 방식. 유튜브 음원 받기·채보 분석은 호스트 PC의 채보 엔진이 맡음
 CLOUD = os.environ.get("LB_CLOUD", "") == "1"
@@ -2340,9 +2353,10 @@ async def api(method, path, headers, body):
         return out
 
     if parts == ["health"]:
-        # 자동 업데이트가 '지금 다시 켜도 되는지' 확인 (방에 사람이 있으면 미룸)
-        busy = any(r.players for r in ROOMS.values())
-        return {"ok": True, "busy": busy, "clients": len(CLIENTS), "cloud": CLOUD}
+        # 자동 업데이트가 '지금 다시 켜도 되는지' 확인: 게임 중인 방이 있을 때만 미룸
+        # (로비 방은 괜찮음 — 서버가 다시 켜지면 화면이 같은 방 코드로 자동으로 다시 들어옴)
+        busy = any(r.players and r.phase != "lobby" for r in ROOMS.values())
+        return {"ok": True, "busy": busy, "clients": len(CLIENTS), "rooms": len(ROOMS), "cloud": CLOUD, "ver": CODE_VER}
 
     if parts == ["avatar", "ai", "choose"] and method == "POST":
         if not CLOUD:
@@ -2894,7 +2908,7 @@ async def ws_session(reader, writer, headers):
     await writer.drain()
     client = Client(writer)
     CLIENTS[client.id] = client
-    client.send({"type": "welcome", "id": client.id})
+    client.send({"type": "welcome", "id": client.id, "ver": CODE_VER})
     buf = b""
     msg_op = None
     try:
@@ -3046,6 +3060,8 @@ def leave_room(client, msg=None):
             room.phase = "lobby"
             room.promote_watchers()
     if room.leader not in room.players:
+        if room.leader == client.id:
+            room.lead_left = (client.name, time.time())
         room.leader = next(iter(room.players))
         room.players[room.leader].ready = False
     room.broadcast({"type": "chat", "system": True, "text": msg or f"{client.name} 님이 나갔어요."})
@@ -3132,6 +3148,13 @@ def set_my_diff(c, m):
     return changed
 
 
+def _restore_song(room, sid):
+    sid = str(sid or "")
+    song = load_song(sid) if VID_RE.match(sid) else None
+    if song:
+        room.song_id, room.song_title = sid, song.get("title", sid)
+
+
 def handle_msg(c, m):
     t = m.get("type")
     room = c.room
@@ -3170,6 +3193,23 @@ def handle_msg(c, m):
     if t == "join":
         code = str(m.get("code", "")).strip().upper()
         r = ROOMS.get(code)
+        rejoin = bool(m.get("rejoin"))
+        if not r and rejoin and re.fullmatch(r"[A-Z]{4}", code):
+            # 서버가 다시 켜져서(업데이트) 방이 없어짐 → 같은 코드로 다시 염. 먼저 돌아온 사람이 방장,
+            # 원래 방장이 돌아오면 다시 방장으로 (고른 곡도 원래 방장이 가져옴)
+            leave_room(c)
+            r = Room(code, c)
+            r.await_lead = not m.get("lead")
+            ROOMS[code] = r
+            r.players[c.id] = c
+            c.room = r
+            c.ready = False
+            if m.get("lead"):
+                _restore_song(r, m.get("songId"))
+            log(f"방 {code} 다시 엶 ({c.name})")
+            r.broadcast({"type": "chat", "system": True, "text": "서버가 업데이트돼서 방을 다시 열었어요. 다른 사람도 곧 돌아와요."})
+            r.push()
+            return
         if not r:
             c.send({"type": "error", "msg": "그런 방이 없어요."})
             return
@@ -3193,7 +3233,13 @@ def handle_msg(c, m):
                     "hl": r.hl_range, "ai": r.ai, "game": r.game_no})
             return
         r.players[c.id] = c
-        r.broadcast({"type": "chat", "system": True, "text": f"{c.name} 님이 들어왔어요."})
+        if rejoin and m.get("lead") and r.phase == "lobby":
+            ll = getattr(r, "lead_left", None)
+            if getattr(r, "await_lead", False) or (ll and ll[0] == c.name and time.time() - ll[1] < 90):
+                r.leader, r.await_lead, r.lead_left = c.id, False, None      # 원래 방장이 돌아옴
+                if not r.song_id:
+                    _restore_song(r, m.get("songId"))
+        r.broadcast({"type": "chat", "system": True, "text": f"{c.name} 님이 {'돌아왔어요' if rejoin else '들어왔어요'}."})
         r.push()
         return
     if t == "leave":

@@ -1462,8 +1462,17 @@ net.on('room', () => {
   // 게임 화면 '친구 화면'에 구경하는 사람 수
   if (game && game.multi && net.room && (net.room.watchers || []).length) $('#specCount').textContent = `${game.spec ? game.spec.views.size : 0}명 · 👀 구경 ${net.room.watchers.length}명`;
 });
+net.on('rejoined', () => toast('방에 다시 들어왔어요.', 2200));
+// 서버가 새 버전으로 바뀜 → 새로고침 알림 (방에 있었으면 새로고침해도 같은 방으로 돌아옴)
+net.on('newver', () => {
+  const b = $('#verBanner');
+  if (b) b.classList.remove('hidden');
+});
+$('#verReload').addEventListener('click', () => location.reload());
+$('#verLater').addEventListener('click', () => $('#verBanner').classList.add('hidden'));
 net.on('left', (m) => {
   lastRoomSong = null;
+  if (m && m.lost && net.lastRoom && currentScreen !== 'game') toast('서버와 다시 연결하는 중... 연결되면 방에 다시 들어가요.', 3500);
   stopWatch();
   if ($('#watchDlg').open) $('#watchDlg').close();
   renderRoom();
