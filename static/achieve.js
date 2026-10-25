@@ -6,7 +6,7 @@
 'use strict';
 
 /* cat: 업적 창의 묶음 · goal: 횟수 업적이면 목표 (창에 '7/10' 진행도) */
-const ACH_CATS = ['시작', '등급', '콤보', '난이도', '꾸준함', '곡 탐험', '멀티', '도전', '재미'];
+const ACH_CATS = ['전설', '시작', '등급', '콤보', '난이도', '꾸준함', '곡 탐험', '멀티', '도전', '재미'];
 const ACH = [
   // 시작
   { id: 'first', cat: '시작', name: '첫 발걸음', desc: '곡을 처음으로 끝까지 플레이' },
@@ -77,7 +77,26 @@ const ACH = [
   { id: 'onemiss', cat: '재미', name: '아깝다!', desc: 'MISS 딱 하나로 끝냄' },
   { id: 'clutch', cat: '재미', name: '아슬아슬', desc: '정확도 80.00~80.49%로 B 랭크 클리어' },
   { id: 'comeback', cat: '재미', name: '포기하지 않아', desc: 'MISS 30개 넘게 나고도 B 랭크 이상' },
+  // 전설: 정말 어려운 업적 — 칭호가 무지개빛으로 반짝임
+  { id: 'L_godhand', cat: '전설', tier: 'legend', name: '신의 손', desc: '★9.5 이상 곡에서 MAX (전부 PERFECT)' },
+  { id: 'L_iron', cat: '전설', tier: 'legend', name: '강철 손가락', desc: '5분이 넘는 곡의 극한 난이도를 MAX' },
+  { id: 'L_wings', cat: '전설', tier: 'legend', name: '여섯 날개', desc: '6키 극한 난이도를 MAX' },
+  { id: 'L_chaos', cat: '전설', tier: 'legend', name: '혼돈의 지배자', desc: '랜덤을 켜고 극한 난이도 풀콤보' },
+  { id: 'L_metro', cat: '전설', tier: 'legend', name: '인간 메트로놈', desc: '노트 500개 이상 곡에서 정확도 99% 이상 + 판정 오차 평균 ±2ms 안' },
+  { id: 'L_light', cat: '전설', tier: 'legend', name: '광속', desc: '노트 속도 10으로 ★8 이상 곡 SSS 이상' },
+  { id: 'L_endless', cat: '전설', tier: 'legend', name: '끝나지 않는 노래', desc: '한 판에 3000 콤보' },
+  { id: 'L_max50', cat: '전설', tier: 'legend', name: '완벽 그 자체', desc: 'MAX 기록 50곡·난이도', goal: 50, stat: 'maxRec' },
+  { id: 'L_ext20', cat: '전설', tier: 'legend', name: '극한의 지배자', desc: '극한 난이도 SSS 이상 기록 20곡', goal: 20, stat: 'extSSS' },
+  { id: 'L_conquer', cat: '전설', tier: 'legend', name: '정복자', desc: '모든 곡(10곡 이상)의 극한 난이도를 S 이상 (4키)', goal: () => Math.max(10, typeof songs !== 'undefined' ? songs.length : 10), stat: 'conquerN' },
+  { id: 'L_monk', cat: '전설', tier: 'legend', name: '리듬 수도승', desc: '30일 연속 플레이', goal: 30, stat: 'streak' },
+  { id: 'L_living', cat: '전설', tier: 'legend', name: '살아있는 전설', desc: '1000판 플레이', goal: 1000, stat: 'plays' },
+  { id: 'L_thunder', cat: '전설', tier: 'legend', name: '천둥의 손', desc: 'PERFECT 누적 200,000개', goal: 200000, stat: 'perf' },
+  { id: 'L_champ', cat: '전설', tier: 'legend', name: '무패의 챔피언', desc: '멀티에서 1위 50번', goal: 50, stat: 'mwin' },
+  { id: 'L_master', cat: '전설', tier: 'legend', name: '링크비트 마스터', desc: '다른 업적을 모두 달성' },
 ];
+const goalOf = (a) => (typeof a.goal === 'function' ? a.goal() : a.goal);
+const LEGEND_TITLES = new Set(ACH.filter((a) => a.tier === 'legend').map((a) => a.name));
+function achIsLegend(t) { return !!t && LEGEND_TITLES.has(t); }
 const ACH_BY = Object.fromEntries(ACH.map((a) => [a.id, a]));
 
 function achGot() { const v = store.get('ach', {}); return v && typeof v === 'object' ? v : {}; }
@@ -95,6 +114,7 @@ function achUnlock(ids) {
   if (!fresh.length) return [];
   const now = Date.now();
   fresh.forEach((id) => { got[id] = now; });
+  if (!got.L_master && ACH.every((a) => a.id === 'L_master' || got[a.id])) { got.L_master = now; fresh.push('L_master'); }
   store.set('ach', got);
   if (typeof profileSync === 'function') profileSync();
   achPopup(fresh);
@@ -104,9 +124,9 @@ function achUnlock(ids) {
 
 /* 내 기록(곡 목록의 최고 기록)에서 셀 수 있는 것: S·SS 이상 기록 수, 해 본 곡 수, 사계절 — 예전에 한 판도 셈 */
 function achFromRecords() {
-  const out = { sRec: 0, ssRec: 0, played: new Set(), allfour: false, sss: false, fchard: false, fcext: false, fc6: false };
+  const out = { sRec: 0, ssRec: 0, maxRec: 0, extSSS: 0, conquerN: 0, played: new Set(), allfour: false, sss: false, fchard: false, fcext: false, fc6: false };
   if (typeof songs === 'undefined' || typeof myRecord !== 'function') return out;
-  const iS = RANKS.indexOf('S'), iSS = RANKS.indexOf('SS'), iSSS = RANKS.indexOf('SSS');
+  const iS = RANKS.indexOf('S'), iSS = RANKS.indexOf('SS'), iSSS = RANKS.indexOf('SSS'), iMAX = RANKS.indexOf('MAX');
   for (const s of songs) {
     let cleared = 0;
     for (const nl of [4, 6]) {
@@ -118,6 +138,9 @@ function achFromRecords() {
         if (k >= iS) out.sRec++;
         if (k >= iSS) out.ssRec++;
         if (k >= iSSS) out.sss = true;
+        if (k >= iMAX) out.maxRec++;
+        if (k >= iSSS && d === 'extreme') out.extSSS++;
+        if (k >= iS && d === 'extreme' && nl === 4) out.conquerN++;
         if (r.fc && (d === 'hard' || d === 'extreme')) out.fchard = true;
         if (r.fc && d === 'extreme') out.fcext = true;
         if (r.fc && nl === 6) out.fc6 = true;
@@ -133,9 +156,9 @@ function achProgress(st = achStats(), rec = achFromRecords()) {
   const songN = new Set([...Object.keys(st.songs), ...rec.played]).size;
   const sameMax = Math.max(0, ...Object.values(st.songs).map((v) => +v || 0));
   const today = st.day === dayKey() ? st.dayN : 0;
-  return { ...st, songN, sameMax, dayN: today, sRec: rec.sRec, ssRec: rec.ssRec };
+  return { ...st, songN, sameMax, dayN: today, sRec: rec.sRec, ssRec: rec.ssRec, maxRec: rec.maxRec, extSSS: rec.extSSS, conquerN: rec.conquerN };
 }
-function achGoalIds(pr) { return ACH.filter((a) => a.goal && (pr[a.stat] || 0) >= a.goal).map((a) => a.id); }
+function achGoalIds(pr) { return ACH.filter((a) => a.goal && (pr[a.stat] || 0) >= goalOf(a)).map((a) => a.id); }
 /* 기록만 보고 줄 수 있는 업적 (업적 창을 열 때·판이 끝날 때) */
 function achRetro() {
   const rec = achFromRecords();
@@ -212,6 +235,13 @@ function achieveOnResult(g, r) {
   if (done && c.miss === 1) ids.push('onemiss');
   if (clear && r.acc < 80.5) ids.push('clutch');
   if (clear && (c.miss || 0) > 30) ids.push('comeback');
+  if (ap && g.stars >= 9.5) ids.push('L_godhand');
+  if (ap && !g.hl && g.diff === 'extreme' && (g.song.duration || 0) >= 300) ids.push('L_iron');
+  if (ap && g.nl === 6 && g.diff === 'extreme') ids.push('L_wings');
+  if (fc && g.diff === 'extreme' && mods.includes('RANDOM')) ids.push('L_chaos');
+  if (done && r.acc >= 99 && off.length >= 500 && Math.abs(off.reduce((a, b) => a + b, 0) / off.length) <= 0.002) ids.push('L_metro');
+  if (done && (settings.speed || 0) >= 10 && g.stars >= 8 && rk >= RANKS.indexOf('SSS')) ids.push('L_light');
+  if (r.maxCombo >= 3000) ids.push('L_endless');
   const h = new Date().getHours();
   if (done && h >= 2 && h < 5) ids.push('owl');
   if (done && h >= 6 && h < 8) ids.push('early');
@@ -260,8 +290,9 @@ function achNext() {
   achShowing = true;
   const a = ACH_BY[id];
   const el = document.createElement('div');
-  el.className = 'ach-pop';
-  el.innerHTML = `<span class="ap-ico">🏆</span><div><div class="ap-head">업적 달성!</div><div class="ap-name">${esc(a.name)}</div><div class="ap-desc">${esc(a.desc)}</div></div>`;
+  const lg = a.tier === 'legend';
+  el.className = 'ach-pop' + (lg ? ' legend' : '');
+  el.innerHTML = `<span class="ap-ico">${lg ? '👑' : '🏆'}</span><div><div class="ap-head">${lg ? '✦ 전설 업적 달성! ✦' : '업적 달성!'}</div><div class="ap-name">${esc(a.name)}</div><div class="ap-desc">${esc(a.desc)}</div></div>`;
   el.addEventListener('click', () => { el.classList.add('out'); });
   document.body.appendChild(el);
   achChime();
@@ -278,17 +309,20 @@ function renderAchDlg() {
   const pr = achProgress();
   $('#achCount').textContent = `${n} / ${ACH.length}`;
   $('#achFill').style.width = `${Math.round((n / ACH.length) * 100)}%`;
-  $('#achTitleNow').innerHTML = achTitle() ? `지금 칭호: <b>${esc(achTitle())}</b> <button type="button" class="ghost small-btn" id="achTitleOff">떼기</button>` : '달성한 업적을 누르면 칭호로 달 수 있어요.';
+  $('#achTitleNow').innerHTML = achTitle() ? `지금 칭호: <b class="${achIsLegend(achTitle()) ? 'ptitle legend' : ''}">${esc(achTitle())}</b> <button type="button" class="ghost small-btn" id="achTitleOff">떼기</button>` : '달성한 업적을 누르면 칭호로 달 수 있어요.';
   $('#achGrid').innerHTML = ACH_CATS.map((cat) => {
     const list = ACH.filter((a) => a.cat === cat);
     const k = list.filter((a) => got[a.id]).length;
-    return `<h4 class="ach-cat">${esc(cat)} <small>${k}/${list.length}</small></h4>` + list.map((a) => {
+    const head = cat === '전설' ? '✦ 전설 <em>정말 어려운 업적 · 칭호가 무지개빛으로 반짝여요</em>' : esc(cat);
+    return `<h4 class="ach-cat${cat === '전설' ? ' legend' : ''}">${head} <small>${k}/${list.length}</small></h4>` + list.map((a) => {
       const at = got[a.id];
       const d = at ? new Date(at) : null;
-      const v = a.goal ? Math.min(a.goal, pr[a.stat] || 0) : 0;
-      const bar = a.goal && !at ? `<span class="ai-prog"><i style="width:${Math.round((v / a.goal) * 100)}%"></i></span><span class="ai-num">${v.toLocaleString()} / ${a.goal.toLocaleString()}</span>` : '';
-      return `<button type="button" class="ach-item${at ? ' got' : ''}${cur === a.id && at ? ' cur' : ''}" data-id="${a.id}" ${at ? '' : 'disabled'}>
-      <span class="ai-ico">${at ? '🏆' : '🔒'}</span>
+      const goal = a.goal ? goalOf(a) : 0;
+      const v = goal ? Math.min(goal, pr[a.stat] || 0) : 0;
+      const bar = goal && !at ? `<span class="ai-prog"><i style="width:${Math.round((v / goal) * 100)}%"></i></span><span class="ai-num">${v.toLocaleString()} / ${goal.toLocaleString()}</span>` : '';
+      const lg = a.tier === 'legend';
+      return `<button type="button" class="ach-item${lg ? ' legend' : ''}${at ? ' got' : ''}${cur === a.id && at ? ' cur' : ''}" data-id="${a.id}" ${at ? '' : 'disabled'}>
+      <span class="ai-ico">${at ? (lg ? '👑' : '🏆') : '🔒'}</span>
       <span class="ai-name">${esc(a.name)}</span>
       <span class="ai-desc">${esc(a.desc)}</span>${bar}
       ${d ? `<span class="ai-date">${d.getMonth() + 1}/${d.getDate()}</span>` : ''}</button>`;
@@ -311,6 +345,7 @@ function renderMyTitle() {
   const t = achTitle();
   el.textContent = t;
   el.classList.toggle('hidden', !t);
+  el.classList.toggle('legend', achIsLegend(t));
 }
 $('#btnAch').addEventListener('click', () => { renderAchDlg(); $('#achDlg').showModal(); });
 $('#achClose').addEventListener('click', () => $('#achDlg').close());

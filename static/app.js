@@ -1101,7 +1101,7 @@ function renderMultiResults(m) {
   const avOf = (id) => ((net.room && net.room.players.find((p) => p.id === id)) || {}).avatar || r_avatars[id];
   for (const r of m.results) plRemember({ id: r.id, name: r.name, title: r.title, avatar: avOf(r.id) || r.avatar });
   $('#rMultiList').innerHTML = m.results.map((r, i) =>
-    `<li class="${r.id === net.id ? 'me' : ''}" data-pl="${esc(r.id)}"><span class="pos">${i + 1}</span><span class="n">${miniHtml(avOf(r.id) || r.avatar, 24)} ${r.title ? `<span class="ptitle">${esc(r.title)}</span>` : ''}${esc(r.name)}${r.diff ? ` <small class="ld"><span class="tag">${r.keys || 4}K</span> ${DIFF_EN[r.diff] || ''}</small>` : ''}</span>
+    `<li class="${r.id === net.id ? 'me' : ''}" data-pl="${esc(r.id)}"><span class="pos">${i + 1}</span><span class="n">${miniHtml(avOf(r.id) || r.avatar, 24)} ${r.title ? `<span class="${ptCls(r.title)}">${esc(r.title)}</span>` : ''}${esc(r.name)}${r.diff ? ` <small class="ld"><span class="tag">${r.keys || 4}K</span> ${DIFF_EN[r.diff] || ''}</small>` : ''}</span>
       <span class="s">${(r.score || 0).toLocaleString()}</span><span class="a">${(r.acc || 0).toFixed(2)}%</span>
       <span class="rk rank-${esc(r.rank || '')}">${r.incomplete ? '포기' : esc(r.rank || '')}</span></li>`).join('');
   paintMinis($('#rMultiList'));
@@ -1185,13 +1185,13 @@ function renderRoom() {
       const tag = r.phase === 'lobby' && (p.state === 'idle' || !p.state)
         ? (lead ? '<span class="rdy lead">방장</span>' : p.ready ? '<span class="rdy on">✓ 준비</span>' : '<span class="rdy">대기</span>')
         : `<span class="muted small">${stateName[p.state] || ''}</span>`;
-      return `<li class="${p.id === net.id ? 'me' : ''}${!lead && p.ready ? ' ready' : ''}" data-pl="${esc(p.id)}" title="눌러서 ${esc(p.name)} 님 캐릭터·자주 하는 노래 보기">${miniHtml(p.avatar)}${lead ? '<span class="crown">👑</span>' : ''}<span class="pn">${p.title ? `<span class="ptitle">${esc(p.title)}</span>` : ''}${esc(p.name)}</span>
+      return `<li class="${p.id === net.id ? 'me' : ''}${!lead && p.ready ? ' ready' : ''}" data-pl="${esc(p.id)}" title="눌러서 ${esc(p.name)} 님 캐릭터·자주 하는 노래 보기">${miniHtml(p.avatar)}${lead ? '<span class="crown">👑</span>' : ''}<span class="pn">${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}${esc(p.name)}</span>
         <span class="pdiff"><span class="tag">${pk}K</span> ${DIFF_EN[pd] || ''}${st}</span>
         ${tag}</li>`;
     }).join('');
     $('#roomPlayers').insertAdjacentHTML('beforeend', (r.watchers || []).map((p) => {
       plRemember(p);
-      return `<li class="watch${p.id === net.id ? ' me' : ''}" data-pl="${esc(p.id)}" title="게임이 끝나면 같이 해요">${miniHtml(p.avatar)}<span class="pn">${p.title ? `<span class="ptitle">${esc(p.title)}</span>` : ''}${esc(p.name)}</span><span class="rdy watch">👀 구경 중</span></li>`;
+      return `<li class="watch${p.id === net.id ? ' me' : ''}" data-pl="${esc(p.id)}" title="게임이 끝나면 같이 해요">${miniHtml(p.avatar)}<span class="pn">${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}${esc(p.name)}</span><span class="rdy watch">👀 구경 중</span></li>`;
     }).join(''));
     paintMinis($('#roomPlayers'));
     $('#roomSong').textContent = r.songId ? r.songTitle : '방장이 곡을 고르는 중...';
@@ -1295,6 +1295,7 @@ async function openPlCard(id, anchor) {
   $('.pl-name', card).textContent = p.name + (String(id) === String(net.id) ? ' (나)' : '');
   $('.pl-title', card).textContent = p.title || '';
   $('.pl-title', card).classList.toggle('hidden', !p.title);
+  $('.pl-title', card).classList.toggle('legend', ptCls(p.title) !== 'ptitle');
   plFillChar(card, a);
   // 방장이면 같은 방의 다른 사람에게: 방장 넘기기 · 내보내기 (게임 중에는 못 함)
   const inRoom = net.room && net.room.players.some((x) => String(x.id) === String(id));
@@ -1417,7 +1418,7 @@ async function loadOnline() {
       const st = p.status || {};
       const can = !me && st.room && st.room !== myRoom;
       return `<li class="${me ? 'me' : ''}" data-pl="${esc(p.id)}">${miniHtml(p.avatar, 30)}<span class="on-who">`
-        + `<span class="on-name">${p.title ? `<span class="ptitle">${esc(p.title)}</span>` : ''}${esc(p.name)}${me ? ' <small>(나)</small>' : ''}</span>`
+        + `<span class="on-name">${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}${esc(p.name)}${me ? ' <small>(나)</small>' : ''}</span>`
         + `<span class="on-st on-${esc(st.kind || 'lobby')}">${onStatusHtml(st)}</span></span>`
         + (can ? `<button type="button" class="small-btn on-join" data-room="${esc(st.room)}">${st.kind === 'room' ? '같이 하기' : '구경하기'}</button>` : '')
         + '</li>';
@@ -1492,6 +1493,9 @@ net.on('watch', async (m) => {
 });
 $('#wClose').addEventListener('click', () => $('#watchDlg').close());
 $('#btnWatch').addEventListener('click', () => { if (!$('#watchDlg').open) $('#watchDlg').showModal(); });
+
+/* 칭호 뱃지: 전설 업적 칭호면 무지개빛 */
+function ptCls(t) { return typeof achIsLegend === 'function' && achIsLegend(t) ? 'ptitle legend' : 'ptitle'; }
 
 function addChat(m) {
   const log = $('#chatLog');
