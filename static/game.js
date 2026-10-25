@@ -1,7 +1,7 @@
 /* 링크비트 플레이 화면 */
 'use strict';
 
-const JUDGE = { perfect: 0.045, great: 0.09, good: 0.14, bad: 0.18 };
+const JUDGE = { perfect: 0.055, great: 0.09, good: 0.14, bad: 0.18 };   // PERFECT ±55ms (예전 ±45ms에서 조금 넓힘)
 const WEIGHT = { perfect: 1, great: 0.7, good: 0.4, miss: 0 };
 const JUDGE_COLORS = { perfect: '#ffe45e', great: '#5effa1', good: '#5ec8ff', miss: '#ff5a6e' };
 const JUDGE_TEXT = { perfect: 'PERFECT', great: 'GREAT', good: 'GOOD', miss: 'MISS' };
