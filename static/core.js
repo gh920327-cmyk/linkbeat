@@ -204,9 +204,9 @@ function toast(msg, ms = 2200) {
 
 /* ------------------------------------------------------------ 시계 */
 class SongClock {
-  constructor() { this.running = false; this.base = 0; this.anchor = 0; }
-  now(perf = performance.now()) { return this.running ? this.base + (perf - this.anchor) / 1000 * (this.rate || 1) : this.base; }
-  set(t, perf = performance.now()) { this.base = t; this.anchor = perf; }
+  constructor() { this.running = false; this.base = 0; this.anchor = 0; this.adj = 0; }
+  now(perf = performance.now()) { return this.running ? this.base + (perf - this.anchor) / 1000 * (this.rate || 1) * (1 + this.adj) : this.base; }
+  set(t, perf = performance.now()) { this.base = t; this.anchor = perf; this.adj = 0; }
   start(perf = performance.now()) { if (!this.running) { this.anchor = perf; this.running = true; } }
   stop() { if (this.running) { this.base = this.now(); this.running = false; } }
   /* 유튜브 시간과 맞추기: 크게 어긋나면 바로, 조금이면 부드럽게 */
@@ -215,6 +215,14 @@ class SongClock {
     const err = vt - cur;
     if (Math.abs(err) > snap) this.set(vt);
     else this.set(cur + err * k);
+  }
+  /* 플레이용: 위치를 건드리지 않고 흐르는 빠르기만 살짝(최대 ±6%) 바꿔서 유튜브를 따라감 → 노트가 갑자기 빨라지거나 튀지 않음.
+     아주 크게 어긋났을 때(snap)만 바로 맞춤 (최대 ±8%) */
+  follow(vt, snap = 0.4, maxAdj = 0.08) {
+    const p = performance.now(), cur = this.now(p), err = vt - cur;
+    if (Math.abs(err) > snap) { this.set(vt, p); return; }
+    const a = Math.abs(err) < 0.012 ? 0 : clamp(err * 0.8, -maxAdj, maxAdj);
+    if (a !== this.adj) { this.base = cur; this.anchor = p; this.adj = a; }
   }
 }
 
@@ -523,6 +531,7 @@ const yt = {
     p.pauseVideo();
     p.seekTo(0, true);
     await sleep(250);
+    for (let i = 0; i < 8 && (p.getCurrentTime() || 0) > 0.05; i++) { p.seekTo(0, true); await sleep(100); }
     p.unMute();
     p.setVolume(settings.volume);
     p.setPlaybackRate(1);

@@ -996,6 +996,7 @@ class Game {
     this.slew = null;
     if (settings.skin.hitSound && settings.skin.hitSound !== 'off') sfx.ensure();   // 첫 타격음에서 끊기지 않게 미리 켬
     if (this.practice) { yt.rate(this.rate); yt.seek(this.startT); }
+    else if (Math.abs(yt.time() - this.startT) > 0.05) yt.seek(this.startT);    // 영상이 시작 위치에 있는지 한 번 더
     this.clock.set(this.startT - lead * this.rate);
     this.clock.start();
     this.phase = 'countdown';
@@ -1010,10 +1011,10 @@ class Game {
       if (this.phase === 'preroll') {
         // 미리 재생을 요청해 둔 상태: 실제로 걸린 시간을 기억(다음 판 보정)하고, 시계는 멈추지 않고 부드럽게 맞춤
         ytLagLearn((performance.now() - this.playAt) / 1000);
+        // 차이가 크지 않으면 시계는 그대로 두고 follow()가 빠르기만 살짝 바꿔 맞춤 (예전엔 1.5배로 몰아서 따라가 노트가 확 빨라졌음)
         const err = yt.time() - this.clock.now();
-        if (Math.abs(err) > 0.35) this.clock.set(yt.time());
-        else this.slew = { err, done: 0, at: performance.now(), ms: Math.max(250, Math.abs(err) * 2000) };   // 차이는 잠깐 살짝 빠르게/느리게 흘려서 맞춤 (거꾸로 가지 않게)
-        this.softUntil = performance.now() + 1500;
+        if (Math.abs(err) > 0.6) this.clock.set(yt.time());
+        this.softUntil = performance.now() + 2000;
         this.lastVT = -1;
         this.phase = 'playing';
         return;
@@ -1214,17 +1215,11 @@ class Game {
         if (wait - (this.retryAt || 0) > 1000 && yt.state() !== YTS.PLAYING && yt.state() !== YTS.BUFFERING) { this.retryAt = wait; yt.play(); }
       }
       if (this.phase === 'playing') {
-        if (this.slew) {
-          const want = this.slew.err * Math.min(1, (performance.now() - this.slew.at) / this.slew.ms);
-          this.clock.set(this.clock.now() + want - this.slew.done);
-          this.slew.done = want;
-          if (performance.now() - this.slew.at >= this.slew.ms) this.slew = null;
-        }
         const vt = yt.time();
-        if (!this.slew && vt !== this.lastVT) {
-          // 시작 직후 1.5초는 유튜브 시간이 들쭉날쭉해서 부드럽게만 맞춤
-          if (performance.now() < (this.softUntil || 0)) this.clock.sync(vt, 0.35, 0.12);
-          else this.clock.sync(vt);
+        if (vt !== this.lastVT) {
+          if (this.nextNoteT() > Math.max(this.clock.now(), vt) + this.lookahead() + 0.3) this.clock.set(vt);   // 화면에 노트가 없으면 바로 맞춤 (눈에 안 보임)
+          // 노트가 보일 땐 빠르기만 살짝 바꿔 따라감. 시작 직후 2초는 유튜브 시간이 들쭉날쭉해서 더 너그럽게
+          else this.clock.follow(vt, performance.now() < (this.softUntil || 0) ? 0.6 : 0.4);
           this.lastVT = vt;
         }
         this.update();
@@ -1233,6 +1228,21 @@ class Game {
       this.raf = requestAnimationFrame(step);
     };
     this.raf = requestAnimationFrame(step);
+  }
+
+  /* 아직 안 친 첫 노트 시간 (누르고 있는 롱노트가 있으면 -Infinity) — 화면에 노트가 없을 때를 알기 위해 */
+  nextNoteT() {
+    for (let i = this.drawFrom; i < this.notes.length; i++) {
+      const n = this.notes[i];
+      if (!n.head) return n.t;
+      if (n.d > 0 && !n.tail) return -Infinity;
+    }
+    return Infinity;
+  }
+  /* 노트가 위에서 판정선까지 내려오는 데 걸리는 시간(초) */
+  lookahead() {
+    const h = this.L ? this.L.h : 900;
+    return judgeLineY(h) / ((150 + settings.speed * 90) * (h < 600 ? h / 600 : 1));
   }
 
   /* 고스트 대결: 친구 1위(또는 내 최고) 기록과 같은 지점의 점수 비교 */
