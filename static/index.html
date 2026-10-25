@@ -288,13 +288,6 @@
     </div>
   </div>
   <button id="btnTouchPause" class="touch-pause">❚❚</button>
-  <div id="gameOverlay" class="overlay hidden">
-    <div class="overlay-box">
-      <div id="ovTitle" class="ov-title"></div>
-      <div id="ovText" class="muted"></div>
-      <div id="ovButtons" class="ov-buttons"></div>
-    </div>
-  </div>
 </section>
 
 <!-- ======================= 결과 ======================= -->
@@ -436,6 +429,14 @@
 
 <!-- 유튜브 플레이어 (화면마다 위치만 옮겨 씀) -->
 <div id="ytWrap" class="parked"><div id="ytPlayer"></div></div>
+<!-- 일시정지·준비 창: 유튜브 영상보다 위에 보이도록 맨 위층에 둠 (게임 화면일 때만 보임) -->
+<div id="gameOverlay" class="overlay hidden">
+  <div class="overlay-box">
+    <div id="ovTitle" class="ov-title"></div>
+    <div id="ovText" class="muted"></div>
+    <div id="ovButtons" class="ov-buttons"></div>
+  </div>
+</div>
 
 <!-- 설정 -->
 <dialog id="settingsDlg">

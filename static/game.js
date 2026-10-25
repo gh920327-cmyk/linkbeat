@@ -2,7 +2,8 @@
 'use strict';
 
 const JUDGE = { perfect: 0.055, great: 0.09, good: 0.14, bad: 0.18 };
-const EARLIEST_NOTE = 0.15;   // 곡 처음부터 할 때 이보다 앞(또는 음수 시간)의 노트는 빼요   // PERFECT ±55ms (예전 ±45ms에서 조금 넓힘)
+const EARLIEST_NOTE = 0.15;
+const LEAD_GAP = 0.8;      // 세 번째 '딱'(노래 시작) 뒤 이만큼(초) 지나서 첫 노트가 화면 맨 위에 들어오게   // 곡 처음부터 할 때 이보다 앞(또는 음수 시간)의 노트는 빼요   // PERFECT ±55ms (예전 ±45ms에서 조금 넓힘)
 const WEIGHT = { perfect: 1, great: 0.7, good: 0.4, miss: 0 };
 const JUDGE_COLORS = { perfect: '#ffe45e', great: '#5effa1', good: '#5ec8ff', miss: '#ff5a6e' };
 const JUDGE_TEXT = { perfect: 'PERFECT', great: 'GREAT', good: 'GOOD', miss: 'MISS' };
@@ -1184,6 +1185,7 @@ class Game {
     if (this.tapTimer) { clearTimeout(this.tapTimer); this.tapTimer = 0; try { yt.pause(); yt.seek(this.startT || 0); } catch { /* 무시 */ } }
     this.slew = null;
     if (settings.skin.hitSound && settings.skin.hitSound !== 'off') sfx.ensure();   // 첫 타격음에서 끊기지 않게 미리 켬
+    if (!this.leadDone) { this.leadDone = true; this.makeLeadIn(); }
     if (this.practice) { yt.rate(this.rate); yt.seek(this.startT); }
     else if (Math.abs(yt.time() - this.startT) > 0.05) yt.seek(this.startT);    // 영상이 시작 위치에 있는지 한 번 더
     this.clock.set(this.startT - lead * this.rate);
@@ -1209,8 +1211,10 @@ class Game {
     if (st === YTS.PLAYING) {
       if (this.phase === 'countdown') {     // 카운트인 중에 영상이 먼저 켜짐 (폰에서 탭한 재생이 늦게 걸린 경우 등) → 멈추고 시작 위치로
         try { yt.pause(); yt.seek(this.startT); } catch { /* 무시 */ }
+        this.strayPauseAt = performance.now();
         return;
       }
+      if (this.phase === 'paused') { yt.pause(); return; }   // 일시정지 창이 떠 있는데 (미디어 키 등으로) 영상이 재생됨 → 다시 멈춤
       // ※ 재생이 막 시작된 순간의 유튜브 시간 값은 믿지 않음: 유튜브가 마지막으로 알려 준 값에 '지난 시간'을 더해서
       //    최대 1초쯤 앞선 값을 잠깐 돌려줄 때가 있음 → 예전엔 이 값 때문에 노트가 튀거나(MISS) 영상을 되감아 소리가 끊겼음
       const now = performance.now();
@@ -1222,7 +1226,7 @@ class Game {
         this.clock.set(this.startT);
         this.clock.start();
         this.softUntil = now + 2500;
-        this.trustAt = now + 450;
+        this.trustAt = now + 380;
         this.badSince = 0;
         this.lastVT = -1;
         this.phase = 'playing';
@@ -1241,7 +1245,7 @@ class Game {
       if (this.phase === 'playing') { this.clock.stop(); this.slew = null; }
     } else if (st === YTS.PAUSED) {
       if (this.phase === 'playing') {
-        if (this.multi) yt.play();
+        if (this.multi) { this.clock.stop(); this.slew = null; yt.play(); }   // 멀티는 멈출 수 없음 → 시계도 멈추고 다시 재생 (노트가 혼자 내려가 MISS 나지 않게)
         else this.pause();
       }
     } else if (st === YTS.ENDED) {
@@ -1391,7 +1395,7 @@ class Game {
     const fv = this.fever;
     net.send({
       type: 'progress', score: this.score(), combo: this.combo, acc: +this.acc().toFixed(2),
-      t: +gt.toFixed(3), p: bits, h: this.sentHits, m: this.laneMap, f: fv.mult > 1 && gt <= fv.until,
+      t: +gt.toFixed(3), c: this.cutT || 0, p: bits, h: this.sentHits, m: this.laneMap, f: fv.mult > 1 && gt <= fv.until,
     });
     this.sentHits = [];
     if (now - this.lastLive > 400) { this.lastLive = now; this.renderLive(); }
@@ -1413,7 +1417,7 @@ class Game {
         this.phase = 'preroll';
         this.waitSince = this.playAt = performance.now();
         this.retryAt = 0;
-        if (yt.state() === YTS.PLAYING) {   // 이미 재생 중이면 '재생됨' 알림이 다시 안 오므로 시작 위치로 맞추고 바로 시작
+        if (yt.state() === YTS.PLAYING && performance.now() - (this.strayPauseAt || 0) > 1000) {   // 이미 재생 중이면 '재생됨' 알림이 다시 안 오므로 시작 위치로 맞추고 바로 시작
           yt.seek(this.startT);
           this.finishClicks();
           this.clock.set(this.startT);
@@ -1437,7 +1441,16 @@ class Game {
         const wait = performance.now() - this.waitSince;
         if (wait > 10000) { this.abort('영상이 시작되지 않아요. 인터넷 연결을 확인하고 다시 시도해 주세요.'); return; }
         if (wait - (this.retryAt || 0) > 1000 && yt.state() !== YTS.PLAYING && yt.state() !== YTS.BUFFERING) { this.retryAt = wait; yt.play(); }
-        if (wait > 400 && yt.state() === YTS.PLAYING) this.onYT(YTS.PLAYING);   // '재생됨' 알림을 놓친 경우
+        if (wait > 400 && yt.state() === YTS.PLAYING) {   // '재생됨' 알림을 놓친 경우 (이미 재생된 지 오래라 유튜브 시간이 정확함)
+          this.onYT(YTS.PLAYING);
+          this.clock.set(Math.max(this.startT, yt.time()));
+        }
+      }
+      if (this.phase === 'resuming') {
+        const wait = performance.now() - this.waitSince;
+        if (wait > 10000) { this.abort('영상이 다시 재생되지 않아요. 인터넷 연결을 확인하고 다시 시도해 주세요.'); return; }
+        if (yt.state() === YTS.PLAYING && wait > 150) this.onYT(YTS.PLAYING);   // '재생됨' 알림을 놓쳤거나 이미 재생 중이었음
+        else if (wait - (this.retryAt || 0) > 1000 && yt.state() !== YTS.BUFFERING) { this.retryAt = wait; yt.play(); }
       }
       if (this.phase === 'playing') {
         const now = performance.now();
@@ -1464,7 +1477,8 @@ class Game {
             }
           } else {
             this.badSince = 0;
-            if (this.nextNoteT() > Math.max(this.clock.now(), vt) + this.lookahead() + 0.3) this.clock.set(vt);   // 화면에 노트가 없으면 바로 맞춤 (눈에 안 보임)
+            const offT = settings.offset / 1000 * this.rate;
+            if (this.nextNoteT() > Math.max(this.gt, vt - offT) + this.lookahead()) this.clock.set(vt);   // 맞춘 뒤에도 화면에 노트가 없으면 바로 맞춤 (눈에 안 보임)
             else this.clock.follow(vt, Infinity);   // 노트가 보일 땐 빠르기만 살짝(최대 ±8%) 바꿔 따라감
           }
           this.lastVT = vt;
@@ -1481,7 +1495,7 @@ class Game {
   nextNoteT() {
     for (let i = this.drawFrom; i < this.notes.length; i++) {
       const n = this.notes[i];
-      if (!n.head) return n.t;
+      if (!n.head || n.head === 'miss') return n.t;   // MISS 난 노트도 판정선 아래로 잠깐 그려지므로 '보이는 노트'로 침
       if (n.d > 0 && !n.tail) return -Infinity;
     }
     return Infinity;
@@ -1671,6 +1685,8 @@ class Game {
     const { ctx, w, h, laneW, fieldW, x0 } = L;
     const judgeY = judgeLineY(h);
     const gt = this.phase === 'loading' || this.phase === 'ready' ? this.startT - 3 : this.gt;
+    // 카운트인 중에 속도를 바꾸거나 창 크기가 바뀌어 노트가 일찍 보이게 되면 그만큼 더 뺌 ('딱 딱 딱' 동안엔 노트가 안 보이게)
+    if (this.leadDone && (this.phase === 'countdown' || this.phase === 'preroll' || this.phase === 'waitVideo')) this.makeLeadIn(true);
     const pps = (150 + settings.speed * 90) * (h < 600 ? h / 600 : 1);
     const nowF = performance.now();
     const off0 = fxOffset(this.fx, nowF);       // 기어 반동·흔들림
@@ -1738,9 +1754,10 @@ class Game {
       if (n.t + n.d < gt - 0.6 && n.head && (n.d === 0 || n.tail)) this.drawFrom++;
       else break;
     }
+    const preStart = this.phase === 'loading' || this.phase === 'ready';   // 시작 전엔 노트를 안 보여 줌 (곧 빠질 앞부분 노트가 보이지 않게)
     for (let i = this.drawFrom; i < this.notes.length; i++) {
       const n = this.notes[i];
-      if (n.t > tTop + 0.1) break;
+      if (preStart || n.t > tTop + 0.1) break;
       const holding = this.activeHold[n.l] === n;
       if (n.head && n.head !== 'miss' && !holding) continue; // 처리 끝난 노트
       let yHead = judgeY - (n.t - gt) * pps;
@@ -1861,7 +1878,7 @@ class Game {
       ]);
       return;
     }
-    if (!['playing', 'countdown', 'waitVideo', 'preroll'].includes(this.phase)) return;
+    if (!['playing', 'countdown', 'waitVideo', 'preroll', 'resuming'].includes(this.phase)) return;
     this.prevPhase = this.phase;
     this.phase = 'paused';          // 영상 멈춤 알림이 바로 와도 다시 일시정지를 부르지 않게 먼저 바꿈
     yt.pause();
@@ -1896,6 +1913,34 @@ class Game {
     this.begin(1.5);
   }
 
+  /* '딱 딱 딱'이 끝날 때까지 화면에 노트가 하나도 안 보이게:
+     첫 노트가 노래 시작 뒤 LEAD_GAP초에 화면 맨 위로 들어오도록
+     - 연습·하이라이트: 영상을 그만큼 앞에서부터 틀어 줌 (노트는 그대로)
+     - 곡 처음부터: 영상을 더 앞에서 틀 수 없으니 그 전에 나오는 노트를 뺌
+     → 영상이 켜지는 순간(유튜브 반응이 들쭉날쭉한 때)에는 화면에 노트가 없어서 멈칫해도 안 보이고, 그사이 노래와 정확히 맞춤 */
+  makeLeadIn(later = false) {
+    if (!this.notes.length || this.noLeadCut) return;
+    const look = this.lookahead() + LEAD_GAP * this.rate;
+    const off = settings.offset / 1000 * this.rate;
+    const firstT = this.notes[0].t;
+    if (!later && this.practice && firstT - look + off < this.startT) {
+      const st = Math.max(0, firstT - look + off);
+      this.startT = st;
+      if (st > 0) return;          // 영상을 앞에서부터 틀면 충분 → 노트는 그대로
+    }
+    const cut = +(this.startT - off + look).toFixed(3);
+    if (firstT >= cut - 0.002) return;       // 0.002: 반올림 오차로 딱 맞춘 첫 노트가 빠지지 않게 (관전 화면도 같은 기준)
+    this.cutT = cut;
+    this.notes = this.notes.filter((n) => n.t >= cut - 0.002);
+    if (this.notes.length) this.lastEnd = this.notes.reduce((m, n) => Math.max(m, n.t + n.d), 0);
+    this.lanes = Array.from({ length: this.nl }, () => []);
+    this.notes.forEach((n, i) => this.lanes[n.l].push(i));
+    this.laneHead.fill(0);
+    this.drawFrom = 0;
+    this.totalUnits = this.notes.length + this.notes.filter((n) => n.d > 0).length;
+    this.feverMax = feverMaxSum(this.notes);
+  }
+
   /* 영상이 세 번째 '딱'보다 조금 먼저 켜졌을 때: 아직 안 울린 마지막 '딱'을 지금 울림 */
   finishClicks() {
     if (this.clicks && this.clickN < this.clicks.length) {
@@ -1908,8 +1953,12 @@ class Game {
   resume() {
     hideOverlay();
     if (this.prevPhase === 'countdown') { this.phase = 'countdown'; this.clock.start(); return; }
-    if (this.prevPhase === 'preroll' || this.prevPhase === 'waitVideo') { this.begin(1.5); return; }   // 시작 직전에 멈췄으면 카운트인부터 다시
+    if (this.prevPhase === 'preroll' || this.prevPhase === 'waitVideo') { this.begin(1.5); return; }
+    if (this.prevPhase === 'resuming') this.prevPhase = 'playing';   // 시작 직전에 멈췄으면 카운트인부터 다시
     this.phase = 'resuming';
+    this.waitSince = performance.now();
+    this.retryAt = 0;
+    this.clock.set(this.clock.now());   // 멈춘 자리에서 이어감
     yt.play();
   }
 

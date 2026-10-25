@@ -85,6 +85,7 @@ class Spectator {
     const v = this.views.get(m.id);
     if (!v) return;
     const now = performance.now();
+    if (typeof m.c === 'number' && m.c > 0 && m.c !== v.cut) { v.cut = m.c; v.notes = v.notes.filter((n) => n.t >= m.c - 0.002); v.from = 0; }   // 그 플레이어가 곡 맨 앞에서 뺀 노트
     if (typeof m.t === 'number') {
       v.t = m.t;
       v.recvAt = now;
