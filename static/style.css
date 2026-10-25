@@ -313,7 +313,7 @@ body.touch .touch-pause { display: block; }
 #screen-game:not(.active) .touch-pause { display: none; }
 
 .overlay { position: fixed; inset: 0; z-index: 20; background: rgba(2, 4, 10, .72); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
-body:has(#screen-game:not(.active)) #gameOverlay { display: none; }   /* 게임 화면일 때만 (영상보다 위층에 있어서) */
+body:not([data-screen="game"]) #gameOverlay { display: none; }   /* 게임 화면일 때만 (영상보다 위층에 있어서) */
 .overlay-box { background: var(--panel); border: 1px solid var(--line2); padding: 28px 34px; min-width: 300px; text-align: center; clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px); }
 .ov-title { font-family: var(--head); font-weight: 900; font-size: 26px; letter-spacing: 3px; font-style: italic; margin-bottom: 6px; }
 .ov-buttons { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
@@ -1763,7 +1763,7 @@ html[data-tone="light"] .nm.nc_gold { color: #b07800; text-shadow: none; } html[
 .evb-go { margin-left: auto; font-weight: 900; color: #ffd36b; white-space: nowrap; }
 .ev-deco { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
 .ev-deco.hidden { display: none; }
-.ev-deco span { position: absolute; left: var(--x); top: var(--y); font-size: calc(26px * var(--s)); opacity: .13; filter: saturate(.8);
+.ev-deco span { position: absolute; left: var(--x); top: var(--y); font-size: calc(26px * var(--s)); opacity: .13; will-change: transform;
   animation: evFloat var(--d) ease-in-out var(--dl) infinite alternate; }
 html[data-tone="light"] .ev-deco span { opacity: .18; }
 @keyframes evFloat { 0% { transform: translate(0, 0) rotate(-6deg); } 50% { transform: translate(28px, -18px) rotate(5deg); } 100% { transform: translate(-22px, 14px) rotate(-3deg); } }
