@@ -983,6 +983,52 @@ html[data-theme] #screen-game, html[data-theme] #screen-calib { background: #040
 .pl-il, .pl-big, .pl-dot, #avAiIllust, #avAiPixel, #rIllust, #rAvatar { cursor: zoom-in; }
 .mc-big { position: absolute; right: 8px; top: 6px; z-index: 2; padding: 3px 9px; font-size: 11px; border: 1px solid var(--line2); background: color-mix(in srgb, var(--panel2) 80%, transparent); color: var(--muted); }
 .mc-big:hover:not(:disabled) { color: var(--text); }
+/* 레벨 */
+.lv-pill { display: inline-flex; align-items: center; padding: 3px 9px 5px; font-family: var(--head); font-weight: 800; font-size: 12px; color: var(--text);
+  border: 1px solid var(--line2); white-space: nowrap; cursor: default;
+  background: linear-gradient(90deg, var(--cyan) var(--p, 0%), color-mix(in srgb, var(--text) 12%, transparent) var(--p, 0%)) left bottom / 100% 3px no-repeat,
+    color-mix(in srgb, var(--cyan) 10%, transparent); }
+.lv-tag { display: inline-block; margin-right: 5px; padding: 0 5px; font-family: var(--head); font-weight: 800; font-size: 10px; line-height: 15px; vertical-align: 1px;
+  color: var(--cyan); border: 1px solid color-mix(in srgb, var(--cyan) 55%, transparent); }
+.r-xp { display: grid; grid-template-columns: auto 1fr auto; align-items: center; column-gap: 10px; row-gap: 2px; max-width: 420px; margin: 6px auto 0; font-size: 12px; }
+.r-xp.hidden { display: none; }
+.rx-gain { font-family: var(--head); font-weight: 900; color: var(--cyan); font-size: 15px; }
+.rx-lv { grid-column: 3; font-family: var(--head); font-weight: 800; }
+.rx-bar { grid-column: 2; grid-row: 1; height: 6px; background: color-mix(in srgb, var(--text) 10%, transparent); overflow: hidden; }
+.rx-bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--cyan), var(--blue)); transition: width 1.1s cubic-bezier(.2, .8, .2, 1) .3s; }
+.rx-next { grid-column: 1 / -1; text-align: center; color: var(--muted); font-size: 11px; }
+.rx-up { grid-column: 1 / -1; text-align: center; font-family: var(--head); font-weight: 900; letter-spacing: 1px; color: var(--gold); }
+.rx-up:empty { display: none; }
+.r-xp.up .rx-lv { color: var(--gold); }
+/* 결과 카드 */
+.card-dlg { width: min(520px, calc(100vw - 16px)); }
+.card-img { display: block; width: 100%; aspect-ratio: 1080 / 1350; object-fit: contain; background: #04060d; border: 1px solid var(--line2); }
+.card-btns { display: flex; gap: 8px; justify-content: center; margin-top: 10px; }
+.card-btns .hidden { display: none; }
+/* 오늘의 곡 */
+.daily-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 10px; padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--gold) 55%, transparent); background: linear-gradient(90deg, color-mix(in srgb, var(--gold) 16%, transparent), transparent 70%), var(--panel); }
+.daily-bar.hidden { display: none; }
+.db-tag { font-weight: 900; color: var(--gold); white-space: nowrap; }
+.db-song { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.db-song small { color: var(--muted); }
+.db-top { font-size: 12px; color: var(--muted); }
+.db-top b { color: var(--text); }
+.db-left { font-size: 11px; color: var(--muted); font-family: var(--head); }
+.db-btns { display: flex; gap: 6px; margin-left: auto; }
+.db-btns button { padding: 4px 12px; font-size: 12px; }
+.daily-badge { display: inline-block; margin-right: 6px; padding: 0 6px; font-size: 10px; font-weight: 900; color: #1a1204; background: var(--gold); transform: skewX(-10deg); vertical-align: 1px; }
+.dm-song { margin-top: 8px; font-weight: 800; }
+.dm-song small { color: var(--muted); font-weight: 500; }
+.dm-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; counter-reset: none; }
+.dm-list li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto 58px 36px; gap: 8px; align-items: center; padding: 5px 8px; font-size: 13px; background: color-mix(in srgb, var(--text) 5%, transparent); }
+.dm-list li.me { background: color-mix(in srgb, var(--cyan) 16%, transparent); }
+.dm-list li.muted { display: block; }
+.dm-pos { font-family: var(--head); font-weight: 900; color: var(--gold); text-align: center; }
+.dm-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.dm-name small { color: var(--muted); font-weight: 500; }
+.dm-score { font-family: var(--head); font-weight: 800; }
+.dm-acc { font-size: 11px; color: var(--muted); text-align: right; }
 /* 지금 접속 중 */
 .on-btn { padding: 4px 10px; font-size: 13px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
 .on-btn b { color: var(--text); font-family: var(--head); }

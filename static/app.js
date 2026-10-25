@@ -14,6 +14,7 @@ let pendingResults = null;
 const preview = { id: null, timer: 0, auto: 0 };
 const DIFFS = ['easy', 'normal', 'hard', 'extreme'];
 const DIFF_EN = { easy: 'EASY', normal: 'NORMAL', hard: 'HARD', extreme: 'EXTREME' };
+let daily = null;      // 오늘의 곡 (/api/daily) — 곡 목록에서도 쓰므로 맨 위에
 
 /* ============================================================ 곡 데이터 */
 async function refreshSongs() {
@@ -130,7 +131,7 @@ function renderSongs() {
       return `<div class="row${s.id === selId ? ' sel' : ''}${roomSel}" data-id="${s.id}">
         <button class="fav${fav[s.id] ? ' on' : ''}" type="button" title="${fav[s.id] ? '즐겨찾기에서 빼기' : '즐겨찾기'}">${fav[s.id] ? '★' : '☆'}</button>
         <img class="row-thumb" src="https://i.ytimg.com/vi/${s.id}/mqdefault.jpg" alt="" loading="lazy">
-        <div class="row-info"><div class="row-title">${s.ai && songPick(s) ? (aiIsMug(s) ? '<span class="ai-badge mug" title="이 곡은 예전 AI(MuG)로 만든 AI 채보로 플레이 (곡 화면의 AI 채보 칩으로 바꿀 수 있어요)">MuG</span>' : '<span class="ai-badge" title="이 곡은 새 AI로 만든 AI 채보로 플레이 (곡 화면의 AI 채보 칩으로 바꿀 수 있어요)">AI</span>') : ''}${esc(s.title)}</div><div class="row-artist">${esc(artistOf(s))}</div></div>
+        <div class="row-info"><div class="row-title">${daily && daily.songId === s.id ? `<span class="daily-badge" title="오늘의 곡 (${DIFF_NAME[daily.diff] || ''} · 4키)">🎯 오늘</span>` : ''}${s.ai && songPick(s) ? (aiIsMug(s) ? '<span class="ai-badge mug" title="이 곡은 예전 AI(MuG)로 만든 AI 채보로 플레이 (곡 화면의 AI 채보 칩으로 바꿀 수 있어요)">MuG</span>' : '<span class="ai-badge" title="이 곡은 새 AI로 만든 AI 채보로 플레이 (곡 화면의 AI 채보 칩으로 바꿀 수 있어요)">AI</span>') : ''}${esc(s.title)}</div><div class="row-artist">${esc(artistOf(s))}</div></div>
         <div class="row-slots">${slots}</div>
       </div>`;
     }).join('');
@@ -959,6 +960,7 @@ function showResult(g, r) {
   startResultAvatar(r);
   if (g.fcKind && !r.incomplete) startConfetti(g.fcKind === 'ap');
   if (!isTest && typeof achieveOnResult === 'function') { try { achieveOnResult(g, r); } catch (e) { console.warn('업적 확인 오류', e); } }
+  if (typeof gainXp === 'function') { try { if (isTest) $('#rXp').classList.add('hidden'); else gainXp(g, r); } catch (e) { console.warn('경험치 오류', e); } }
   if (!isTest) {
     api('/scores', {
       method: 'POST',
@@ -969,6 +971,7 @@ function showResult(g, r) {
       if (res.newBest) parts.push('<b class="nb">NEW RECORD</b>');
       if (res.position) parts.push(`친구 순위 <b>${res.position}위</b> / ${res.total}명`);
       $('#rBest').innerHTML = parts.join(' · ') || $('#rBest').innerHTML;
+      afterDailyPlay(g, r);
     }).catch(() => {});
   }
 }
@@ -1101,7 +1104,7 @@ function renderMultiResults(m) {
   const avOf = (id) => ((net.room && net.room.players.find((p) => p.id === id)) || {}).avatar || r_avatars[id];
   for (const r of m.results) plRemember({ id: r.id, name: r.name, title: r.title, avatar: avOf(r.id) || r.avatar });
   $('#rMultiList').innerHTML = m.results.map((r, i) =>
-    `<li class="${r.id === net.id ? 'me' : ''}" data-pl="${esc(r.id)}"><span class="pos">${i + 1}</span><span class="n">${miniHtml(avOf(r.id) || r.avatar, 24)} ${r.title ? `<span class="${ptCls(r.title)}">${esc(r.title)}</span>` : ''}${esc(r.name)}${r.diff ? ` <small class="ld"><span class="tag">${r.keys || 4}K</span> ${DIFF_EN[r.diff] || ''}</small>` : ''}</span>
+    `<li class="${r.id === net.id ? 'me' : ''}" data-pl="${esc(r.id)}"><span class="pos">${i + 1}</span><span class="n">${miniHtml(avOf(r.id) || r.avatar, 24)} ${typeof lvTag === 'function' ? lvTag(r.level) : ''}${r.title ? `<span class="${ptCls(r.title)}">${esc(r.title)}</span>` : ''}${esc(r.name)}${r.diff ? ` <small class="ld"><span class="tag">${r.keys || 4}K</span> ${DIFF_EN[r.diff] || ''}</small>` : ''}</span>
       <span class="s">${(r.score || 0).toLocaleString()}</span><span class="a">${(r.acc || 0).toFixed(2)}%</span>
       <span class="rk rank-${esc(r.rank || '')}">${r.incomplete ? '포기' : esc(r.rank || '')}</span></li>`).join('');
   paintMinis($('#rMultiList'));
@@ -1185,13 +1188,13 @@ function renderRoom() {
       const tag = r.phase === 'lobby' && (p.state === 'idle' || !p.state)
         ? (lead ? '<span class="rdy lead">방장</span>' : p.ready ? '<span class="rdy on">✓ 준비</span>' : '<span class="rdy">대기</span>')
         : `<span class="muted small">${stateName[p.state] || ''}</span>`;
-      return `<li class="${p.id === net.id ? 'me' : ''}${!lead && p.ready ? ' ready' : ''}" data-pl="${esc(p.id)}" title="눌러서 ${esc(p.name)} 님 캐릭터·자주 하는 노래 보기">${miniHtml(p.avatar)}${lead ? '<span class="crown">👑</span>' : ''}<span class="pn">${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}${esc(p.name)}</span>
+      return `<li class="${p.id === net.id ? 'me' : ''}${!lead && p.ready ? ' ready' : ''}" data-pl="${esc(p.id)}" title="눌러서 ${esc(p.name)} 님 캐릭터·자주 하는 노래 보기">${miniHtml(p.avatar)}${lead ? '<span class="crown">👑</span>' : ''}<span class="pn">${typeof lvTag === 'function' ? lvTag(p.level) : ''}${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}${esc(p.name)}</span>
         <span class="pdiff"><span class="tag">${pk}K</span> ${DIFF_EN[pd] || ''}${st}</span>
         ${tag}</li>`;
     }).join('');
     $('#roomPlayers').insertAdjacentHTML('beforeend', (r.watchers || []).map((p) => {
       plRemember(p);
-      return `<li class="watch${p.id === net.id ? ' me' : ''}" data-pl="${esc(p.id)}" title="게임이 끝나면 같이 해요">${miniHtml(p.avatar)}<span class="pn">${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}${esc(p.name)}</span><span class="rdy watch">👀 구경 중</span></li>`;
+      return `<li class="watch${p.id === net.id ? ' me' : ''}" data-pl="${esc(p.id)}" title="게임이 끝나면 같이 해요">${miniHtml(p.avatar)}<span class="pn">${typeof lvTag === 'function' ? lvTag(p.level) : ''}${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}${esc(p.name)}</span><span class="rdy watch">👀 구경 중</span></li>`;
     }).join(''));
     paintMinis($('#roomPlayers'));
     $('#roomSong').textContent = r.songId ? r.songTitle : '방장이 곡을 고르는 중...';
@@ -1233,7 +1236,7 @@ function renderRoom() {
 /* ============================================================ 다른 사람 카드: 방·실시간 순위·친구 화면·결과에서 누르면
    그 사람이 쓰는 일러스트·캐릭터(표정)와 자주 하는 노래. 플레이 중에도 키 입력을 막지 않게 작은 창(바깥·ESC·✕로 닫힘) */
 const plSeen = {};      // id → {id, name, title, avatar} (방을 나간 뒤 결과 화면에서도 쓰게)
-function plRemember(p) { if (p && p.id) plSeen[p.id] = { id: p.id, name: p.name, title: p.title || '', avatar: p.avatar }; }
+function plRemember(p) { if (p && p.id) plSeen[p.id] = { id: p.id, name: p.name, title: p.title || '', avatar: p.avatar, level: p.level || (plSeen[p.id] && plSeen[p.id].level) || 0 }; }
 function plLookup(id) {
   const p = net.room && net.room.players.find((x) => String(x.id) === String(id));     // 방 번호표(id)는 숫자, 화면의 data-pl은 글자
   if (p) plRemember(p);
@@ -1292,7 +1295,9 @@ async function openPlCard(id, anchor) {
   plShown = { avatar: a, name: p.name };
   $('.pl-av', card).innerHTML = miniHtml(a, 34);
   paintMinis($('.pl-av', card));
-  $('.pl-name', card).textContent = p.name + (String(id) === String(net.id) ? ' (나)' : '');
+  const mine = String(id) === String(net.id);
+  const lv = mine && typeof myLevel === 'function' ? myLevel() : p.level;
+  $('.pl-name', card).innerHTML = (typeof lvTag === 'function' ? lvTag(lv) : '') + esc(p.name) + (mine ? ' <small>(나)</small>' : '');
   $('.pl-title', card).textContent = p.title || '';
   $('.pl-title', card).classList.toggle('hidden', !p.title);
   $('.pl-title', card).classList.toggle('legend', ptCls(p.title) !== 'ptitle');
@@ -1393,6 +1398,90 @@ $('#chatLog').addEventListener('click', (e) => {
   }
 });
 
+/* ============================================================ 오늘의 곡: 날마다 한 곡·난이도, 그날의 순위 */
+let dailyTimer = 0;
+function fmtLeft(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  return h ? `${h}시간 ${m}분` : `${m}분`;
+}
+async function loadDaily() {
+  try {
+    const r = await fetch('/api/daily');
+    const j = await r.json();
+    if (!r.ok || !j.songId) { daily = null; renderDaily(); return null; }
+    j.loadedAt = Date.now();
+    daily = j;
+  } catch { /* 무시 */ }
+  renderDaily();
+  return daily;
+}
+function dailyLeft() { return daily ? Math.max(0, daily.endsIn - (Date.now() - daily.loadedAt) / 1000) : 0; }
+function renderDaily() {
+  const bar = $('#dailyBar');
+  if (!bar) return;
+  const s = daily && songById(daily.songId);
+  bar.classList.toggle('hidden', !s);
+  if (!s) return;
+  $('#dbTitle').textContent = s.title;
+  $('#dbArtist').textContent = artistOf(s);
+  $('#dbDiff').textContent = `4K ${DIFF_EN[daily.diff] || ''}`;
+  $('#dbDiff').className = `tag diff-${daily.diff}`;
+  const nick = (settings.nick || '').trim();
+  const b = daily.board || [];
+  const mi = b.findIndex((e) => e.name === nick);
+  const top = b[0];
+  $('#dbTop').innerHTML = top ? `1위 <b>${esc(top.name)}</b> ${top.score.toLocaleString()}${mi >= 0 ? ` · 나 <b>${mi + 1}위</b>` : ''} · ${b.length}명 도전` : '아직 아무도 도전하지 않았어요 — 첫 1위가 되어 보세요!';
+  $('#dbLeft').textContent = `남은 시간 ${fmtLeft(dailyLeft())}`;
+  if ($('#dailyMenu') && !$('#dailyMenu').classList.contains('hidden')) renderDailyMenu();
+}
+function renderDailyMenu() {
+  const s = daily && songById(daily.songId);
+  if (!s) return;
+  const nick = (settings.nick || '').trim();
+  $('#dmSum').textContent = `${(daily.board || []).length}명 · 남은 시간 ${fmtLeft(dailyLeft())}`;
+  $('#dmSong').innerHTML = `${esc(s.title)} <small>${esc(artistOf(s))}</small> <span class="tag">4K ${DIFF_EN[daily.diff] || ''}</span>`;
+  $('#dmList').innerHTML = (daily.board || []).map((e, i) => `<li class="${e.name === nick ? 'me' : ''}"><span class="dm-pos">${i + 1}</span><span class="dm-name">${esc(e.name)}${e.ai ? ' <small>AI</small>' : ''}</span>`
+    + `<span class="dm-score">${e.score.toLocaleString()}</span><span class="dm-acc">${(+e.acc).toFixed(2)}%</span><span class="rk rank-${esc(rankFor(e))}">${esc(rankFor(e))}</span></li>`).join('')
+    || '<li class="muted">아직 기록이 없어요.</li>';
+  $('#dmPrev').textContent = daily.prev ? `어제의 1위: ${daily.prev.winner} · ${daily.prev.title} (${DIFF_NAME[daily.prev.diff] || ''}) ${daily.prev.score.toLocaleString()}점` : '';
+}
+$('#dbGo').addEventListener('click', () => {
+  if (!daily) return;
+  if (net.room && !net.isLeader()) { toast('방에 있을 땐 방장이 곡을 골라요. 방을 나가서 도전해 보세요.'); return; }
+  if (settings.mode !== 4) setMode(4);
+  if (settings.diff !== daily.diff) setDiff(daily.diff);
+  if (!net.room && settings.hlMode) { settings.hlMode = false; saveSettings(); renderSongs(); }
+  select(daily.songId);
+  toast('오늘의 곡이에요! PLAY를 누르면 시작해요. (4키 · 전체곡 기록이 순위에 들어가요)', 2600);
+});
+$('#dbRank').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const m = $('#dailyMenu');
+  if (!m.classList.contains('hidden')) { m.classList.add('hidden'); return; }
+  m.classList.remove('hidden');
+  const r = $('#dbRank').getBoundingClientRect(), w = m.offsetWidth;
+  m.style.top = `${Math.round(r.bottom + 6)}px`;
+  m.style.left = `${Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)))}px`;
+  renderDailyMenu();
+  loadDaily();
+});
+$('#dmClose').addEventListener('click', () => $('#dailyMenu').classList.add('hidden'));
+document.addEventListener('click', (e) => { if (!e.target.closest('#dailyMenu, #dbRank')) $('#dailyMenu').classList.add('hidden'); });
+/* 오늘의 곡을 끝까지 했으면 순위를 다시 받아서 알려 줌 */
+function isDailyPlay(g) { return !!(daily && g && g.song && g.song.id === daily.songId && g.diff === daily.diff && g.nl === 4 && !g.hl && !g.practice); }
+async function afterDailyPlay(g, r) {
+  if (!isDailyPlay(g) || r.incomplete) return;
+  const d = await loadDaily();
+  if (!d) return;
+  const nick = (settings.nick || '').trim();
+  const pos = (d.board || []).findIndex((e) => e.name === nick) + 1;
+  if (pos) toast(`🎯 오늘의 곡 ${pos}위! (${d.board.length}명 중)`, 3000);
+  if (typeof achieveOnDaily === 'function') achieveOnDaily(pos, d.day);
+}
+loadDaily();
+dailyTimer = setInterval(() => { if (document.hidden) return; if (daily && dailyLeft() <= 0) loadDaily(); else renderDaily(); }, 60000);
+setInterval(() => { if (!document.hidden) loadDaily(); }, 300000);
+
 /* ============================================================ 지금 접속 중인 사람 */
 const ON_KIND = { lobby: '로비', room: '방', multi: '멀티 플레이 중', watch: '구경 중', solo: '혼자 플레이 중', edit: '채보 편집 중', calib: '싱크 맞추는 중' };
 let onTimer = 0;
@@ -1418,7 +1507,7 @@ async function loadOnline() {
       const st = p.status || {};
       const can = !me && st.room && st.room !== myRoom;
       return `<li class="${me ? 'me' : ''}" data-pl="${esc(p.id)}">${miniHtml(p.avatar, 30)}<span class="on-who">`
-        + `<span class="on-name">${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}${esc(p.name)}${me ? ' <small>(나)</small>' : ''}</span>`
+        + `<span class="on-name">${typeof lvTag === 'function' ? lvTag(p.level) : ''}${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}${esc(p.name)}${me ? ' <small>(나)</small>' : ''}</span>`
         + `<span class="on-st on-${esc(st.kind || 'lobby')}">${onStatusHtml(st)}</span></span>`
         + (can ? `<button type="button" class="small-btn on-join" data-room="${esc(st.room)}">${st.kind === 'room' ? '같이 하기' : '구경하기'}</button>` : '')
         + '</li>';
@@ -1891,7 +1980,7 @@ $('#nick').value = settings.nick || '';
 $('#nick').addEventListener('change', (e) => {
   settings.nick = e.target.value.trim().slice(0, 16);
   saveSettings();
-  net.send({ type: 'hello', name: settings.nick, avatar: settings.avatar, title: typeof achTitle === 'function' ? achTitle() : '', diff: settings.diff, keys: settings.mode });
+  net.send({ type: 'hello', name: settings.nick, avatar: settings.avatar, title: typeof achTitle === 'function' ? achTitle() : '', diff: settings.diff, keys: settings.mode, level: typeof myLevel === 'function' ? myLevel() : 0 });
   renderSongs();
 });
 

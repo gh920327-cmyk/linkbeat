@@ -49,6 +49,7 @@
         <span id="connDot" class="dot" title="서버 연결 상태"></span>
         <button id="btnOnline" class="ghost on-btn" type="button" title="지금 접속 중인 사람" aria-haspopup="true">👥 <b id="onCount">-</b></button>
         <button id="btnProfile" class="ghost pf-btn" type="button"></button>
+        <span id="myLv" class="lv-pill" title="레벨">Lv 1</span>
         <span id="myTitle" class="ptitle my-title hidden" title="내 칭호"></span>
       </div>
       <nav class="tools">
@@ -157,6 +158,13 @@
           <button id="btnReq" class="link-go">곡 신청</button>
         </div>
         <div id="reqStatus" class="add-status"></div>
+      </div>
+      <div id="dailyBar" class="daily-bar hidden">
+        <span class="db-tag">🎯 오늘의 곡</span>
+        <span class="db-song"><b id="dbTitle"></b> <small id="dbArtist"></small> <span id="dbDiff" class="tag"></span></span>
+        <span id="dbTop" class="db-top"></span>
+        <span id="dbLeft" class="db-left"></span>
+        <span class="db-btns"><button type="button" id="dbGo" class="primary small-btn">도전하기</button><button type="button" id="dbRank" class="small-btn">순위</button></span>
       </div>
       <div class="list-head">
         <h2>곡 목록 <span id="songCount"></span></h2>
@@ -311,10 +319,12 @@
         <div id="rtSuggest" class="rt-suggest small"></div>
       </div>
       <div id="rBest" class="r-best center"></div>
+      <div id="rXp" class="r-xp hidden"><span class="rx-gain"></span><span class="rx-lv"></span><span class="rx-bar"><i></i></span><span class="rx-next"></span><span class="rx-up"></span></div>
       <div id="rGhost" class="r-ghost center hidden"></div>
       <div class="r-buttons">
         <button id="btnRetry" class="primary">다시 하기</button>
         <button id="btnResRank">순위표</button>
+        <button id="btnCard" type="button" title="결과를 그림 한 장으로 저장·공유">📸 결과 카드</button>
         <button id="btnToLobby">로비로</button>
       </div>
     </div>
@@ -580,6 +590,19 @@
   </div>
 </dialog>
 
+<!-- 결과 카드 (그림 한 장으로 저장·공유) -->
+<dialog id="cardDlg" class="card-dlg">
+  <div class="skin-box">
+    <div class="skin-head">
+      <h3>RESULT CARD<small>저장해서 친구들에게 자랑해 보세요</small></h3>
+      <button id="cardClose" class="ghost small-btn" type="button">닫기</button>
+    </div>
+    <img id="cardImg" class="card-img" alt="결과 카드">
+    <div class="card-btns"><button id="cardSave" class="primary skew" type="button">💾 저장</button><button id="cardShare" class="skew hidden" type="button">↗ 공유</button><button id="cardCopy" class="skew hidden" type="button">📋 복사</button></div>
+    <p class="small muted center" id="cardMsg"></p>
+  </div>
+</dialog>
+
 <dialog id="avPickDlg">
   <div class="skin-box">
     <div class="skin-head">
@@ -755,6 +778,12 @@
     <h5>자주 하는 노래 <span class="pl-sum muted"></span></h5>
     <ol class="pl-songs"></ol>
   </div>
+  <div id="dailyMenu" class="on-menu hidden" role="dialog" aria-label="오늘의 곡 순위">
+    <div class="tm-head"><b>🎯 오늘의 곡 순위</b><span class="muted" id="dmSum"></span><button type="button" id="dmClose" class="ghost tm-x" aria-label="닫기">✕</button></div>
+    <div id="dmSong" class="dm-song"></div>
+    <ol id="dmList" class="dm-list"></ol>
+    <p class="small muted on-tip" id="dmPrev"></p>
+  </div>
   <div id="onMenu" class="on-menu hidden" role="dialog" aria-label="지금 접속 중">
     <div class="tm-head"><b>지금 접속 중</b><span class="muted" id="onSum"></span><button type="button" id="onClose" class="ghost tm-x" aria-label="닫기">✕</button></div>
     <ul id="onList" class="on-list"></ul>
@@ -774,6 +803,7 @@
 <script src="/static/spectate.js"></script>
 <script src="/static/app.js"></script>
 <script src="/static/achieve.js"></script>
+<script src="/static/card.js"></script>
 <script src="/static/profile.js"></script>
 <script src="/static/gate.js"></script>
 </body>

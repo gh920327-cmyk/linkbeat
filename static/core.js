@@ -604,7 +604,7 @@ const net = {
     ws.onopen = () => {
       this.open = true;
       this.samples = [];
-      this.send({ type: 'hello', name: settings.nick || '', avatar: settings.avatar, title: typeof achTitle === 'function' ? achTitle() : '', diff: settings.diff, keys: settings.mode });
+      this.send({ type: 'hello', name: settings.nick || '', avatar: settings.avatar, title: typeof achTitle === 'function' ? achTitle() : '', diff: settings.diff, keys: settings.mode, level: typeof myLevel === 'function' ? myLevel() : 0 });
       const lr = this.lastRoom && Date.now() - this.lastRoom.at < LAST_ROOM_MS ? this.lastRoom : null;
       if (lr) { this.rejoining = true; this.send({ type: 'join', code: lr.code, rejoin: true, lead: lr.lead, songId: lr.songId }); }
       let n = 0;
