@@ -724,6 +724,7 @@ const net = {
 let currentScreen = 'lobby';
 function showScreen(name) {
   currentScreen = name;
+  document.body.dataset.screen = name;     // 화면별 CSS (일시정지 창은 게임 화면에서만)
   if (typeof onScreenChange === 'function') { try { onScreenChange(name); } catch { /* 무시 */ } }
   $$('.screen').forEach((s) => s.classList.toggle('active', s.id === 'screen-' + name));
   const slot = { game: '#slotGame', editor: '#slotEditor' }[name];

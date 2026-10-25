@@ -160,8 +160,36 @@ function heartPath(ctx, cx, cy, r) {
   ctx.bezierCurveTo(cx + r * 0.95, top - r * 0.75, cx + r * 1.35, cy + r * 0.05, cx, cy + r * 0.9);
   ctx.closePath();
 }
-/* 호박: 둥근 몸통 세 쪽 + 꼭지 — face면 잭오랜턴 얼굴(이벤트 호박 노트) */
-function drawPumpkin(ctx, cx, cy, r, { rim = null, face = false, dead = false, glow = 0 } = {}) {
+/* 한 번 그려 둔 그림을 다시 씀 (빛 번짐·그라데이션을 매 프레임 그리면 GPU에서 무거워서 끊김) */
+const SPRITES = new Map();
+function spriteOf(key, w, h, paint) {
+  const dpr = Math.min(3, window.devicePixelRatio || 1);
+  const k = `${key}|${dpr}`;
+  let sp = SPRITES.get(k);
+  if (!sp) {
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.ceil(w * dpr)); c.height = Math.max(1, Math.ceil(h * dpr));
+    const x = c.getContext('2d');
+    x.scale(dpr, dpr);
+    paint(x, w, h);
+    sp = { c, w, h };
+    SPRITES.set(k, sp);
+    if (SPRITES.size > 600) SPRITES.delete(SPRITES.keys().next().value);
+  }
+  return sp;
+}
+function drawSprite(ctx, sp, cx, cy, sc = 1) {
+  ctx.drawImage(sp.c, cx - sp.w * sc / 2, cy - sp.h * sc / 2, sp.w * sc, sp.h * sc);
+}
+/* 호박: 둥근 몸통 세 쪽 + 꼭지 — face면 잭오랜턴 얼굴(이벤트 호박 노트) · 크기·모양마다 한 번만 그려 두고 재사용 */
+function drawPumpkin(ctx, cx, cy, r, opts = {}) {
+  const rr = Math.max(2, Math.round(r * 2) / 2);
+  const { rim = null, face = false, dead = false, glow = 0 } = opts;
+  const pad = glow + 6, size = rr * 2.4 + pad * 2;
+  const sp = spriteOf(`pk|${rr}|${rim}|${face}|${dead}|${glow}`, size, size, (x, w, h) => paintPumpkin(x, w / 2, h / 2 + rr * 0.1, rr, opts));
+  drawSprite(ctx, sp, cx, cy - rr * 0.1, r / rr);
+}
+function paintPumpkin(ctx, cx, cy, r, { rim = null, face = false, dead = false, glow = 0 } = {}) {
   ctx.save();
   const body = dead ? ['#7a7f92', '#4a5066', '#2e3244'] : ['#ffd08a', '#ff8a1e', '#b8460a'];
   if (glow) { ctx.shadowColor = '#ff8a1e'; ctx.shadowBlur = glow; }
@@ -183,8 +211,7 @@ function drawPumpkin(ctx, cx, cy, r, { rim = null, face = false, dead = false, g
   ctx.fillStyle = dead ? '#3b4052' : '#3f8a2a';           // 꼭지
   ctx.beginPath(); ctx.moveTo(cx - r * 0.1, cy - r * 0.72); ctx.lineTo(cx + r * 0.12, cy - r * 0.72); ctx.lineTo(cx + r * 0.2, cy - r * 1.08); ctx.lineTo(cx + r * 0.02, cy - r * 1.05); ctx.closePath(); ctx.fill();
   if (face && !dead) {              // 눈·입에서 불빛
-    const fl = 0.75 + 0.25 * Math.sin(performance.now() / 90);
-    ctx.fillStyle = `rgba(255,${Math.round(230 * fl)},120,1)`;
+    ctx.fillStyle = 'rgba(255,230,120,1)';
     ctx.shadowColor = '#ffe27a'; ctx.shadowBlur = 8;
     for (const sx of [-1, 1]) { ctx.beginPath(); ctx.moveTo(cx + sx * r * 0.42, cy - r * 0.12); ctx.lineTo(cx + sx * r * 0.18, cy - r * 0.12); ctx.lineTo(cx + sx * r * 0.3, cy - r * 0.42); ctx.closePath(); ctx.fill(); }
     ctx.beginPath(); ctx.moveTo(cx - r * 0.48, cy + r * 0.12);
@@ -200,10 +227,16 @@ function drawPumpkinNote(L, lane, yHead, now) {
   const r = Math.min((laneW - 4) * 0.36, settings.skin.noteH * 0.9 + 8);
   const bob = Math.sin(now / 160 + lane) * 1.2;
   const pulse = 0.6 + 0.4 * Math.sin(now / 140 + lane);
-  const hg = ctx.createRadialGradient(cx, yHead + bob, r * 0.4, cx, yHead + bob, r * 2.1);
-  hg.addColorStop(0, `rgba(255,211,107,${(0.55 * pulse).toFixed(3)})`); hg.addColorStop(1, 'rgba(255,140,30,0)');
-  ctx.fillStyle = hg;
-  ctx.fillRect(cx - r * 2.2, yHead + bob - r * 2.2, r * 4.4, r * 4.4);
+  const rr = Math.max(2, Math.round(r));
+  const halo = spriteOf(`halo|${rr}`, rr * 4.4, rr * 4.4, (x, w, h) => {
+    const hg = x.createRadialGradient(w / 2, h / 2, rr * 0.4, w / 2, h / 2, rr * 2.1);
+    hg.addColorStop(0, 'rgba(255,211,107,0.55)'); hg.addColorStop(1, 'rgba(255,140,30,0)');
+    x.fillStyle = hg; x.fillRect(0, 0, w, h);
+  });
+  const a0 = ctx.globalAlpha;
+  ctx.globalAlpha = a0 * pulse;
+  drawSprite(ctx, halo, cx, yHead + bob, r / rr);
+  ctx.globalAlpha = a0;
   drawPumpkin(ctx, cx, yHead + bob, r * 1.08, { rim: colors[lane], face: true, glow: 16 });
   for (let i = 0; i < 3; i++) {          // 둘레를 도는 반짝이
     const a = now / 260 + i * 2.094;
@@ -648,10 +681,13 @@ function drawGhostWisps(ctx, x0, fieldW, judgeY, now) {
     const k = ((now / 2600) + i / 7) % 1;
     const x = x0 + fieldW * ((i * 0.37 + 0.11) % 1) + Math.sin(now / 500 + i) * 8;
     const y = judgeY - 4 - k * 46;
-    const g = ctx.createRadialGradient(x, y, 1, x, y, 14 + k * 10);
-    g.addColorStop(0, `rgba(184,255,224,${(0.22 * (1 - k)).toFixed(3)})`); g.addColorStop(1, 'rgba(184,255,224,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(x - 26, y - 26, 52, 52);
+    const sp = spriteOf('wisp', 52, 52, (c, w, h) => {
+      const g = c.createRadialGradient(w / 2, h / 2, 1, w / 2, h / 2, 24);
+      g.addColorStop(0, 'rgba(184,255,224,1)'); g.addColorStop(1, 'rgba(184,255,224,0)');
+      c.fillStyle = g; c.fillRect(0, 0, w, h);
+    });
+    ctx.globalAlpha = 0.22 * (1 - k);
+    drawSprite(ctx, sp, x, y, (14 + k * 10) / 24);
   }
   ctx.restore();
 }
@@ -742,6 +778,12 @@ function drawFxNew(L, judgeY, fx, now, e) {
 }
 /* 박쥐 한 마리 (날갯짓 flap: 라디안) */
 function drawBat(ctx, x, y, s, flap, col = '#9466e0') {
+  const ss = Math.max(2, Math.round(s * 2) / 2);
+  const fi = ((Math.round(flap / (Math.PI / 4)) % 8) + 8) % 8;
+  const sp = spriteOf(`bat|${ss}|${fi}|${col}`, ss * 5 + 26, ss * 3.4 + 26, (c, w, h) => paintBat(c, w / 2, h / 2, ss, fi * Math.PI / 4, col));
+  drawSprite(ctx, sp, x, y, s / ss);
+}
+function paintBat(ctx, x, y, s, flap, col) {
   const w = Math.sin(flap) * 0.7;
   ctx.save();
   ctx.translate(x, y);
@@ -2021,13 +2063,12 @@ class Game {
         const k = (now - c.at) / 800;
         const sc = k < 0.15 ? 0.7 + k * 3 : 1.15 - Math.min(0.15, (k - 0.15));
         ctx.globalAlpha = 1 - k * k;
-        ctx.font = `900 ${Math.round(23 * sc)}px ${UI_FONT}`;
-        ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(60,20,0,0.85)';
-        ctx.shadowColor = '#ff7a1a'; ctx.shadowBlur = 12;
-        const tx = x0 + c.lane * laneW + laneW / 2, ty = judgeY - 40 - 52 * k;
-        ctx.strokeText('🍬+1', tx, ty);
-        ctx.fillStyle = '#ffe9a8';
-        ctx.fillText('🍬+1', tx, ty);
+        const sp = spriteOf('candy+1', 96, 44, (x, w, h) => {
+          x.font = `900 23px ${UI_FONT}`; x.textAlign = 'center'; x.textBaseline = 'middle';
+          x.lineWidth = 4; x.strokeStyle = 'rgba(60,20,0,0.85)'; x.shadowColor = '#ff7a1a'; x.shadowBlur = 12;
+          x.strokeText('🍬+1', w / 2, h / 2); x.fillStyle = '#ffe9a8'; x.fillText('🍬+1', w / 2, h / 2);
+        });
+        drawSprite(ctx, sp, x0 + c.lane * laneW + laneW / 2, judgeY - 40 - 52 * k, sc);
       }
       ctx.restore();
     }
