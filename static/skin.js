@@ -124,16 +124,33 @@ class SkinPreview {
       ctx.fillText('FEVER x2', 0, 0);
       ctx.restore();
     }
-    drawCombo(L, this.combo, this.comboPop, now, judgeY);
+    drawCombo(L, this.fcAt ? 0 : this.combo, this.comboPop, now, judgeY);
     drawMilestone(L, this.fx, now, judgeY);
     drawJudgePopup(L, this.popup, now, judgeY);
+    if (this.fcLoop && (!this.fcAt || now - this.fcAt > fcDur(settings.skin.fcFx) + 700)) this.demoFc(false, true);   // 상점: 계속 보여 줌
+    if (this.fcAt) {
+      if (now - this.fcAt < fcDur(settings.skin.fcFx)) drawFcFx(L, settings.skin.fcFx, this.fcAp, this.fcAt, now, this.combo);
+      else this.fcAt = 0;
+    }
     ctx.restore();
     if (this.combo > 400) this.reset();
+  }
+  /* 풀콤보 연출 미리보기 */
+  demoFc(ap = false, quiet = false) {
+    this.fcAt = performance.now();
+    this.fcAp = ap;
+    if (!quiet) fcSound(settings.skin.fcFx);
   }
 }
 
 /* ---------------- 창 */
 let skinPrev = null;
+/* 이벤트 물건: 이벤트가 끝났는데 못 얻었으면 숨김 */
+function evItemOf(id) { const it = typeof itemOf === 'function' ? itemOf(id) : null; return it && it.event ? it : null; }
+function evItemGone(id) {
+  const it = evItemOf(id);
+  return !!it && !(typeof myGrow !== 'undefined' && myGrow && myGrow.event && myGrow.event.id === it.event);
+}
 /* 상점에서 사야 하는 꾸미기: 안 가졌으면 🔒 — 누르면 상점의 그 물건으로 */
 function skinLock(key, v) {
   const id = (SKIN_ITEMS[key] || {})[v];
@@ -147,17 +164,19 @@ function lockGuard(key, v) {
   return true;
 }
 function markLocks() {
-  for (const [sel, key] of [['#noteShape', 'note'], ['#effectOpt', 'effect'], ['#gearOpt', 'gear'], ['#comboOpt', 'comboStyle']]) {
+  for (const [sel, key] of [['#noteShape', 'note'], ['#effectOpt', 'effect'], ['#gearOpt', 'gear'], ['#comboOpt', 'comboStyle'], ['#fcFxOpt', 'fcFx']]) {
     $$(`${sel} button[data-v]`).forEach((b) => {
       const id = skinLock(key, b.dataset.v);
       b.classList.toggle('locked', !!id);
-      b.title = id ? '🔒 상점에서 열 수 있어요 (누르면 상점으로)' : '';
+      b.classList.toggle('hidden', !!id && evItemGone(id));
+      b.title = id ? (evItemOf(id) ? '🎃 할로윈 이벤트 교환소에서 얻어요 (누르면 보기)' : '🔒 상점에서 열 수 있어요 (누르면 상점으로)') : '';
     });
   }
   $$('#lineSw button[data-line]').forEach((b) => {
     const id = skinLock('line', b.dataset.line);
     b.classList.toggle('locked', !!id);
-    if (id) b.title = '🔒 상점에서 열 수 있어요';
+    b.classList.toggle('hidden', !!id && evItemGone(id));
+    if (id) b.title = evItemOf(id) ? '🎃 할로윈 이벤트 교환소에서 얻어요' : '🔒 상점에서 열 수 있어요';
   });
 }
 $('#hitSound').innerHTML = hitSoundOptions();
@@ -179,6 +198,7 @@ function renderSkin() {
     `<button class="dot-sw${sk.line === id ? ' on' : ''}${id === 'rainbow' ? ' rb' : ''}" data-line="${id}" style="--c:${c}" title="${id}"></button>`).join('');
   $$('#gearOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.gear || 'metal')));
   $$('#comboOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.comboStyle || 'normal')));
+  $$('#fcFxOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.fcFx || 'basic')));
   $('#judgeYIn').value = sk.judgeY; $('#judgeYVal').textContent = sk.judgeY;
   $$('#effectOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === sk.effect));
   $('#hitSound').value = sk.hitSound;
@@ -263,6 +283,10 @@ $('#comboOpt').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-v]');
   if (b && !lockGuard('comboStyle', b.dataset.v)) { settings.skin.comboStyle = b.dataset.v; skinChanged(); }
 });
+$('#fcFxOpt').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-v]');
+  if (b && !lockGuard('fcFx', b.dataset.v)) { settings.skin.fcFx = b.dataset.v; skinChanged(); if (skinPrev) skinPrev.demoFc(false); }
+});
 $('#hitSound').addEventListener('change', (e) => { settings.skin.hitSound = e.target.value; skinChanged(); sfx.hit(); });
 $('#hitVol').addEventListener('input', (e) => { settings.skin.hitVol = +e.target.value; skinChanged(); });
 $('#hitVol').addEventListener('change', () => sfx.hit());
@@ -279,8 +303,10 @@ $('#optChorus').addEventListener('change', (e) => { settings.skin.chorusFx = e.t
 $('#optApplause').addEventListener('change', (e) => { settings.skin.applause = e.target.checked; skinChanged(); if (!e.target.checked && sfx.clapStop) sfx.clapStop(); });
 for (const [id, big] of [['#applauseTest', false], ['#applauseTestAp', true]]) {
   $(id).addEventListener('click', () => {
+    if (skinPrev) skinPrev.demoFc(big, true);
     if (settings.skin.applause === false) { toast('풀콤보 박수가 꺼져 있어요.'); return; }
     sfx.applause(big);
+    fcSound(settings.skin.fcFx);
   });
 }
 for (const [id, key] of [['#optAccentSnd', 'accentSound'], ['#optHoldSnd', 'holdSound'], ['#optBreakSnd', 'breakSound'], ['#optErrBar', 'errorBar'], ['#optGlint', 'perfectGlint']]) {

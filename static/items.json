@@ -1,8 +1,8 @@
 {
-  "_": "상점·꾸미기 아이템 목록 (서버와 화면이 같이 읽음). price가 있으면 상점에서 ♪로 사고, earn이 있으면 조건을 채워야만 얻어요. limited는 주마다 돌아가며 한 개씩만 팔아요.",
+  "_": "상점·꾸미기 아이템 목록 (서버와 화면이 같이 읽음). price가 있으면 상점에서 ♪로 사고, earn이 있으면 조건을 채워야만 얻어요. limited는 주마다 돌아가며 한 개씩만 팔아요. event가 있으면 그 이벤트 기간에만 교환소에서 candy(사탕)로 바꿔요.",
   "cats": [
     ["note", "노트 모양"], ["fx", "타격 이펙트"], ["line", "판정선 색"], ["gear", "기어 테두리"], ["combo", "콤보 숫자"],
-    ["nc", "이름 색"], ["icon", "이름 아이콘"], ["card", "프로필 카드 배경"], ["frame", "결과 카드 테두리"]
+    ["fcfx", "풀콤보 연출"], ["nc", "이름 색"], ["icon", "이름 아이콘"], ["card", "프로필 카드 배경"], ["frame", "결과 카드 테두리"]
   ],
   "limited": ["fx_snow", "icon_cat", "icon_pumpkin", "card_halloween"],
   "items": [
@@ -10,26 +10,35 @@
     {"id": "note_star", "cat": "note", "name": "별", "price": 800},
     {"id": "note_heart", "cat": "note", "name": "하트", "price": 800},
     {"id": "note_gem", "cat": "note", "name": "보석", "price": 2000},
+    {"id": "note_pumpkin", "cat": "note", "name": "호박", "candy": 120, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
 
     {"id": "fx_petal", "cat": "fx", "name": "벚꽃잎", "price": 800},
     {"id": "fx_bolt", "cat": "fx", "name": "번개", "price": 2000},
     {"id": "fx_star", "cat": "fx", "name": "별가루", "earn": "mis10", "how": "미션을 다 한 날 10일"},
     {"id": "fx_fire", "cat": "fx", "name": "불꽃", "earn": "streak30", "how": "30일 연속 출석"},
     {"id": "fx_snow", "cat": "fx", "name": "눈송이", "price": 800, "limited": true},
+    {"id": "fx_bat", "cat": "fx", "name": "박쥐", "candy": 150, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
 
     {"id": "line_purple", "cat": "line", "name": "보라", "price": 300},
     {"id": "line_green", "cat": "line", "name": "초록", "price": 300},
     {"id": "line_rainbow", "cat": "line", "name": "흐르는 무지개", "price": 2000},
+    {"id": "line_ghost", "cat": "line", "name": "유령", "candy": 80, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
 
     {"id": "gear_clear", "cat": "gear", "name": "투명", "price": 300},
     {"id": "gear_wood", "cat": "gear", "name": "나무", "price": 800},
     {"id": "gear_neon", "cat": "gear", "name": "네온", "price": 800},
     {"id": "gear_chrome", "cat": "gear", "name": "크롬", "earn": "lv20", "how": "레벨 20"},
     {"id": "gear_gold", "cat": "gear", "name": "황금", "earn": "champ", "how": "주간 리그 1위"},
+    {"id": "gear_hw", "cat": "gear", "name": "할로윈", "candy": 150, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
 
     {"id": "combo_gold", "cat": "combo", "name": "금빛", "price": 300},
     {"id": "combo_neon", "cat": "combo", "name": "네온", "price": 800},
     {"id": "combo_rainbow", "cat": "combo", "name": "무지개", "price": 2000},
+
+    {"id": "fc_fireworks", "cat": "fcfx", "name": "불꽃놀이", "price": 800},
+    {"id": "fc_stars", "cat": "fcfx", "name": "별가루 폭죽", "price": 800},
+    {"id": "fc_hero", "cat": "fcfx", "name": "내 캐릭터 승리", "price": 2000},
+    {"id": "fc_bats", "cat": "fcfx", "name": "박쥐 떼", "candy": 200, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
 
     {"id": "nc_sky", "cat": "nc", "name": "하늘", "price": 300},
     {"id": "nc_mint", "cat": "nc", "name": "민트", "price": 300},
@@ -38,6 +47,7 @@
     {"id": "nc_purple", "cat": "nc", "name": "보라", "price": 800},
     {"id": "nc_lime", "cat": "nc", "name": "연두", "earn": "lv5", "how": "레벨 5"},
     {"id": "nc_rainbow", "cat": "nc", "name": "무지개", "earn": "streak100", "how": "100일 연속 출석"},
+    {"id": "nc_hw", "cat": "nc", "name": "할로윈", "candy": 100, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
 
     {"id": "icon_note", "cat": "icon", "name": "음표", "emoji": "🎵", "price": 300},
     {"id": "icon_headphone", "cat": "icon", "name": "헤드폰", "emoji": "🎧", "price": 300},
@@ -47,6 +57,7 @@
     {"id": "icon_fire", "cat": "icon", "name": "불꽃", "emoji": "🔥", "earn": "streak7", "how": "7일 연속 출석"},
     {"id": "icon_pumpkin", "cat": "icon", "name": "호박", "emoji": "🎃", "price": 800, "limited": true},
     {"id": "icon_cat", "cat": "icon", "name": "고양이", "emoji": "🐱", "price": 800, "limited": true},
+    {"id": "icon_ghost", "cat": "icon", "name": "유령", "emoji": "👻", "candy": 60, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
 
     {"id": "card_sunset", "cat": "card", "name": "노을", "price": 300},
     {"id": "card_ocean", "cat": "card", "name": "바다", "price": 300},
@@ -55,6 +66,7 @@
     {"id": "card_galaxy", "cat": "card", "name": "은하수", "price": 2000},
     {"id": "card_gold", "cat": "card", "name": "황금", "earn": "lv30", "how": "레벨 30"},
     {"id": "card_halloween", "cat": "card", "name": "할로윈", "price": 800, "limited": true},
+    {"id": "card_moon", "cat": "card", "name": "보름달 밤", "candy": 120, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
 
     {"id": "frame_silver", "cat": "frame", "name": "은", "price": 300},
     {"id": "frame_gold", "cat": "frame", "name": "금", "price": 800},

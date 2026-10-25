@@ -967,7 +967,7 @@ function showResult(g, r) {
     api('/scores', {
       method: 'POST',
       body: { songId: g.song.id, diff: g.diff, keys: g.nl, name: settings.nick || '이름없음', ...r, hl: g.hl, ai: !!g.ai,
-        multi: !!g.multi, ghostWin: !!g.ghostWin, ...(g.duel ? { duel: g.duel } : {}) },
+        multi: !!g.multi, ghostWin: !!g.ghostWin, pumpkins: g.pumpkins || 0, ...(g.duel ? { duel: g.duel } : {}) },
     }).then((res) => {
       if (typeof growOnResult === 'function') { try { growOnResult(g, r, res); } catch (e) { console.warn('보상 표시 오류', e); } }
       if (lastResult.g !== g || r.incomplete) return;

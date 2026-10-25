@@ -56,14 +56,15 @@ const THEMES = {
   mono:    { name: '모노',   a: '#ffffff', b: '#8a93ad', c: '#d6dcef' },
   custom:  { name: '커스텀' },
 };
-const LINE_COLORS = { red: '#ff3b55', cyan: '#4de1ff', gold: '#ffc83d', white: '#ffffff', pink: '#ff5fa2', purple: '#b06bff', green: '#3ddc84', rainbow: '#ff5fa2' };
+const LINE_COLORS = { red: '#ff3b55', cyan: '#4de1ff', gold: '#ffc83d', white: '#ffffff', pink: '#ff5fa2', purple: '#b06bff', green: '#3ddc84', rainbow: '#ff5fa2', ghost: '#b8ffe0' };
 /* 상점에서 사야 쓸 수 있는 꾸미기 값 → 아이템 (없는 값은 처음부터 무료) */
 const SKIN_ITEMS = {
-  note: { neon: 'note_neon', star: 'note_star', heart: 'note_heart', gem: 'note_gem' },
-  effect: { petal: 'fx_petal', bolt: 'fx_bolt', stardust: 'fx_star', fire: 'fx_fire', snow: 'fx_snow' },
-  line: { purple: 'line_purple', green: 'line_green', rainbow: 'line_rainbow' },
-  gear: { clear: 'gear_clear', wood: 'gear_wood', neon: 'gear_neon', chrome: 'gear_chrome', gold: 'gear_gold' },
+  note: { neon: 'note_neon', star: 'note_star', heart: 'note_heart', gem: 'note_gem', pumpkin: 'note_pumpkin' },
+  effect: { petal: 'fx_petal', bolt: 'fx_bolt', stardust: 'fx_star', fire: 'fx_fire', snow: 'fx_snow', bat: 'fx_bat' },
+  line: { purple: 'line_purple', green: 'line_green', rainbow: 'line_rainbow', ghost: 'line_ghost' },
+  gear: { clear: 'gear_clear', wood: 'gear_wood', neon: 'gear_neon', chrome: 'gear_chrome', gold: 'gear_gold', halloween: 'gear_hw' },
   comboStyle: { gold: 'combo_gold', neon: 'combo_neon', rainbow: 'combo_rainbow' },
+  fcFx: { fireworks: 'fc_fireworks', stars: 'fc_stars', hero: 'fc_hero', bats: 'fc_bats' },
 };
 const DEFAULT_SKIN = {
   theme: 'classic', colors: { a: '#eef3ff', b: '#3f8cff', c: '#ffc83d' },
@@ -82,6 +83,7 @@ const DEFAULT_SKIN = {
   bgFx: 'soft',                // 배경 연출: off | soft | strong
   gear: 'metal',               // 기어 테두리 (상점): metal | clear | wood | neon | chrome | gold
   comboStyle: 'normal',        // 콤보 숫자 (상점): normal | gold | neon | rainbow
+  fcFx: 'basic',               // 풀콤보 연출 (상점): basic(빛 고리·반짝이) | fireworks | stars | hero | bats
 };
 const savedSndV = settings.skin && typeof settings.skin === 'object' ? settings.skin.sndV : 2;   // 저장된 꾸미기가 없으면 새 기본값 그대로
 settings.skin = Object.assign({ ...DEFAULT_SKIN, hitSound: settings.hit ? 'click' : 'off' }, settings.skin || {});
@@ -399,6 +401,62 @@ sfx.hit = function (type = settings.skin.hitSound, vol = settings.skin.hitVol / 
       for (const [f, a] of [[1318, 0.3], [1976, 0.15], [2637, 0.08]]) osc('sine', f, f, 0.35, a);
       break;
     default: break;
+  }
+};
+/* 풀콤보 연출 소리 (박수와 같이 '풀콤보 박수' 설정을 따름): 불꽃놀이 펑펑 · 별가루 띠링 · 캐릭터 빰빠밤 · 박쥐 휘익 */
+function fcSound(style) {
+  if (settings.skin.applause === false || style === 'basic' || !style) return;
+  const ctx = sfx.ensure();
+  if (!ctx) return;
+  const vol = sfx.fxVol(0.5);
+  if (vol <= 0) return;
+  const t0 = ctx.currentTime + 0.03;
+  const out = ctx.createGain(); out.gain.value = vol; out.connect(ctx.destination);
+  const tone = (f, at, dur, type = 'triangle', v = 0.35, f2 = null) => {
+    const o = ctx.createOscillator(); o.type = type;
+    o.frequency.setValueAtTime(f, at); if (f2) o.frequency.exponentialRampToValueAtTime(f2, at + dur);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, at); g.gain.linearRampToValueAtTime(v, at + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    o.connect(g).connect(out); o.start(at); o.stop(at + dur + 0.02);
+  };
+  const burst = (at, dur, ftype, f, v, q = 0.8, f2 = null) => {
+    const n = sfx.noise(ctx, dur + 0.02); const bf = ctx.createBiquadFilter(); bf.type = ftype; bf.frequency.setValueAtTime(f, at); bf.Q.value = q;
+    if (f2) bf.frequency.exponentialRampToValueAtTime(f2, at + dur);
+    const g = ctx.createGain(); g.gain.setValueAtTime(v, at); g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    n.connect(bf).connect(g).connect(out); n.start(at); n.stop(at + dur + 0.02);
+  };
+  if (style === 'fireworks') {
+    for (let b = 0; b < 7; b++) {
+      const at = t0 + b * 0.26 + 0.23;
+      burst(at - 0.2, 0.2, 'bandpass', 1800, 0.12, 2, 4200);     // 피융
+      burst(at, 0.5, 'lowpass', 1400, 0.9, 0.7);                   // 펑
+      tone(70 + b * 4, at, 0.3, 'sine', 0.6, 40);                 // 둥
+      burst(at + 0.08, 0.6, 'highpass', 5000, 0.18);               // 타닥타닥
+    }
+  } else if (style === 'stars') {
+    [1046.5, 1318.5, 1568, 2093, 2637, 3136, 2093, 2637].forEach((f, i) => tone(f, t0 + i * 0.075, 0.6, 'sine', 0.28));
+    burst(t0, 1.2, 'highpass', 7000, 0.12);
+  } else if (style === 'hero') {
+    [[392, 0], [523.3, 0.12], [659.3, 0.24], [784, 0.36]].forEach(([f, d]) => tone(f, t0 + d, 0.18, 'square', 0.12));
+    for (const f of [523.3, 659.3, 784, 1046.5]) tone(f, t0 + 0.5, 0.9, 'triangle', 0.22);
+  } else if (style === 'bats') {
+    burst(t0, 1.1, 'bandpass', 380, 0.55, 1.4, 2600);                         // 휘이익
+    for (let i = 0; i < 10; i++) burst(t0 + 0.15 + i * 0.07, 0.05, 'bandpass', 900 + i * 90, 0.25, 3);   // 푸드득
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(260, t0 + 0.4); o.frequency.linearRampToValueAtTime(190, t0 + 1.6);
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 5; const lg = ctx.createGain(); lg.gain.value = 9; lfo.connect(lg).connect(o.frequency);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t0 + 0.4); g.gain.linearRampToValueAtTime(0.16, t0 + 0.7); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.7);
+    o.connect(g).connect(out); o.start(t0 + 0.4); o.stop(t0 + 1.75); lfo.start(t0 + 0.4); lfo.stop(t0 + 1.75);   // 우우~
+  }
+}
+/* 할로윈 호박 노트를 쳤을 때: 작은 '뾰롱' */
+sfx.candy = function () {
+  const ctx = this.ensure();
+  if (!ctx) return;
+  const v = this.fxVol(0.18), t = ctx.currentTime + 0.005;
+  if (v <= 0) return;
+  for (const [f, d] of [[1568, 0], [2349, 0.05]]) {
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(f, t + d);
+    const g = ctx.createGain(); g.gain.setValueAtTime(v, t + d); g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.18);
+    o.connect(g).connect(ctx.destination); o.start(t + d); o.stop(t + d + 0.2);
   }
 };
 /* 풀콤보 박수: 여러 사람이 각자 박자로 치는 박수를 합성 (짧게 커졌다가 하나둘 멈춤).
@@ -719,7 +777,7 @@ function helloMsg() {
   return m;
 }
 /* 남에게 보이는 이름 꾸미기: 지난주 리그 메달 · 이름 아이콘 · 이름 색 (서버가 가진 것만 보내 줌) */
-const ICON_EMOJI = { icon_note: '🎵', icon_headphone: '🎧', icon_bolt: '⚡', icon_gem: '💎', icon_star: '⭐', icon_fire: '🔥', icon_pumpkin: '🎃', icon_cat: '🐱' };
+const ICON_EMOJI = { icon_note: '🎵', icon_headphone: '🎧', icon_bolt: '⚡', icon_gem: '💎', icon_star: '⭐', icon_fire: '🔥', icon_pumpkin: '🎃', icon_cat: '🐱', icon_ghost: '👻' };
 const MEDALS = ['', '🥇', '🥈', '🥉'];
 function nameDeco(p, name = p && p.name) {
   const d = (p && p.deco) || {};
