@@ -1578,6 +1578,7 @@ html[data-theme] .rt-wrap { background: var(--slot); border-color: var(--line); 
 .lg-r { font-family: var(--head); font-weight: 900; text-align: center; }
 .lg-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lg-p { font-family: var(--head); font-weight: 800; color: var(--gold); }
+.ch-menu { z-index: 96; }          /* 프로필 카드(85) 위에 */
 .ch-list button { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 7px 10px; text-align: left; }
 .ch-list small { font-size: 11px; color: var(--muted); }
 

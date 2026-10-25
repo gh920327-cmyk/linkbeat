@@ -772,7 +772,17 @@ def acct_by_nick(nick):
             best, bt = a, p.get("lastSeen", 0)
     if best:
         return best
-    return n if n in load_profiles() else None
+    profs = load_profiles()
+    if n in profs:
+        return n
+    for key, pr in profs.items():         # 새 버전으로 아직 안 들어온 사람: 프로필에 저장된 게임 이름으로
+        try:
+            st = json.loads((pr.get("data") or {}).get("settings", "{}"))
+        except Exception:
+            continue
+        if isinstance(st, dict) and str(st.get("nick", "")).strip().lower() == n:
+            return key
+    return None
 
 
 def _notice(p, n):
