@@ -447,18 +447,6 @@ function fcSound(style) {
     o.connect(g).connect(out); o.start(t0 + 0.4); o.stop(t0 + 1.75); lfo.start(t0 + 0.4); lfo.stop(t0 + 1.75);   // 우우~
   }
 }
-/* 할로윈 호박 노트를 쳤을 때: 작은 '뾰롱' */
-sfx.candy = function () {
-  const ctx = this.ensure();
-  if (!ctx) return;
-  const v = this.fxVol(0.18), t = ctx.currentTime + 0.005;
-  if (v <= 0) return;
-  for (const [f, d] of [[1568, 0], [2349, 0.05]]) {
-    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(f, t + d);
-    const g = ctx.createGain(); g.gain.setValueAtTime(v, t + d); g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.18);
-    o.connect(g).connect(ctx.destination); o.start(t + d); o.stop(t + d + 0.2);
-  }
-};
 /* 풀콤보 박수: 여러 사람이 각자 박자로 치는 박수를 합성 (짧게 커졌다가 하나둘 멈춤).
    big(ALL PERFECT)이면 사람이 더 많고 길게 + 환호 휘파람 */
 sfx.applause = function (big = false) {
