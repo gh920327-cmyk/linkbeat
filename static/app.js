@@ -789,7 +789,7 @@ function ghostFor(id, diff, nl, hl, ai) {
 }
 
 let soloSeq = 0;
-async function startSolo(id, diff, nl = 4, customNotes = null, practice = null) {
+async function startSolo(id, diff, nl = 4, customNotes = null, practice = null, opts = {}) {
   const token = ++soloSeq;
   stopPreview();
   if (game) game.destroy();
@@ -799,13 +799,15 @@ async function startSolo(id, diff, nl = 4, customNotes = null, practice = null) 
   stopPreview();
   if (game) game.destroy();
   if (practice && practice.hl && song._hl) practice = hlPractice(song._hl);   // 서버의 최신 구간으로
-  const useAi = !customNotes && !!aiChartOf(song, diff, nl) && songPick(songById(id) || song);
+  const useAi = !customNotes && !!aiChartOf(song, diff, nl) && (typeof opts.ai === 'boolean' ? opts.ai : songPick(songById(id) || song));
   const notes = customNotes || (useAi ? aiChartOf(song, diff, nl) : chartOf(song, diff, nl));
   if (!notes.length) { toast('이 난이도에는 노트가 없어요.'); return; }
   pendingResults = null;
   const g = new Game({ song, diff, keys: nl, notes, onExit: backFromGame, practice });
   game = g;
   if (!customNotes && (!practice || practice.hl)) g.ghost = ghostFor(id, diff, nl, !!(practice && practice.hl), useAi);
+  if (opts.ghost) g.ghost = opts.ghost;       // 도전장·복수전: 그 친구 기록과 대결
+  if (opts.duel) g.duel = opts.duel;
   g.customNotes = customNotes;
   g.ai = useAi;
   setupGameScreen(g, false);
@@ -964,15 +966,17 @@ function showResult(g, r) {
   if (!isTest) {
     api('/scores', {
       method: 'POST',
-      body: { songId: g.song.id, diff: g.diff, keys: g.nl, name: settings.nick || '이름없음', ...r, hl: g.hl, ai: !!g.ai },
+      body: { songId: g.song.id, diff: g.diff, keys: g.nl, name: settings.nick || '이름없음', ...r, hl: g.hl, ai: !!g.ai,
+        multi: !!g.multi, ghostWin: !!g.ghostWin, ...(g.duel ? { duel: g.duel } : {}) },
     }).then((res) => {
+      if (typeof growOnResult === 'function') { try { growOnResult(g, r, res); } catch (e) { console.warn('보상 표시 오류', e); } }
       if (lastResult.g !== g || r.incomplete) return;
       const parts = [];
       if (res.newBest) parts.push('<b class="nb">NEW RECORD</b>');
       if (res.position) parts.push(`친구 순위 <b>${res.position}위</b> / ${res.total}명`);
       $('#rBest').innerHTML = parts.join(' · ') || $('#rBest').innerHTML;
       afterDailyPlay(g, r);
-    }).catch(() => {});
+    }).catch(() => { if (typeof growOnResult === 'function') growOnResult(g, r, null); });
   }
 }
 
@@ -1104,10 +1108,11 @@ function renderMultiResults(m) {
   const avOf = (id) => ((net.room && net.room.players.find((p) => p.id === id)) || {}).avatar || r_avatars[id];
   for (const r of m.results) plRemember({ id: r.id, name: r.name, title: r.title, avatar: avOf(r.id) || r.avatar });
   $('#rMultiList').innerHTML = m.results.map((r, i) =>
-    `<li class="${r.id === net.id ? 'me' : ''}" data-pl="${esc(r.id)}"><span class="pos">${i + 1}</span><span class="n">${miniHtml(avOf(r.id) || r.avatar, 24)} ${typeof lvTag === 'function' ? lvTag(r.level) : ''}${r.title ? `<span class="${ptCls(r.title)}">${esc(r.title)}</span>` : ''}${esc(r.name)}${r.diff ? ` <small class="ld"><span class="tag">${r.keys || 4}K</span> ${DIFF_EN[r.diff] || ''}</small>` : ''}</span>
+    `<li class="${r.id === net.id ? 'me' : ''}" data-pl="${esc(r.id)}"><span class="pos">${i + 1}</span><span class="n">${miniHtml(avOf(r.id) || r.avatar, 24)} ${typeof lvTag === 'function' ? lvTag(r.level) : ''}${r.title ? `<span class="${ptCls(r.title)}">${esc(r.title)}</span>` : ''}${nameDeco(r)}${r.diff ? ` <small class="ld"><span class="tag">${r.keys || 4}K</span> ${DIFF_EN[r.diff] || ''}</small>` : ''}</span>
       <span class="s">${(r.score || 0).toLocaleString()}</span><span class="a">${(r.acc || 0).toFixed(2)}%</span>
       <span class="rk rank-${esc(r.rank || '')}">${r.incomplete ? '포기' : esc(r.rank || '')}</span></li>`).join('');
   paintMinis($('#rMultiList'));
+  if (typeof growDuelResult === 'function') growDuelResult(m);
 }
 
 $('#btnRetry').addEventListener('click', () => {
@@ -1188,13 +1193,13 @@ function renderRoom() {
       const tag = r.phase === 'lobby' && (p.state === 'idle' || !p.state)
         ? (lead ? '<span class="rdy lead">방장</span>' : p.ready ? '<span class="rdy on">✓ 준비</span>' : '<span class="rdy">대기</span>')
         : `<span class="muted small">${stateName[p.state] || ''}</span>`;
-      return `<li class="${p.id === net.id ? 'me' : ''}${!lead && p.ready ? ' ready' : ''}" data-pl="${esc(p.id)}" title="눌러서 ${esc(p.name)} 님 캐릭터·자주 하는 노래 보기">${miniHtml(p.avatar)}${lead ? '<span class="crown">👑</span>' : ''}<span class="pn">${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}<span class="pn-n">${typeof lvTag === 'function' ? lvTag(p.level) : ''}${esc(p.name)}</span></span>
+      return `<li class="${p.id === net.id ? 'me' : ''}${!lead && p.ready ? ' ready' : ''}" data-pl="${esc(p.id)}" title="눌러서 ${esc(p.name)} 님 캐릭터·자주 하는 노래 보기">${miniHtml(p.avatar)}${lead ? '<span class="crown">👑</span>' : ''}<span class="pn">${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}<span class="pn-n">${typeof lvTag === 'function' ? lvTag(p.level) : ''}${nameDeco(p)}</span></span>
         <span class="pdiff"><span class="tag">${pk}K</span> ${DIFF_EN[pd] || ''}${st}</span>
         ${tag}</li>`;
     }).join('');
     $('#roomPlayers').insertAdjacentHTML('beforeend', (r.watchers || []).map((p) => {
       plRemember(p);
-      return `<li class="watch${p.id === net.id ? ' me' : ''}" data-pl="${esc(p.id)}" title="게임이 끝나면 같이 해요">${miniHtml(p.avatar)}<span class="pn">${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}<span class="pn-n">${typeof lvTag === 'function' ? lvTag(p.level) : ''}${esc(p.name)}</span></span><span class="rdy watch">👀 구경 중</span></li>`;
+      return `<li class="watch${p.id === net.id ? ' me' : ''}" data-pl="${esc(p.id)}" title="게임이 끝나면 같이 해요">${miniHtml(p.avatar)}<span class="pn">${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}<span class="pn-n">${typeof lvTag === 'function' ? lvTag(p.level) : ''}${nameDeco(p)}</span></span><span class="rdy watch">👀 구경 중</span></li>`;
     }).join(''));
     paintMinis($('#roomPlayers'));
     $('#roomSong').textContent = r.songId ? r.songTitle : '방장이 곡을 고르는 중...';
@@ -1236,7 +1241,7 @@ function renderRoom() {
 /* ============================================================ 다른 사람 카드: 방·실시간 순위·친구 화면·결과에서 누르면
    그 사람이 쓰는 일러스트·캐릭터(표정)와 자주 하는 노래. 플레이 중에도 키 입력을 막지 않게 작은 창(바깥·ESC·✕로 닫힘) */
 const plSeen = {};      // id → {id, name, title, avatar} (방을 나간 뒤 결과 화면에서도 쓰게)
-function plRemember(p) { if (p && p.id) plSeen[p.id] = { id: p.id, name: p.name, title: p.title || '', avatar: p.avatar, level: p.level || (plSeen[p.id] && plSeen[p.id].level) || 0 }; }
+function plRemember(p) { if (p && p.id) plSeen[p.id] = { id: p.id, name: p.name, title: p.title || '', avatar: p.avatar, level: p.level || (plSeen[p.id] && plSeen[p.id].level) || 0, deco: p.deco || (plSeen[p.id] && plSeen[p.id].deco), medal: p.medal || 0 }; }
 function plLookup(id) {
   const p = net.room && net.room.players.find((x) => String(x.id) === String(id));     // 방 번호표(id)는 숫자, 화면의 data-pl은 글자
   if (p) plRemember(p);
@@ -1334,7 +1339,11 @@ async function openPlCard(id, anchor) {
   paintMinis($('.pl-av', card));
   const mine = String(id) === String(net.id);
   const lv = mine && typeof myLevel === 'function' ? myLevel() : p.level;
-  $('.pl-name', card).innerHTML = (typeof lvTag === 'function' ? lvTag(lv) : '') + esc(p.name) + (mine ? ' <small>(나)</small>' : '');
+  $('.pl-name', card).innerHTML = (typeof lvTag === 'function' ? lvTag(lv) : '') + nameDeco(mine && typeof myGrow !== 'undefined' && myGrow ? { ...p, deco: settings.deco || {}, medal: myGrow.medal } : p) + (mine ? ' <small>(나)</small>' : '');
+  card.className = 'pl-card' + ((p.deco || {}).card ? ' ' + p.deco.card : '');
+  $('.pl-grow', card).innerHTML = '';
+  $('.pl-chal', card).classList.toggle('hidden', mine);
+  $('.pl-chal', card).dataset.name = p.name;
   $('.pl-title', card).textContent = p.title || '';
   $('.pl-title', card).classList.toggle('hidden', !p.title);
   $('.pl-title', card).classList.toggle('legend', ptCls(p.title) !== 'ptitle');
@@ -1375,7 +1384,16 @@ async function openPlCard(id, anchor) {
     const me = mine && typeof achSummary === 'function' ? achSummary() : null;     // 내 카드는 이 기기의 값 (가장 최신)
     const ach = me ? { n: me.ach, total: me.achTotal } : pf.ach != null ? { n: pf.ach, total: pf.achTotal || 0 } : null;
     const lv2 = lv || pf.lv || 0;
-    if (lv2 && !lv) $('.pl-name', card).innerHTML = (typeof lvTag === 'function' ? lvTag(lv2) : '') + esc(p.name);
+    if (lv2 && !lv) $('.pl-name', card).innerHTML = (typeof lvTag === 'function' ? lvTag(lv2) : '') + nameDeco(p);
+    const gr = j.grow || {};
+    if (gr.deco && gr.deco.card) card.classList.add(gr.deco.card);
+    if (!p.deco && gr.deco) $('.pl-name', card).innerHTML = (typeof lvTag === 'function' ? lvTag(lv2) : '') + nameDeco({ ...p, deco: gr.deco, medal: gr.medal });
+    const bits = [];
+    if (gr.streak) bits.push(`<span class="pl-gchip">🔥 ${gr.streak}일 연속</span>`);
+    if (gr.chal && (gr.chal.w || gr.chal.l)) bits.push(`<span class="pl-gchip">⚔️ 대결 ${gr.chal.w}승 ${gr.chal.l}패</span>`);
+    if (gr.champ) bits.push(`<span class="pl-gchip gold">🏆 리그 우승 ${gr.champ}회</span>`);
+    if (gr.medal) bits.push(`<span class="pl-gchip">${MEDALS[gr.medal]} 지난주 리그 ${gr.medal}위</span>`);
+    $('.pl-grow', card).innerHTML = bits.join('');
     if (!p.title && pf.title) {      // 지금 접속 안 한 사람: 저장된 칭호
       $('.pl-title', card).textContent = pf.title;
       $('.pl-title', card).classList.remove('hidden');
@@ -1563,7 +1581,7 @@ async function loadOnline() {
       const st = p.status || {};
       const can = !me && st.room && st.room !== myRoom;
       return `<li class="${me ? 'me' : ''}" data-pl="${esc(p.id)}">${miniHtml(p.avatar, 30)}<span class="on-who">`
-        + `<span class="on-name">${typeof lvTag === 'function' ? lvTag(p.level) : ''}${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}${esc(p.name)}${me ? ' <small>(나)</small>' : ''}</span>`
+        + `<span class="on-name">${typeof lvTag === 'function' ? lvTag(p.level) : ''}${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}${nameDeco(p)}${me ? ' <small>(나)</small>' : ''}</span>`
         + `<span class="on-st on-${esc(st.kind || 'lobby')}">${onStatusHtml(st)}</span></span>`
         + (can ? `<button type="button" class="small-btn on-join" data-room="${esc(st.room)}">${st.kind === 'room' ? '같이 하기' : '구경하기'}</button>` : '')
         + '</li>';
