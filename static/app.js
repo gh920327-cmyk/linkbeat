@@ -1891,6 +1891,7 @@ $('#edTest').addEventListener('click', async () => {
   const g = new Game({ song, diff: editor.diff, keys: editor.nl, notes, onExit: backFromGame, mods: false });
   game = g;
   g.customNotes = notes;
+  g.noLeadCut = true;            // 편집기 테스트: 곡 맨 앞 노트도 확인할 수 있게 빼지 않음
   setupGameScreen(g, false);
   try { await g.load(); if (g.phase === 'ready') g.begin(2); } catch (e) { g.abort(e.message); }
 });

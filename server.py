@@ -4652,6 +4652,8 @@ def handle_msg(c, m):
                 out["m"] = [int(x) % 6 for x in mp]
             out["f"] = bool(m.get("f"))
             out["z"] = bool(m.get("z"))
+            if isinstance(m.get("c"), (int, float)) and 0 < m["c"] < 36000:
+                out["c"] = round(float(m["c"]), 3)   # 곡 맨 앞에서 뺀 노트 시간 (관전 화면이 같은 노트를 보여 주게)
         except (TypeError, ValueError):
             return
         room.broadcast(out, exclude=c)

@@ -313,6 +313,7 @@ body.touch .touch-pause { display: block; }
 #screen-game:not(.active) .touch-pause { display: none; }
 
 .overlay { position: fixed; inset: 0; z-index: 20; background: rgba(2, 4, 10, .72); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+body:has(#screen-game:not(.active)) #gameOverlay { display: none; }   /* 게임 화면일 때만 (영상보다 위층에 있어서) */
 .overlay-box { background: var(--panel); border: 1px solid var(--line2); padding: 28px 34px; min-width: 300px; text-align: center; clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px); }
 .ov-title { font-family: var(--head); font-weight: 900; font-size: 26px; letter-spacing: 3px; font-style: italic; margin-bottom: 6px; }
 .ov-buttons { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }

@@ -225,7 +225,7 @@ class SongClock {
   now(perf = performance.now()) { return this.running ? this.base + (perf - this.anchor) / 1000 * (this.rate || 1) * (1 + this.adj) : this.base; }
   set(t, perf = performance.now()) { this.base = t; this.anchor = perf; this.adj = 0; }
   start(perf = performance.now()) { if (!this.running) { this.anchor = perf; this.running = true; } }
-  stop() { if (this.running) { this.base = this.now(); this.running = false; } }
+  stop() { if (this.running) { this.base = this.now(); this.running = false; } this.adj = 0; }
   /* 유튜브 시간과 맞추기: 크게 어긋나면 바로, 조금이면 부드럽게 */
   sync(vt, snap = 0.12, k = 0.12) {
     const cur = this.now();
