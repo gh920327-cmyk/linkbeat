@@ -134,6 +134,32 @@ class SkinPreview {
 
 /* ---------------- 창 */
 let skinPrev = null;
+/* 상점에서 사야 하는 꾸미기: 안 가졌으면 🔒 — 누르면 상점의 그 물건으로 */
+function skinLock(key, v) {
+  const id = (SKIN_ITEMS[key] || {})[v];
+  return id && typeof itemOwned === 'function' && !itemOwned(id) ? id : null;
+}
+function lockGuard(key, v) {
+  const id = skinLock(key, v);
+  if (!id) return false;
+  if (typeof openShop === 'function') openShop(id);
+  else toast('상점에서 열 수 있어요.');
+  return true;
+}
+function markLocks() {
+  for (const [sel, key] of [['#noteShape', 'note'], ['#effectOpt', 'effect'], ['#gearOpt', 'gear'], ['#comboOpt', 'comboStyle']]) {
+    $$(`${sel} button[data-v]`).forEach((b) => {
+      const id = skinLock(key, b.dataset.v);
+      b.classList.toggle('locked', !!id);
+      b.title = id ? '🔒 상점에서 열 수 있어요 (누르면 상점으로)' : '';
+    });
+  }
+  $$('#lineSw button[data-line]').forEach((b) => {
+    const id = skinLock('line', b.dataset.line);
+    b.classList.toggle('locked', !!id);
+    if (id) b.title = '🔒 상점에서 열 수 있어요';
+  });
+}
 $('#hitSound').innerHTML = hitSoundOptions();
 
 function renderSkin() {
@@ -150,7 +176,9 @@ function renderSkin() {
   $('#laneScale').value = String(sk.laneScale);
   $('#gearPos').value = sk.gearPos;
   $('#lineSw').innerHTML = Object.entries(LINE_COLORS).map(([id, c]) =>
-    `<button class="dot-sw${sk.line === id ? ' on' : ''}" data-line="${id}" style="--c:${c}" title="${id}"></button>`).join('');
+    `<button class="dot-sw${sk.line === id ? ' on' : ''}${id === 'rainbow' ? ' rb' : ''}" data-line="${id}" style="--c:${c}" title="${id}"></button>`).join('');
+  $$('#gearOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.gear || 'metal')));
+  $$('#comboOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.comboStyle || 'normal')));
   $('#judgeYIn').value = sk.judgeY; $('#judgeYVal').textContent = sk.judgeY;
   $$('#effectOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === sk.effect));
   $('#hitSound').value = sk.hitSound;
@@ -171,6 +199,7 @@ function renderSkin() {
   $('#optGlint').checked = sk.perfectGlint !== false;
   $$('#lineStyleOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.lineStyle || 'auto')));
   $$('#bgFxOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.bgFx || 'soft')));
+  markLocks();
 }
 function skinChanged() { saveSettings(); renderSkin(); }
 
@@ -212,19 +241,27 @@ $$('#customColors input').forEach((inp) => inp.addEventListener('input', () => {
 }));
 $('#noteShape').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-v]');
-  if (b) { settings.skin.note = b.dataset.v; skinChanged(); }
+  if (b && !lockGuard('note', b.dataset.v)) { settings.skin.note = b.dataset.v; skinChanged(); }
 });
 $('#noteH').addEventListener('input', (e) => { settings.skin.noteH = +e.target.value; skinChanged(); });
 $('#laneScale').addEventListener('change', (e) => { settings.skin.laneScale = +e.target.value; skinChanged(); });
 $('#gearPos').addEventListener('change', (e) => { settings.skin.gearPos = e.target.value; skinChanged(); });
 $('#lineSw').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-line]');
-  if (b) { settings.skin.line = b.dataset.line; skinChanged(); }
+  if (b && !lockGuard('line', b.dataset.line)) { settings.skin.line = b.dataset.line; skinChanged(); }
 });
 $('#judgeYIn').addEventListener('input', (e) => { settings.skin.judgeY = +e.target.value; skinChanged(); });
 $('#effectOpt').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-v]');
-  if (b) { settings.skin.effect = b.dataset.v; skinChanged(); }
+  if (b && !lockGuard('effect', b.dataset.v)) { settings.skin.effect = b.dataset.v; skinChanged(); }
+});
+$('#gearOpt').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-v]');
+  if (b && !lockGuard('gear', b.dataset.v)) { settings.skin.gear = b.dataset.v; skinChanged(); }
+});
+$('#comboOpt').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-v]');
+  if (b && !lockGuard('comboStyle', b.dataset.v)) { settings.skin.comboStyle = b.dataset.v; skinChanged(); }
 });
 $('#hitSound').addEventListener('change', (e) => { settings.skin.hitSound = e.target.value; skinChanged(); sfx.hit(); });
 $('#hitVol').addEventListener('input', (e) => { settings.skin.hitVol = +e.target.value; skinChanged(); });

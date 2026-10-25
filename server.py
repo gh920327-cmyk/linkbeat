@@ -456,6 +456,11 @@ def _submit_score(sid, diff, keys, name, data):
     new_best = not same or entry["score"] > same[0]["score"]
     if data.get("incomplete"):
         new_best = False
+    passed = []
+    if new_best:          # 이번 기록으로 넘어선 다른 사람 (알림용: 원래 내 기록 이상이었는데 이제 아래)
+        mine0 = same[0]["score"] if same else -1
+        passed = [{"name": e["name"], "score": e["score"]} for e in sc["entries"]
+                  if e["name"] != name and _same_board(e, diff, keys, hl, ai) and mine0 <= e["score"] < entry["score"]]
     if new_best:
         sc["entries"] = [e for e in sc["entries"] if e not in same] + [entry]
         # 난이도·키 조합마다 상위 50명만 보관
@@ -479,7 +484,7 @@ def _submit_score(sid, diff, keys, name, data):
                    key=lambda e: -e["score"])
     mine = next((e for e in board if e["name"] == name), None)
     pos = (1 + sum(1 for e in board if e["score"] > mine["score"])) if mine else None   # 동점은 같은 순위
-    return {"newBest": new_best, "position": pos, "total": len(board), "plays": sc["plays"]}
+    return {"newBest": new_best, "position": pos, "total": len(board), "plays": sc["plays"], "_passed": passed, "_hl": hl, "_ai": ai}
 
 
 # ---- 오늘의 곡: 한국 시간 날짜마다 한 곡 · 난이도(요일마다), 그날 그 곡의 최고 기록끼리 순위 (4키 · 전체곡)
@@ -660,7 +665,787 @@ def player_info(name):
     return {"name": name, "songs": rows[:6], "songCount": len(rows), "totalPlays": sum(r["plays"] for r in rows),
             "prof": {k: prof.get(k) for k in ("lv", "ach", "achTotal", "top", "title") if k in prof},
             "stats": {"records": len(recs), "ranks": ranks, "fc": sum(1 for r in recs if r["fc"])},
-            "bests": recs[:5]}
+            "bests": recs[:5], "grow": growth_public(name)}
+
+
+# ============================================================ 성장: 경험치·♪·출석·미션·복귀·리그·알림·도전장·상점
+# 계정(프로필 아이디)마다 서버에 저장해요 — 브라우저를 바꾸거나 지워도 그대로, 기기에서 숫자를 고쳐도 소용없게.
+PROGRESS_FILE = DATA / "progress.json"   # 계정별 성장 기록
+CHAL_FILE = DATA / "challenges.json"     # 도전장
+LEAGUE_FILE = DATA / "league.json"       # 주간 리그 (이번 주 점수 · 지난주 1~3위)
+ITEMS_FILE = STATIC / "items.json"       # 상점·꾸미기 아이템 목록 (화면과 같이 씀)
+_PROG = None
+_CHAL = None
+_LEAGUE = None
+
+
+def _load_items():
+    try:
+        d = json.loads(ITEMS_FILE.read_text(encoding="utf-8"))
+        return ({it["id"]: it for it in d.get("items", []) if isinstance(it, dict) and it.get("id")},
+                [x for x in d.get("limited", []) if isinstance(x, str)], dict(d.get("cats", [])))
+    except Exception as e:
+        log("아이템 목록을 읽지 못했어요:", e)
+        return {}, [], {}
+
+
+ITEMS, ITEM_LIMITED, ITEM_CATS = _load_items()
+START_COINS = 500
+LV_ITEMS = {5: "nc_lime", 10: "icon_star", 20: "gear_chrome", 30: "card_gold", 50: "frame_legend"}
+STREAK_REWARD = {3: (50, None), 7: (150, "icon_fire"), 14: (300, None), 30: (500, "fx_fire"), 50: (700, None), 100: (1500, "nc_rainbow")}
+DECO_KEYS = ("nc", "icon", "card", "frame")         # 남에게 보이는 꾸미기 (이름 색·이름 아이콘·프로필 카드 배경·결과 카드 테두리)
+DUEL_WIN, DUEL_LOSE = 60, 15
+LEAGUE_PRIZE = [500, 300, 200]
+
+
+def xp_need(lv):
+    return 100 + 40 * lv
+
+
+def level_of(xp):
+    lv, left = 1, max(0, int(xp))
+    while lv < 999 and left >= xp_need(lv):
+        left -= xp_need(lv)
+        lv += 1
+    return lv
+
+
+def _day_diff(a, b):
+    import datetime
+    return (datetime.date.fromisoformat(b) - datetime.date.fromisoformat(a)).days
+
+
+def _week_of(t=None):
+    """한국 시간 기준 그 주 월요일 날짜 (주간 리그·한정 상품)"""
+    import datetime
+    d = datetime.date.fromisoformat(_kst_day(t))
+    return (d - datetime.timedelta(days=d.weekday())).isoformat()
+
+
+def _week_left():
+    import datetime
+    now = time.time()
+    d = datetime.date.fromisoformat(_kst_day(now))
+    days_left = 7 - d.weekday()                     # 다음 월요일까지 남은 날 (오늘 포함)
+    return int((days_left - 1) * 86400 + 86400 - ((now + KST) % 86400))
+
+
+def _prog_all():
+    global _PROG
+    if _PROG is None:
+        d = read_json(PROGRESS_FILE, {})
+        _PROG = d if isinstance(d, dict) else {}
+    return _PROG
+
+
+def _prog_save():
+    write_json_atomic(PROGRESS_FILE, _prog_all())
+
+
+def acct_of(headers):
+    """로그인 토큰 → (계정 키, 프로필). 없거나 만료면 (None, None)"""
+    tok = headers.get("x-profile-token", "")
+    if not tok:
+        return None, None
+    th = token_hash(tok)
+    for key, pr in load_profiles().items():
+        if th in pr.get("tokens", []):
+            return key, pr
+    return None, None
+
+
+def acct_need(headers):
+    acct, pr = acct_of(headers)
+    if not acct:
+        raise HttpError(401, "로그인이 필요해요.")
+    return acct, pr
+
+
+def acct_by_nick(nick):
+    """게임 이름 → 계정 (최근에 그 이름을 쓴 계정)"""
+    n = str(nick or "").strip().lower()
+    if not n:
+        return None
+    best, bt = None, -1
+    for a, p in _prog_all().items():
+        if str(p.get("nick", "")).lower() == n and p.get("lastSeen", 0) > bt:
+            best, bt = a, p.get("lastSeen", 0)
+    if best:
+        return best
+    return n if n in load_profiles() else None
+
+
+def _notice(p, n):
+    n = dict(n)
+    n.setdefault("id", secrets.token_hex(4))
+    n.setdefault("at", time.time())
+    n["read"] = False
+    p.setdefault("notices", []).append(n)
+    p["notices"] = p["notices"][-40:]
+    return n
+
+
+def push_acct(acct, obj):
+    """그 계정으로 접속 중인 화면에 바로 알림"""
+    for c in list(CLIENTS.values()):
+        if getattr(c, "acct", None) == acct and not c.closed:
+            c.send(obj)
+
+
+def _grant(p, iid, why, out=None):
+    it = ITEMS.get(iid)
+    if not it or iid in p["owned"]:
+        return False
+    p["owned"].append(iid)
+    _notice(p, {"type": "item", "item": iid, "text": f"{why} 보상으로 {ITEM_CATS.get(it['cat'], '')} '{it['name']}'을(를) 얻었어요!"})
+    if out is not None:
+        out.append(iid)
+    return True
+
+
+def _grant_level_items(p, out=None):
+    lv = level_of(p["xp"])
+    for L, iid in sorted(LV_ITEMS.items()):
+        if lv >= L:
+            _grant(p, iid, f"레벨 {L}", out)
+
+
+def prog_of(acct, pr=None, nick=None, claim_xp=None):
+    """계정의 성장 기록 (없으면 새로: 예전 경험치는 프로필 백업·이 기기 값 중 큰 쪽으로 이어받음) — FILE_LOCK 안에서"""
+    P = _prog_all()
+    p = P.get(acct)
+    if p is None:
+        xp0 = 0
+        try:
+            xp0 = int(float(json.loads(((pr or {}).get("data") or {}).get("xp", "0"))))
+        except Exception:
+            xp0 = 0
+        if isinstance(claim_xp, (int, float)) and not isinstance(claim_xp, bool) and math.isfinite(claim_xp):
+            xp0 = max(xp0, min(int(claim_xp), 500_000))
+        p = {"nick": nick or (pr or {}).get("id", acct), "xp": max(0, xp0), "coins": START_COINS, "earned": START_COINS, "owned": [],
+             "streak": {"n": 0, "last": "", "shields": 0, "best": 0}, "ret": 0, "mis": {}, "misAll": 0,
+             "notices": [], "chal": {"w": 0, "l": 0}, "champ": 0, "deco": {}, "created": time.time(), "lastPlay": 0, "lastSeen": time.time()}
+        _notice(p, {"type": "welcome", "text": f"시작 선물 {START_COINS}♪를 받았어요! 상점에서 마음에 드는 꾸미기를 골라 보세요."})
+        P[acct] = p
+        _grant_level_items(p)
+    for k, v in (("owned", []), ("notices", []), ("chal", {"w": 0, "l": 0}), ("deco", {}), ("mis", {})):
+        p.setdefault(k, v)
+    if nick:
+        p["nick"] = str(nick)[:16]
+    p["lastSeen"] = time.time()
+    return p
+
+
+# ---- 오늘의 미션: 날마다 모두에게 같은 3개 (가볍게 · 실력 · 색다르게 묶음에서 하나씩), 하루 한 번 바꾸기
+MISSIONS = {
+    "plays3": ("아무 곡이나 3판 끝까지", 3, "a"),
+    "songs3": ("서로 다른 곡 3개 끝까지", 3, "a"),
+    "perf800": ("PERFECT 800개 모으기", 800, "a"),
+    "ai2": ("AI 채보로 2판", 2, "a"),
+    "hard2": ("어려움 이상 2판 B 랭크 이상", 2, "b"),
+    "combo300": ("한 판에 300 콤보", 1, "b"),
+    "combo500": ("한 판에 500 콤보", 1, "b"),
+    "s3": ("S 랭크 이상 3번", 3, "b"),
+    "ss1": ("SS 랭크 이상 1번", 1, "b"),
+    "fc1": ("풀콤보 1번", 1, "b"),
+    "ext1": ("극한 난이도 1판 끝까지", 1, "b"),
+    "new1": ("안 해 본 곡 1곡 끝까지", 1, "c"),
+    "daily1": ("오늘의 곡 도전", 1, "c"),
+    "multi1": ("멀티로 1판", 1, "c"),
+    "ghost1": ("고스트 이기기 1번", 1, "c"),
+}
+MIS_XP, MIS_COIN, MIS_ALL_XP, MIS_ALL_COIN = 50, 30, 100, 50
+
+
+def _mis_pick(day, group, avoid=(), salt=""):
+    ids = sorted(k for k, v in MISSIONS.items() if v[2] == group and k not in avoid)
+    return random.Random(f"linkbeat-mis-{day}-{group}{salt}").choice(ids) if ids else None
+
+
+def _mis_today(p, day):
+    m = p.get("mis") or {}
+    if m.get("day") != day:
+        m = {"day": day, "ids": [_mis_pick(day, g) for g in "abc"], "prog": {}, "done": [], "all": False, "rr": False, "songs": []}
+        p["mis"] = m
+    return m
+
+
+def mis_public(p, day):
+    m = _mis_today(p, day)
+    out = []
+    for mid in m["ids"]:
+        text, goal, grp = MISSIONS.get(mid, (mid, 1, "a"))
+        out.append({"id": mid, "text": text, "goal": goal, "prog": min(goal, int(m["prog"].get(mid, 0))), "done": mid in m["done"]})
+    return {"day": day, "list": out, "all": bool(m.get("all")), "rr": bool(m.get("rr")),
+            "reward": {"xp": MIS_XP, "coins": MIS_COIN, "allXp": MIS_ALL_XP, "allCoins": MIS_ALL_COIN}}
+
+
+RANK_AT = {k: i for i, k in enumerate(RANK_LIST)}
+
+
+def _mis_apply(m, info):
+    newly = []
+    rk = RANK_AT.get(info["rank"], 0)
+    for mid in m["ids"]:
+        if mid in m["done"] or mid not in MISSIONS:
+            continue
+        goal = MISSIONS[mid][1]
+        if mid == "songs3":
+            if info["sid"] not in m.setdefault("songs", []):
+                m["songs"].append(info["sid"])
+            m["prog"][mid] = len(m["songs"])
+        else:
+            inc = {
+                "plays3": 1, "perf800": info["perfect"], "ai2": int(info["ai"]),
+                "hard2": int(info["diff"] in ("hard", "extreme") and rk >= RANK_AT["B"]),
+                "combo300": int(info["maxCombo"] >= 300), "combo500": int(info["maxCombo"] >= 500),
+                "s3": int(rk >= RANK_AT["S"]), "ss1": int(rk >= RANK_AT["SS"]), "fc1": int(info["fc"]),
+                "ext1": int(info["diff"] == "extreme"), "new1": int(info["newSong"]), "daily1": int(info["daily"]),
+                "multi1": int(info["multi"]), "ghost1": int(info["ghostWin"]),
+            }.get(mid, 0)
+            m["prog"][mid] = int(m["prog"].get(mid, 0)) + inc
+        if m["prog"][mid] >= goal:
+            m["done"].append(mid)
+            newly.append(mid)
+    return newly
+
+
+def mis_reroll(acct, pr, data):
+    """오늘 미션 하나 바꾸기 (하루 한 번, 아직 안 끝낸 것만)"""
+    try:
+        slot = int(data.get("slot"))
+    except (TypeError, ValueError):
+        raise HttpError(400, "잘못된 요청이에요.")
+    with FILE_LOCK:
+        p = prog_of(acct, pr)
+        day = _kst_day()
+        m = _mis_today(p, day)
+        if m.get("rr"):
+            raise HttpError(400, "미션은 하루에 한 번만 바꿀 수 있어요.")
+        if not 0 <= slot < len(m["ids"]) or m["ids"][slot] in m["done"]:
+            raise HttpError(400, "끝낸 미션은 바꿀 수 없어요.")
+        old = m["ids"][slot]
+        new = _mis_pick(day, MISSIONS[old][2], avoid=set(m["ids"]), salt=f"-{acct}")
+        if not new:
+            raise HttpError(400, "바꿀 미션이 없어요.")
+        m["ids"][slot] = new
+        m["prog"].pop(old, None)
+        m["rr"] = True
+        _prog_save()
+        return {"ok": True, "missions": mis_public(p, day)}
+
+
+# ---- 출석 (하루에 한 판이라도 끝까지) · 보호막 · 복귀
+def _streak_touch(p, day, out):
+    s = p["streak"]
+    if s.get("last") == day:
+        return False
+    gap = _day_diff(s["last"], day) if s.get("last") else None
+    if gap == 1:
+        s["n"] += 1
+    elif gap and 1 < gap <= 3 and s.get("shields", 0) >= gap - 1:     # 하루·이틀 빠진 건 보호막으로
+        s["shields"] -= gap - 1
+        s["n"] += 1
+        out["shieldUsed"] = gap - 1
+    else:
+        s["n"] = 1
+    s["last"] = day
+    s["best"] = max(s.get("best", 0), s["n"])
+    if s["n"] % 7 == 0 and s.get("shields", 0) < 2:
+        s["shields"] = s.get("shields", 0) + 1
+        out["shieldGot"] = True
+    return True
+
+
+def xp_for_play(info):
+    """화면의 xpFor와 같은 계산 (노트 수·정확도·별점, 풀콤보/올퍼펙트·멀티 보너스)"""
+    x = 20 + info["units"] * (info["acc"] / 100) * (1 + info["stars"] / 5) * 0.1
+    if info["ap"]:
+        x *= 1.3
+    elif info["fc"]:
+        x *= 1.15
+    if info["multi"]:
+        x *= 1.1
+    return int(round(min(x, 3000)))
+
+
+def coins_for_play(info):
+    c = min(50, 10 + info["units"] * (info["acc"] / 100) * 0.02)
+    if info["ap"]:
+        c += 20
+    elif info["fc"]:
+        c += 10
+    if info["multi"]:
+        c += 5
+    return int(round(c))
+
+
+def _play_info(sid, diff, keys, nick, data):
+    counts = data.get("counts") if isinstance(data.get("counts"), dict) else {}
+
+    def cnt(k):
+        v = counts.get(k, 0)
+        return max(0, min(100000, int(v))) if isinstance(v, (int, float)) and math.isfinite(v) else 0
+    units = min(20000, cnt("perfect") + cnt("great") + cnt("good") + cnt("miss"))
+    try:
+        acc = max(0.0, min(100.0, float(data.get("acc", 0))))
+    except (TypeError, ValueError):
+        acc = 0.0
+    ai = bool(data.get("ai")) and keys == 4
+    hl = bool(data.get("hl"))
+    song = load_song(sid) or {}
+    try:
+        st = ((ai_summary(song) or {}).get("stars") or {}) if ai else (song_stars(song).get(str(keys)) or {})
+        stars = float(st.get(diff) or 0)
+    except Exception:
+        stars = 0.0
+    plays = read_json(PLAYS_FILE, {})
+    c = ((plays or {}).get(nick) or {}).get(sid) if isinstance(plays, dict) else None
+    new_song = isinstance(c, list) and c and int(c[0]) == 1
+    days, today = daily_state()
+    cur = days.get(today) if today else None
+    daily = bool(cur and cur.get("songId") == sid and cur.get("diff") == diff and keys == 4 and not hl)
+    ap = units > 0 and cnt("great") == 0 and cnt("good") == 0 and cnt("miss") == 0
+    try:
+        mc = max(0, int(data.get("maxCombo", 0)))
+    except (TypeError, ValueError):
+        mc = 0
+    return {"sid": sid, "title": song.get("title", sid), "diff": diff, "keys": keys, "ai": ai, "hl": hl, "units": units, "acc": acc,
+            "stars": stars, "fc": bool(data.get("fc")) or ap, "ap": ap, "perfect": cnt("perfect"), "maxCombo": mc,
+            "rank": entry_rank({"acc": acc, "counts": {k: cnt(k) for k in ("great", "good", "miss")}}),
+            "multi": bool(data.get("multi")), "ghostWin": bool(data.get("ghostWin")), "newSong": bool(new_song), "daily": daily,
+            "score": max(0, min(1_000_000, int(data.get("score", 0) or 0)))}
+
+
+def on_play(acct, pr, nick, sid, diff, keys, data):
+    """끝까지 한 판: 경험치·♪·출석·복귀·미션·레벨 보상·리그·도전 결과를 한 번에. 결과 화면에 보여 줄 내용을 돌려줌"""
+    if data.get("incomplete"):
+        return None
+    with FILE_LOCK:
+        info = _play_info(sid, diff, keys, nick, data)
+        p = prog_of(acct, pr, nick)
+        day = _kst_day()
+        out = {"xpParts": [], "coinParts": [], "missions": [], "items": [], "levelUp": None}
+        coins = 0
+        # 출석 · 복귀
+        last_day = p["streak"].get("last") or ""
+        if last_day != day:
+            if last_day and _day_diff(last_day, day) >= 4:
+                p["ret"] = 3
+                out["retStart"] = True
+                _notice(p, {"type": "return", "text": "돌아온 걸 환영해요! 이번 판부터 3판 동안 경험치·♪가 2배예요."})
+            st = {}
+            _streak_touch(p, day, st)
+            out["streak"] = dict(st, n=p["streak"]["n"], first=True)
+            coins += 10
+            out["coinParts"].append(["출석", 10])
+            ms = STREAK_REWARD.get(p["streak"]["n"])
+            if ms:
+                coins += ms[0]
+                out["coinParts"].append([f"{p['streak']['n']}일 연속 출석", ms[0]])
+                out["streak"]["milestone"] = p["streak"]["n"]
+                if ms[1]:
+                    _grant(p, ms[1], f"{p['streak']['n']}일 연속 출석", out["items"])
+        # 이번 판
+        xp, c0 = xp_for_play(info), coins_for_play(info)
+        if p.get("ret", 0) > 0:
+            p["ret"] -= 1
+            out["ret"] = {"left": p["ret"]}
+            out["xpParts"].append(["플레이 (복귀 ×2)", xp * 2])
+            out["coinParts"].append(["플레이 (복귀 ×2)", c0 * 2])
+            xp, c0 = xp * 2, c0 * 2
+        else:
+            out["xpParts"].append(["플레이", xp])
+            out["coinParts"].append(["플레이", c0])
+        coins += c0
+        # 미션
+        m = _mis_today(p, day)
+        for mid in _mis_apply(m, info):
+            xp += MIS_XP
+            coins += MIS_COIN
+            out["missions"].append({"id": mid, "text": MISSIONS[mid][0]})
+        if out["missions"]:
+            out["xpParts"].append([f"미션 {len(out['missions'])}개", MIS_XP * len(out["missions"])])
+            out["coinParts"].append([f"미션 {len(out['missions'])}개", MIS_COIN * len(out["missions"])])
+        if len(m["done"]) >= len(m["ids"]) and not m.get("all"):
+            m["all"] = True
+            p["misAll"] = p.get("misAll", 0) + 1
+            xp += MIS_ALL_XP
+            coins += MIS_ALL_COIN
+            out["allDone"] = True
+            out["xpParts"].append(["오늘 미션 모두 완료", MIS_ALL_XP])
+            out["coinParts"].append(["오늘 미션 모두 완료", MIS_ALL_COIN])
+            if p["misAll"] >= 10:
+                _grant(p, "fx_star", "미션을 다 한 날 10일", out["items"])
+        # 도전 (고스트로 한 도전장 · 복수)
+        duel = data.get("duel") if isinstance(data.get("duel"), dict) else None
+        if duel:
+            r = _duel_ghost_result(acct, p, duel, info)
+            if r:
+                out["duel"] = r
+                if r.get("coins"):
+                    coins += r["coins"]
+                    out["coinParts"].append([r["label"], r["coins"]])
+        # 경험치 · 레벨
+        before = p["xp"]
+        p["xp"] = before + xp
+        a, b = level_of(before), level_of(p["xp"])
+        if b > a:
+            lc = 100 * (b - a)
+            coins += lc
+            out["coinParts"].append([f"레벨 업 (Lv {b})", lc])
+            out["levelUp"] = {"from": a, "to": b}
+            _grant_level_items(p, out["items"])
+        p["coins"] += coins
+        p["earned"] = p.get("earned", 0) + coins
+        p["lastPlay"] = time.time()
+        out.update({"xp": {"gain": xp, "before": before, "after": p["xp"]}, "coins": {"gain": coins, "total": p["coins"]},
+                    "streakN": p["streak"]["n"], "shields": p["streak"].get("shields", 0)})
+        # 리그
+        out["league"] = league_add(acct, p["nick"], xp)
+        _prog_save()
+    return out
+
+
+# ---- 주간 리그 (이번 주에 번 경험치)
+def _league():
+    global _LEAGUE
+    if _LEAGUE is None:
+        d = read_json(LEAGUE_FILE, {})
+        _LEAGUE = d if isinstance(d, dict) else {}
+        _LEAGUE.setdefault("pts", {})
+    wk = _week_of()
+    if _LEAGUE.get("week") != wk:
+        _league_rollover(_LEAGUE, wk)
+    return _LEAGUE
+
+
+def _league_rollover(L, wk):
+    old, pts = L.get("week"), L.get("pts") or {}
+    if old:
+        ranked = sorted(((a, v) for a, v in pts.items() if isinstance(v, dict) and v.get("pts", 0) > 0), key=lambda kv: -kv[1]["pts"])
+        top = []
+        P = _prog_all()
+        for i, (a, v) in enumerate(ranked):
+            p = P.get(a)
+            if not p:
+                continue
+            prize = LEAGUE_PRIZE[i] if i < len(LEAGUE_PRIZE) else 50
+            p["coins"] = p.get("coins", 0) + prize
+            p["earned"] = p.get("earned", 0) + prize
+            medal = "🥇🥈🥉"[i] if i < 3 else ""
+            _notice(p, {"type": "league", "rank": i + 1, "pts": v["pts"], "coins": prize,
+                        "text": f"지난주 리그 {medal}{i + 1}위! ({v['pts']:,} XP) 보상 {prize}♪"})
+            if i == 0:
+                p["champ"] = p.get("champ", 0) + 1
+                _grant(p, "gear_gold", "주간 리그 1위")
+            if i < 3:
+                top.append({"acct": a, "nick": v.get("nick", a), "pts": v["pts"]})
+        L["prev"] = {"week": old, "top": top}
+        _prog_save()
+    L["week"] = wk
+    L["pts"] = {}
+    write_json_atomic(LEAGUE_FILE, L)
+    for c in list(CLIENTS.values()):           # 메달이 바뀜
+        a = getattr(c, "acct", None)
+        if a:
+            c.medal = medal_of(a)
+
+
+def league_add(acct, nick, xp):
+    L = _league()
+    v = L["pts"].setdefault(acct, {"nick": nick, "pts": 0})
+    v["nick"] = nick
+    v["pts"] = int(v.get("pts", 0)) + int(xp)
+    write_json_atomic(LEAGUE_FILE, L)
+    ranked = sorted(L["pts"].items(), key=lambda kv: -kv[1]["pts"])
+    rank = next((i + 1 for i, (a, _) in enumerate(ranked) if a == acct), None)
+    return {"pts": v["pts"], "rank": rank, "n": len(ranked)}
+
+
+def medal_of(acct):
+    L = _LEAGUE if _LEAGUE is not None else None
+    if L is None:
+        with FILE_LOCK:
+            L = _league()
+    prev = L.get("prev") or {}
+    for i, t in enumerate(prev.get("top", [])[:3]):
+        if t.get("acct") == acct:
+            return i + 1
+    return 0
+
+
+def league_public(acct=None, limit=10):
+    with FILE_LOCK:
+        L = _league()
+        ranked = sorted(L["pts"].items(), key=lambda kv: -kv[1]["pts"])
+        P = _prog_all()
+        rows = [{"nick": v.get("nick", a), "pts": v["pts"], "me": a == acct, "deco": (P.get(a) or {}).get("deco", {}),
+                 "medal": medal_of(a)} for a, v in ranked[:limit]]
+        me = next(({"rank": i + 1, "pts": v["pts"]} for i, (a, v) in enumerate(ranked) if a == acct), None)
+        prev = [{"nick": t["nick"], "pts": t["pts"]} for t in (L.get("prev") or {}).get("top", [])]
+        return {"week": L["week"], "endsIn": _week_left(), "top": rows, "me": me, "n": len(ranked), "prev": prev, "prize": LEAGUE_PRIZE}
+
+
+# ---- 상점
+def shop_today():
+    import datetime
+    day, wk = _kst_day(), _week_of()
+    buyable = sorted(i for i, it in ITEMS.items() if it.get("price") and not it.get("limited"))
+    sale = random.Random(f"linkbeat-shop-{day}").sample(buyable, min(4, len(buyable))) if buyable else []
+    widx = (datetime.date.fromisoformat(wk) - datetime.date(2020, 1, 6)).days // 7
+    lim = ITEM_LIMITED[widx % len(ITEM_LIMITED)] if ITEM_LIMITED else None
+    return {"day": day, "sale": sale, "off": 20, "limited": lim, "limitedEnds": _week_left(),
+            "saleEnds": int(86400 - ((time.time() + KST) % 86400))}
+
+
+def price_of(iid, shop=None):
+    it = ITEMS.get(iid) or {}
+    base = int(it.get("price") or 0)
+    shop = shop or shop_today()
+    return int(round(base * (100 - shop["off"]) / 100 / 10) * 10) if iid in shop["sale"] else base
+
+
+def shop_buy(acct, pr, data):
+    iid = str(data.get("id", ""))
+    it = ITEMS.get(iid)
+    if not it or not it.get("price"):
+        raise HttpError(400, "상점에서 살 수 없는 물건이에요.")
+    shop = shop_today()
+    if it.get("limited") and iid != shop["limited"]:
+        raise HttpError(400, "이번 주에는 팔지 않는 한정 상품이에요.")
+    price = price_of(iid, shop)
+    with FILE_LOCK:
+        p = prog_of(acct, pr)
+        if iid in p["owned"]:
+            raise HttpError(400, "이미 가지고 있어요.")
+        if p["coins"] < price:
+            raise HttpError(400, f"♪가 모자라요. {price - p['coins']:,}♪ 더 모아 주세요.")
+        p["coins"] -= price
+        p["owned"].append(iid)
+        _prog_save()
+        log("상점 구매:", acct, iid, price)
+        return {"ok": True, "coins": p["coins"], "owned": p["owned"], "price": price}
+
+
+# ---- 도전장 · 실시간 대결
+def _chal_all():
+    global _CHAL
+    if _CHAL is None:
+        d = read_json(CHAL_FILE, {})
+        _CHAL = d if isinstance(d, dict) else {}
+    now = time.time()
+    for k, ch in list(_CHAL.items()):
+        if ch.get("status") == "open" and now - ch.get("at", 0) > 7 * 86400:
+            ch["status"] = "expired"
+        if now - ch.get("at", 0) > 30 * 86400:
+            _CHAL.pop(k, None)
+    return _CHAL
+
+
+def _board_entry(sid, nick, diff, keys, ai, hl=False):
+    sc = load_scores(sid)
+    return next((e for e in sc["entries"] if e.get("name") == nick and _same_board(e, diff, keys, hl, ai)), None)
+
+
+def chal_send(acct, pr, data):
+    to_nick = str(data.get("to", "")).strip()[:16]
+    sid = str(data.get("songId", ""))
+    diff = data.get("diff")
+    keys = 6 if data.get("keys") in (6, "6") else 4
+    ai = bool(data.get("ai")) and keys == 4
+    if not VID_RE.match(sid) or diff not in chartgen.DIFFS:
+        raise HttpError(400, "잘못된 요청이에요.")
+    with FILE_LOCK:
+        p = prog_of(acct, pr)
+        to = acct_by_nick(to_nick)
+        if not to:
+            raise HttpError(404, f"{to_nick} 님을 찾을 수 없어요.")
+        if to == acct:
+            raise HttpError(400, "나에게는 보낼 수 없어요.")
+        e = _board_entry(sid, p["nick"], diff, keys, ai)
+        if not e:
+            raise HttpError(400, "이 곡·난이도에 내 기록이 있어야 도전장을 보낼 수 있어요.")
+        song = load_song(sid) or {}
+        C = _chal_all()
+        for k, ch in list(C.items()):          # 같은 사람에게 같은 곡·난이도로 보낸 건 새 것으로 바꿈
+            if ch["from"] == acct and ch["to"] == to and ch["status"] == "open" and ch["sid"] == sid and ch["diff"] == diff \
+                    and ch["keys"] == keys and ch["ai"] == ai:
+                C.pop(k)
+        if sum(1 for ch in C.values() if ch["from"] == acct and ch["status"] == "open") >= 10:
+            raise HttpError(400, "아직 끝나지 않은 도전장이 너무 많아요 (최대 10개).")
+        cid = secrets.token_hex(5)
+        ch = {"id": cid, "from": acct, "fromNick": p["nick"], "to": to, "toNick": to_nick, "sid": sid, "title": song.get("title", sid),
+              "diff": diff, "keys": keys, "ai": ai, "score": e["score"], "acc": e.get("acc"), "g": e.get("g"), "at": time.time(), "status": "open"}
+        C[cid] = ch
+        write_json_atomic(CHAL_FILE, C)
+        tp = prog_of(to)
+        n = _notice(tp, {"type": "chal", "chal": cid, "by": p["nick"], "sid": sid, "title": ch["title"], "diff": diff, "keys": keys,
+                         "ai": ai, "score": e["score"], "text": f"{p['nick']} 님이 도전장을 보냈어요!"})
+        _prog_save()
+    push_acct(to, {"type": "notice", "n": n})
+    return {"ok": True, "id": cid}
+
+
+def chal_decline(acct, data):
+    cid = str(data.get("id", ""))
+    with FILE_LOCK:
+        C = _chal_all()
+        ch = C.get(cid)
+        if ch and ch["to"] == acct and ch["status"] == "open":
+            ch["status"] = "declined"
+            write_json_atomic(CHAL_FILE, C)
+        p = _prog_all().get(acct)
+        if p:
+            for n in p.get("notices", []):
+                if n.get("chal") == cid:
+                    n["done"] = "declined"
+            _prog_save()
+    return {"ok": True}
+
+
+def _duel_reward(p, win):
+    c = DUEL_WIN if win else DUEL_LOSE
+    p["coins"] = p.get("coins", 0) + c
+    p["earned"] = p.get("earned", 0) + c
+    p.setdefault("chal", {"w": 0, "l": 0})["w" if win else "l"] += 1
+    return c
+
+
+def _duel_ghost_result(acct, p, duel, info):
+    """고스트로 한 도전장·복수: 상대 기록과 비교해서 결과 · 보상 (FILE_LOCK 안에서)"""
+    kind = duel.get("kind")
+    if kind == "chal":
+        C = _chal_all()
+        ch = C.get(str(duel.get("id", "")))
+        if not ch or ch["to"] != acct or ch["status"] != "open" or ch["sid"] != info["sid"] or ch["diff"] != info["diff"] \
+                or ch["keys"] != info["keys"]:
+            return None
+        win = info["score"] > ch["score"]
+        tie = info["score"] == ch["score"]
+        ch["status"] = "draw" if tie else "won" if win else "lost"
+        ch["res"] = {"mode": "ghost", "score": info["score"], "at": time.time()}
+        write_json_atomic(CHAL_FILE, C)
+
+        def tie_pay(pp):
+            pp["coins"] = pp.get("coins", 0) + DUEL_LOSE
+            pp["earned"] = pp.get("earned", 0) + DUEL_LOSE
+            return DUEL_LOSE
+        got = tie_pay(p) if tie else _duel_reward(p, win)
+        for n in p.get("notices", []):
+            if n.get("chal") == ch["id"]:
+                n["done"] = ch["status"]
+        sp = _prog_all().get(ch["from"])
+        if sp:
+            if tie:
+                tie_pay(sp)
+            else:
+                _duel_reward(sp, not win)
+            res = "비겼어요" if tie else "졌어요! 내가 이겼어요 🎉" if not win else "이겼어요…"
+            n = _notice(sp, {"type": "chalres", "win": not win and not tie, "by": p["nick"], "title": ch["title"], "diff": ch["diff"], "keys": ch["keys"],
+                             "mode": "ghost", "theirs": info["score"], "mine": ch["score"],
+                             "text": f"{p['nick']} 님이 내 도전장에서 {res} (고스트 대결)"})
+            push_acct(ch["from"], {"type": "notice", "n": n})
+        return {"win": win, "tie": tie, "vs": ch["fromNick"], "mine": info["score"], "theirs": ch["score"], "coins": got,
+                "label": "도전장 승리" if win else "도전장 무승부" if tie else "도전장 참가"}
+    if kind == "revenge":
+        n = next((x for x in p.get("notices", []) if x.get("id") == duel.get("id") and x.get("type") == "beaten"), None)
+        if not n or n.get("done") or n.get("sid") != info["sid"] or n.get("diff") != info["diff"]:
+            return None
+        win = info["score"] > int(n.get("theirs", 0))
+        if not win:
+            return {"win": False, "vs": n.get("by"), "mine": info["score"], "theirs": n.get("theirs"), "coins": 0, "label": "복수"}
+        n["done"] = "won"
+        c = 40
+        p["coins"] = p.get("coins", 0) + c
+        p["earned"] = p.get("earned", 0) + c
+        return {"win": True, "vs": n.get("by"), "mine": info["score"], "theirs": n.get("theirs"), "coins": c, "label": "복수 성공"}
+    return None
+
+
+def notices_read(acct):
+    with FILE_LOCK:
+        p = _prog_all().get(acct)
+        if p:
+            for n in p.get("notices", []):
+                n["read"] = True
+            _prog_save()
+    return {"ok": True}
+
+
+def notify_beaten(winner_nick, sid, diff, keys, hl, ai, new_score, passed):
+    """내 기록을 넘은 사람이 생기면 (넘긴 사람마다) 알림 — FILE_LOCK 밖에서 불러도 됨"""
+    if not passed:
+        return
+    song = load_song(sid) or {}
+    pushes = []
+    with FILE_LOCK:
+        wa = acct_by_nick(winner_nick)
+        for e in passed:
+            a = acct_by_nick(e.get("name"))
+            if not a or a == wa:
+                continue
+            p = prog_of(a)
+            n = _notice(p, {"type": "beaten", "by": winner_nick, "byAcct": wa, "sid": sid, "title": song.get("title", sid), "diff": diff,
+                            "keys": keys, "hl": hl, "ai": ai, "mine": e.get("score", 0), "theirs": new_score,
+                            "text": f"{winner_nick} 님이 내 기록을 넘었어요!"})
+            pushes.append((a, n))
+        if pushes:
+            _prog_save()
+    for a, n in pushes:
+        push_acct(a, {"type": "notice", "n": n})
+
+
+def me_summary(acct, pr, data):
+    nick = str(data.get("nick", "") or "").strip()[:16] or None
+    claim = data.get("xp")
+    with FILE_LOCK:
+        p = prog_of(acct, pr, nick, claim)
+        day = _kst_day()
+        mis = mis_public(p, day)
+        st = p["streak"]
+        alive = bool(st.get("last")) and (_day_diff(st["last"], day) <= 1 or
+                                          (_day_diff(st["last"], day) <= 3 and st.get("shields", 0) >= _day_diff(st["last"], day) - 1))
+        C = _chal_all()
+        out_ch = [{k: ch[k] for k in ("id", "toNick", "title", "diff", "keys", "ai", "score", "status", "at")}
+                  for ch in C.values() if ch["from"] == acct][-10:]
+        _prog_save()
+        res = {"acct": acct, "nick": p["nick"], "xp": p["xp"], "coins": p["coins"], "owned": p["owned"],
+               "streak": {"n": st["n"] if alive else 0, "best": st.get("best", 0), "shields": st.get("shields", 0), "today": st.get("last") == day},
+               "ret": p.get("ret", 0), "missions": mis, "misAll": p.get("misAll", 0), "notices": p["notices"][-30:],
+               "unread": sum(1 for n in p["notices"] if not n.get("read")), "chal": p["chal"], "champ": p.get("champ", 0),
+               "chalOut": out_ch, "deco": p.get("deco", {})}
+    res["league"] = league_public(acct)
+    res["shop"] = dict(shop_today(), prices={i: price_of(i) for i in ITEMS if ITEMS[i].get("price")})
+    res["medal"] = medal_of(acct)
+    return res
+
+
+def deco_check(acct, deco):
+    """남에게 보이는 꾸미기: 가진 것만 인정"""
+    p = _prog_all().get(acct) if acct else None
+    owned = set((p or {}).get("owned", []))
+    out = {}
+    if isinstance(deco, dict):
+        for k in DECO_KEYS:
+            v = deco.get(k)
+            if isinstance(v, str) and v in owned and (ITEMS.get(v) or {}).get("cat") == k:
+                out[k] = v
+    return out
+
+
+def growth_public(nick):
+    """다른 사람 카드: 꾸미기 · 출석 · 도전 전적 · 리그 우승"""
+    with FILE_LOCK:
+        a = acct_by_nick(nick)
+        p = _prog_all().get(a) if a else None
+        if not p:
+            return {}
+        st = p.get("streak", {})
+        day = _kst_day()
+        alive = bool(st.get("last")) and _day_diff(st["last"], day) <= 1
+        return {"deco": p.get("deco", {}), "streak": st.get("n", 0) if alive else 0, "bestStreak": st.get("best", 0),
+                "chal": p.get("chal", {"w": 0, "l": 0}), "champ": p.get("champ", 0), "medal": medal_of(a)}
 
 
 # ============================================================ 채보 생성 작업
@@ -2771,7 +3556,43 @@ async def api(method, path, headers, body):
     if parts == ["profile", "logout"] and method == "POST":
         return await loop.run_in_executor(None, profile_logout, headers)
     if parts == ["scores"] and method == "POST":
-        return submit_score(json_body(body))
+        data = json_body(body)
+        res = submit_score(data)
+        passed, hl, ai = res.pop("_passed", []), res.pop("_hl", False), res.pop("_ai", False)
+        sid, diff = str(data.get("songId", "")), data.get("diff")
+        keys = 6 if data.get("keys") in (6, "6") else 4
+        nick = str(data.get("name", "")).strip()[:16] or "이름없음"
+        try:
+            notify_beaten(nick, sid, diff, keys, hl, ai, int(data.get("score", 0) or 0), passed)
+        except Exception as e:
+            log("기록 알림 실패:", e)
+        acct, pr = acct_of(headers)
+        if acct:
+            try:
+                res["reward"] = on_play(acct, pr, nick, sid, diff, keys, data)
+            except Exception as e:
+                log("성장 기록 실패:", e)
+        return res
+    if parts == ["me"] and method == "POST":
+        acct, pr = acct_need(headers)
+        return me_summary(acct, pr, json_body(body) if body else {})
+    if parts == ["me", "reroll"] and method == "POST":
+        acct, pr = acct_need(headers)
+        return mis_reroll(acct, pr, json_body(body))
+    if parts == ["shop", "buy"] and method == "POST":
+        acct, pr = acct_need(headers)
+        return shop_buy(acct, pr, json_body(body))
+    if parts == ["notices", "read"] and method == "POST":
+        acct, _ = acct_need(headers)
+        return notices_read(acct)
+    if parts == ["challenge"] and method == "POST":
+        acct, pr = acct_need(headers)
+        return chal_send(acct, pr, json_body(body))
+    if parts == ["challenge", "decline"] and method == "POST":
+        acct, _ = acct_need(headers)
+        return chal_decline(acct, json_body(body))
+    if parts == ["league"] and method == "GET":
+        return league_public(acct_of(headers)[0], 30)
     if parts == ["daily"] and method == "GET":
         return await loop.run_in_executor(None, daily_info)
     if parts == ["online"] and method == "GET":
@@ -3037,6 +3858,13 @@ class Client:
         self.pending = None     # 게임 중에 바꾼 난이도/키 (판이 끝나면 적용)
         self.last_seen = time.time()
         self.closed = False
+        self.acct = None        # 로그인한 계정 (hello의 토큰으로 확인)
+        self.tok = None
+        self.deco = {}          # 남에게 보이는 꾸미기 (가진 것만)
+        self.medal = 0          # 지난주 리그 1~3위
+
+    def pub(self):
+        return {"deco": self.deco, "medal": self.medal}
 
     def send(self, obj):
         if self.closed:
@@ -3113,6 +3941,7 @@ async def ws_session(reader, writer, headers):
     finally:
         client.closed = True
         CLIENTS.pop(client.id, None)
+        duel_forget(client)
         leave_room(client)
         if client.named:
             broadcast_online()
@@ -3145,18 +3974,22 @@ class Room:
         self.hl_range = None        # 지금 판의 하이라이트 구간 (구경하러 들어온 사람에게 보냄)
         self.game_no = 0
         self.timer = None
+        self.private = False        # 1:1 대결 방 (접속자 목록의 '같이 하기'로는 못 들어감)
+        self.duel = None            # 1:1 대결 정보 (첫 판이 끝나면 지움 — 그다음은 보통 방)
+        self.duel_info = None
 
     def state(self):
         return {
             "type": "room", "code": self.code, "leader": self.leader, "phase": self.phase,
             "songId": self.song_id, "songTitle": self.song_title, "diff": self.diff, "keys": self.keys, "hl": self.hl, "ai": self.ai,
             "players": [{"id": c.id, "name": c.name, "state": c.state, "avatar": c.avatar, "title": c.title,
-                         "diff": c.diff, "keys": c.keys, "ready": c.ready, "level": c.level} for c in self.players.values()],
-            "watchers": [{"id": c.id, "name": c.name, "avatar": c.avatar, "title": c.title, "level": c.level} for c in self.watchers.values()],
+                         "diff": c.diff, "keys": c.keys, "ready": c.ready, "level": c.level, **c.pub()} for c in self.players.values()],
+            "watchers": [{"id": c.id, "name": c.name, "avatar": c.avatar, "title": c.title, "level": c.level, **c.pub()} for c in self.watchers.values()],
+            "duel": bool(getattr(self, "duel", None)),
         }
 
     def roster(self):
-        return [{"id": c.id, "name": c.name, "avatar": c.avatar, "title": c.title, "diff": c.diff, "keys": c.keys, "level": c.level}
+        return [{"id": c.id, "name": c.name, "avatar": c.avatar, "title": c.title, "diff": c.diff, "keys": c.keys, "level": c.level, **c.pub()}
                 for c in self.players.values()]
 
     def broadcast(self, obj, exclude=None):
@@ -3233,6 +4066,34 @@ def check_progress(room):
             finish_game(room)
 
 
+def prepare_game(room):
+    """판 준비: 모두에게 곡을 불러오게 하고, 다 불러오면(또는 25초 뒤) 시작. 문제가 있으면 안내 글을 돌려줌"""
+    hl_range = None
+    if room.hl:
+        song = load_song(room.song_id)
+        hl_range = song_hl(song) if song else None
+        if not hl_range:
+            return "이 곡은 하이라이트 구간을 찾지 못했어요. 하이라이트 모드를 끄고 시작해 주세요."
+    room.phase = "preparing"
+    room.cur_hl = bool(hl_range)
+    room.hl_range = hl_range
+    room.game_no += 1
+    for p in room.players.values():
+        p.state = "loading"
+        p.result = None
+        p.live = {"score": 0, "combo": 0, "acc": 100.0}
+    roster = room.roster()
+    for p in room.players.values():   # 난이도/키는 사람마다 달라서 각자에게 보냄
+        p.send({"type": "prepare", "songId": room.song_id, "diff": p.diff, "keys": p.keys,
+                "game": room.game_no, "players": roster, "hl": hl_range, "ai": room.ai,
+                **({"duel": room.duel_info} if getattr(room, "duel_info", None) and room.game_no == room.duel.get("game") else {})})
+    room.push()
+    loop = asyncio.get_running_loop()
+    g = room.game_no
+    room.timer = loop.call_later(25, lambda: room.game_no == g and start_game(room))
+    return None
+
+
 def start_game(room):
     if room.phase != "preparing":
         return
@@ -3265,7 +4126,7 @@ def finish_game(room):
         r = c.result or {"score": c.live.get("score", 0),
                          "acc": 0 if c.state == "error" else c.live.get("acc", 0),
                          "maxCombo": 0, "incomplete": True}
-        results.append(dict(r, id=c.id, name=c.name, avatar=c.avatar, title=c.title, diff=c.diff, keys=c.keys, level=c.level))
+        results.append(dict(r, id=c.id, name=c.name, avatar=c.avatar, title=c.title, diff=c.diff, keys=c.keys, level=c.level, **c.pub()))
         c.state = "idle"
         c.result = None
         c.ready = False                # 다음 판은 다시 준비 (결과는 플레이한 난이도로 표시)
@@ -3273,8 +4134,14 @@ def finish_game(room):
             c.diff, c.keys = c.pending
             c.pending = None
     results.sort(key=lambda r: -r.get("score", 0))
+    duel_res = None
+    if getattr(room, "duel", None) and room.duel.get("game") == room.game_no:
+        try:
+            duel_res = duel_finish(room, results)
+        except Exception as e:
+            log("대결 결과 처리 실패:", e)
     room.broadcast({"type": "results", "results": results, "songTitle": room.song_title, "diff": room.diff, "keys": room.keys,
-                    "hl": room.cur_hl})
+                    "hl": room.cur_hl, **({"duel": duel_res} if duel_res else {})})
     if room.watchers:
         names = ", ".join(w.name for w in room.watchers.values())
         room.promote_watchers()
@@ -3329,7 +4196,9 @@ def online_list():
             st = {"kind": c.act["what"], "song": c.act.get("song", "")}
         else:
             st = {"kind": "lobby"}
-        out.append({"id": c.id, "name": c.name, "avatar": c.avatar, "title": c.title, "level": c.level, "status": st})
+        if r and getattr(r, "private", False) and "room" in st:
+            st = dict(st, room=None, private=True)       # 1:1 대결 방은 '같이 하기'로 못 들어감
+        out.append({"id": c.id, "name": c.name, "avatar": c.avatar, "title": c.title, "level": c.level, "status": st, **c.pub()})
     out.sort(key=lambda x: x["name"].lower())
     return {"n": len(out), "people": out}
 
@@ -3339,6 +4208,193 @@ def _restore_song(room, sid):
     song = load_song(sid) if VID_RE.match(sid) else None
     if song:
         room.song_id, room.song_title = sid, song.get("title", sid)
+
+
+DUELS = {}          # 실시간 대결 신청 (번호 → 신청한 사람·상대 화면들·곡·고스트)
+DUEL_WAIT = 20
+
+
+def client_busy(c):
+    """혼자 하는 중·채보 수정 중·방에서 게임 중이면 바쁨 (대결 신청을 띄우지 않음)"""
+    if c.room and c.room.phase != "lobby":
+        return True
+    return bool(c.act and c.act.get("what") in ("solo", "edit", "calib"))
+
+
+def _duel_ctx(c, m):
+    """신청한 사람 기준: 상대 계정, 곡·난이도, 고스트로 쓸 상대 기록"""
+    if not c.acct:
+        return None, "로그인이 필요해요."
+    kind = m.get("kind")
+    with FILE_LOCK:
+        if kind == "chal":
+            ch = _chal_all().get(str(m.get("id", "")))
+            if not ch or ch["to"] != c.acct or ch["status"] != "open":
+                return None, "이미 끝났거나 없는 도전장이에요."
+            if not load_song(ch["sid"]):
+                return None, "곡이 지워졌어요."
+            return {"kind": "chal", "id": ch["id"], "opp": ch["from"], "oppNick": ch["fromNick"], "sid": ch["sid"], "title": ch["title"],
+                    "diff": ch["diff"], "keys": ch["keys"], "ai": ch["ai"], "hl": False,
+                    "ghost": {"name": ch["fromNick"], "score": ch["score"], "g": ch.get("g")}}, None
+        if kind == "revenge":
+            p = _prog_all().get(c.acct) or {}
+            n = next((x for x in p.get("notices", []) if x.get("id") == m.get("id") and x.get("type") == "beaten"), None)
+            if not n:
+                return None, "알림을 찾을 수 없어요."
+            if not load_song(n["sid"]):
+                return None, "곡이 지워졌어요."
+            e = _board_entry(n["sid"], n.get("by"), n["diff"], n["keys"], bool(n.get("ai")), bool(n.get("hl")))
+            return {"kind": "revenge", "id": n["id"], "opp": n.get("byAcct") or acct_by_nick(n.get("by")), "oppNick": n.get("by"),
+                    "sid": n["sid"], "title": n.get("title"), "diff": n["diff"], "keys": n["keys"], "ai": bool(n.get("ai")), "hl": bool(n.get("hl")),
+                    "ghost": {"name": n.get("by"), "score": e["score"] if e else n.get("theirs", 0), "g": (e or {}).get("g")}}, None
+    return None, "잘못된 요청이에요."
+
+
+def _duel_drop(did, except_c=None):
+    d = DUELS.pop(did, None)
+    if not d:
+        return None
+    if d.get("timer"):
+        d["timer"].cancel()
+    for x in d["opps"]:
+        if x is not except_c:
+            x.send({"type": "duelGone", "did": did})
+    return d
+
+
+def _duel_timeout(did):
+    d = _duel_drop(did)
+    if d:
+        d["req"].send(dict(d["ghost"], reason="timeout"))
+
+
+def duel_forget(c):
+    """연결이 끊기면 그 사람의 대결 신청·받은 신청 정리"""
+    for did, d in list(DUELS.items()):
+        if d["req"] is c:
+            _duel_drop(did)
+        elif c in d["opps"]:
+            d["opps"] = [x for x in d["opps"] if x is not c]
+            if not d["opps"]:
+                _duel_drop(did)
+                d["req"].send(dict(d["ghost"], reason="offline"))
+
+
+def duel_msg(c, m):
+    t = m.get("type")
+    if t == "duelReq":
+        ctx, err = _duel_ctx(c, m)
+        if err:
+            c.send({"type": "error", "msg": err})
+            return
+        ghost = {"type": "duelGhost", **{k: ctx[k] for k in ("kind", "id", "sid", "title", "diff", "keys", "ai", "hl", "ghost", "oppNick")}}
+        cands = [x for x in CLIENTS.values() if ctx.get("opp") and x.acct == ctx["opp"] and not x.closed and x.named and x is not c]
+        free = [x for x in cands if not client_busy(x)]
+        if ctx.get("hl") or not free:          # 없거나 바쁘면 바로 고스트 대결
+            c.send(dict(ghost, reason="busy" if cands else "offline"))
+            return
+        for k, d0 in list(DUELS.items()):      # 전에 기다리던 내 신청은 취소
+            if d0["req"] is c:
+                _duel_drop(k)
+        did = secrets.token_hex(4)
+        d = {"id": did, "req": c, "opps": free, "ctx": ctx, "ghost": ghost}
+        DUELS[did] = d
+        for x in free:
+            x.send({"type": "duelInvite", "did": did, "from": c.name, "kind": ctx["kind"], "title": ctx["title"], "diff": ctx["diff"],
+                    "keys": ctx["keys"], "ai": ctx["ai"], "secs": DUEL_WAIT})
+        c.send({"type": "duelWait", "did": did, "opp": ctx["oppNick"], "title": ctx["title"], "secs": DUEL_WAIT})
+        d["timer"] = asyncio.get_running_loop().call_later(DUEL_WAIT + 1, lambda: _duel_timeout(did))
+        return
+    did = str(m.get("did", ""))
+    d = DUELS.get(did)
+    if not d:
+        if t == "duelAns":
+            c.send({"type": "duelGone", "did": did, "late": True})
+        return
+    if t == "duelCancel" and d["req"] is c:          # 기다리다 '고스트로 할게요'
+        _duel_drop(did)
+        c.send(dict(d["ghost"], reason="cancel"))
+        return
+    if t == "duelAns" and c in d["opps"]:
+        _duel_drop(did, except_c=c)
+        req = d["req"]
+        if not m.get("yes"):
+            req.send(dict(d["ghost"], reason="declined"))
+            return
+        if req.closed or client_busy(req):
+            c.send({"type": "error", "msg": "상대가 다른 걸 시작해서 대결이 취소됐어요."})
+            if not req.closed:
+                req.send(dict(d["ghost"], reason="busy"))
+            return
+        duel_start(req, c, d["ctx"])
+
+
+def duel_start(req, opp, ctx):
+    leave_room(req)
+    leave_room(opp)
+    r = Room(new_code(), req)
+    r.private = True
+    r.duel = {"kind": ctx["kind"], "id": ctx["id"], "req": req.id, "opp": opp.id, "reqAcct": req.acct, "oppAcct": opp.acct,
+              "reqNick": req.name, "oppNick": opp.name, "game": 1}
+    r.duel_info = {"kind": ctx["kind"], "title": ctx["title"]}
+    ROOMS[r.code] = r
+    song = load_song(ctx["sid"]) or {}
+    r.song_id, r.song_title = ctx["sid"], song.get("title", ctx["sid"])
+    r.diff, r.keys, r.ai, r.hl = ctx["diff"], ctx["keys"], bool(ctx["ai"]), False
+    for x in (req, opp):
+        r.players[x.id] = x
+        x.room, x.ready, x.pending, x.state = r, False, None, "idle"
+        x.diff, x.keys = ctx["diff"], ctx["keys"]
+    log(f"1:1 대결 {r.code}: {req.name} vs {opp.name} ({r.song_title})")
+    r.broadcast({"type": "chat", "system": True, "text": f"⚔️ {req.name} vs {opp.name} 실시간 대결! 곧 시작해요."})
+    r.push()
+    for x, o in ((req, opp), (opp, req)):
+        x.send({"type": "duelStart", "vs": o.name, "title": r.song_title, "kind": ctx["kind"]})
+    asyncio.get_running_loop().call_later(2.0, lambda: r.code in ROOMS and r.phase == "lobby" and len(r.players) == 2 and prepare_game(r))
+
+
+def duel_finish(room, results):
+    d = room.duel
+    room.duel = None
+    room.duel_info = None
+    by = {r["id"]: r for r in results}
+    rq, op = by.get(d["req"]), by.get(d["opp"])
+    if not rq or not op:
+        return None
+    a, b = int(rq.get("score", 0) or 0), int(op.get("score", 0) or 0)
+    tie = a == b
+    req_win = a > b
+    coins = {}
+    with FILE_LOCK:
+        P = _prog_all()
+        pq, po = P.get(d["reqAcct"]) if d["reqAcct"] else None, P.get(d["oppAcct"]) if d["oppAcct"] else None
+        for pp, cid, win in ((pq, d["req"], req_win), (po, d["opp"], not req_win)):
+            if not pp:
+                continue
+            if tie:
+                pp["coins"] = pp.get("coins", 0) + DUEL_LOSE
+                pp["earned"] = pp.get("earned", 0) + DUEL_LOSE
+                coins[str(cid)] = DUEL_LOSE
+            else:
+                coins[str(cid)] = _duel_reward(pp, win)
+        if d["kind"] == "chal":
+            C = _chal_all()
+            ch = C.get(d["id"])
+            if ch and ch["status"] == "open":
+                ch["status"] = "draw" if tie else ("won" if req_win else "lost")
+                ch["res"] = {"mode": "live", "score": a, "opp": b, "at": time.time()}
+                write_json_atomic(CHAL_FILE, C)
+                for n in (pq or {}).get("notices", []):
+                    if n.get("chal") == d["id"]:
+                        n["done"] = ch["status"]
+        elif pq:
+            for n in pq.get("notices", []):
+                if n.get("id") == d["id"] and not tie and req_win:
+                    n["done"] = "won"
+        _prog_save()
+    win_id = None if tie else (d["req"] if req_win else d["opp"])
+    return {"kind": d["kind"], "tie": tie, "winner": win_id, "coins": coins,
+            "names": {str(d["req"]): d["reqNick"], str(d["opp"]): d["oppNick"]}}
 
 
 def handle_msg(c, m):
@@ -3373,9 +4429,28 @@ def handle_msg(c, m):
                                      "top": [str(x) for x in top[:3] if isinstance(x, str) and ACH_ID_RE.match(x)], "title": c.title})
             except Exception as e:      # 저장 실패해도 접속은 그대로
                 log("프로필 요약 저장 실패:", e)
+        tok = m.get("tok")
+        if isinstance(tok, str) and tok and tok != c.tok:
+            c.tok = tok
+            c.acct, _ = acct_of({"x-profile-token": tok})
+            c.medal = medal_of(c.acct) if c.acct else 0
+        if c.acct:
+            deco = deco_check(c.acct, m.get("deco"))
+            with FILE_LOCK:
+                p = _prog_all().get(c.acct)
+                if p is not None and (p.get("deco") != deco or (c.name and p.get("nick") != c.name)):
+                    p["deco"] = deco
+                    if c.name:
+                        p["nick"] = c.name
+                    p["lastSeen"] = time.time()
+                    _prog_save()
+            c.deco = deco
         set_my_diff(c, m)
         if room:
             room.push()
+        return
+    if t in ("duelReq", "duelAns", "duelCancel"):
+        duel_msg(c, m)
         return
     if t == "activity":
         what = str(m.get("what", ""))
@@ -3532,29 +4607,9 @@ def handle_msg(c, m):
         if waiting and not m.get("force"):
             c.send({"type": "error", "msg": f"아직 준비하지 않았어요: {', '.join(waiting)}"})
             return
-        hl_range = None
-        if room.hl:
-            song = load_song(room.song_id)
-            hl_range = song_hl(song) if song else None
-            if not hl_range:
-                c.send({"type": "error", "msg": "이 곡은 하이라이트 구간을 찾지 못했어요. 하이라이트 모드를 끄고 시작해 주세요."})
-                return
-        room.phase = "preparing"
-        room.cur_hl = bool(hl_range)
-        room.hl_range = hl_range
-        room.game_no += 1
-        for p in room.players.values():
-            p.state = "loading"
-            p.result = None
-            p.live = {"score": 0, "combo": 0, "acc": 100.0}
-        roster = room.roster()
-        for p in room.players.values():   # 난이도/키는 사람마다 달라서 각자에게 보냄
-            p.send({"type": "prepare", "songId": room.song_id, "diff": p.diff, "keys": p.keys,
-                    "game": room.game_no, "players": roster, "hl": hl_range, "ai": room.ai})
-        room.push()
-        loop = asyncio.get_running_loop()
-        g = room.game_no
-        room.timer = loop.call_later(25, lambda: room.game_no == g and start_game(room))
+        err = prepare_game(room)
+        if err:
+            c.send({"type": "error", "msg": err})
         return
     if t in ("loaded", "progress", "finish", "ready") and c.id not in room.players:
         return                       # 구경하는 사람은 게임 메시지를 보내지 않음

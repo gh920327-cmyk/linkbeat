@@ -162,6 +162,7 @@ function gateEnter() {
   window.gateOpen = false;
   setTimeout(() => { gateEl.classList.add('hidden'); gateEl.classList.remove('out'); cancelAnimationFrame(gateRaf); }, 450);
   if (typeof refreshSongs === 'function') refreshSongs();
+  if (typeof growStart === 'function') growStart();
 }
 
 /* 로그아웃하면 다시 로그인 화면으로 */

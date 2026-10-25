@@ -217,7 +217,39 @@ async function drawResultCard(g, r, withThumb = true) {
   ctx.fillStyle = 'rgba(233,238,252,.45)'; ctx.font = '600 24px "Noto Sans KR", sans-serif'; ctx.textAlign = 'right';
   ctx.fillText('LINKBEAT · 유튜브 링크 리듬게임', CARD_W - 60, ny + 2);
   ctx.textAlign = 'left';
+  cardFrame(ctx, (settings.deco || {}).frame);
   return cv;
+}
+/* 결과 카드 테두리 (상점): 은 · 금 · 네온 · 무지개 · 전설 */
+function cardFrame(ctx, id) {
+  if (!id || (typeof itemOwned === 'function' && !itemOwned(id))) return;
+  const W = CARD_W, H = CARD_H, m = 14;
+  ctx.save();
+  let st;
+  if (id === 'frame_silver' || id === 'frame_gold') {
+    st = ctx.createLinearGradient(0, 0, W, H);
+    const c = id === 'frame_gold' ? ['#7a5208', '#ffe27a', '#c8901a', '#fff3b8', '#7a5208'] : ['#6b7384', '#f4f7ff', '#9aa3b6', '#ffffff', '#6b7384'];
+    c.forEach((x, i) => st.addColorStop(i / (c.length - 1), x));
+  } else if (id === 'frame_neon') {
+    st = '#4de1ff';
+    ctx.shadowColor = '#4de1ff'; ctx.shadowBlur = 30;
+  } else {
+    st = ctx.createLinearGradient(0, 0, W, H);
+    ['#ff4fd8', '#ffcf4d', '#4dffc3', '#4da6ff', '#b06bff', '#ff4fd8'].forEach((x, i) => st.addColorStop(i / 5, x));
+    if (id === 'frame_legend') { ctx.shadowColor = '#ffcf4d'; ctx.shadowBlur = 24; }
+  }
+  ctx.strokeStyle = st;
+  ctx.lineWidth = id === 'frame_legend' ? 16 : 12;
+  cardRound(ctx, m, m, W - m * 2, H - m * 2, 26);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  if (id === 'frame_legend' || id === 'frame_gold') {      // 네 귀퉁이 장식
+    ctx.fillStyle = id === 'frame_legend' ? '#fff6c8' : '#ffe27a';
+    for (const [x, y] of [[m + 8, m + 8], [W - m - 8, m + 8], [m + 8, H - m - 8], [W - m - 8, H - m - 8]]) {
+      ctx.beginPath(); ctx.moveTo(x, y - 22); ctx.lineTo(x + 9, y); ctx.lineTo(x, y + 22); ctx.lineTo(x - 9, y); ctx.closePath(); ctx.fill();
+    }
+  }
+  ctx.restore();
 }
 
 let cardBlob = null;

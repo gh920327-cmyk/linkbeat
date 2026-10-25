@@ -56,7 +56,15 @@ const THEMES = {
   mono:    { name: '모노',   a: '#ffffff', b: '#8a93ad', c: '#d6dcef' },
   custom:  { name: '커스텀' },
 };
-const LINE_COLORS = { red: '#ff3b55', cyan: '#4de1ff', gold: '#ffc83d', white: '#ffffff', pink: '#ff5fa2' };
+const LINE_COLORS = { red: '#ff3b55', cyan: '#4de1ff', gold: '#ffc83d', white: '#ffffff', pink: '#ff5fa2', purple: '#b06bff', green: '#3ddc84', rainbow: '#ff5fa2' };
+/* 상점에서 사야 쓸 수 있는 꾸미기 값 → 아이템 (없는 값은 처음부터 무료) */
+const SKIN_ITEMS = {
+  note: { neon: 'note_neon', star: 'note_star', heart: 'note_heart', gem: 'note_gem' },
+  effect: { petal: 'fx_petal', bolt: 'fx_bolt', stardust: 'fx_star', fire: 'fx_fire', snow: 'fx_snow' },
+  line: { purple: 'line_purple', green: 'line_green', rainbow: 'line_rainbow' },
+  gear: { clear: 'gear_clear', wood: 'gear_wood', neon: 'gear_neon', chrome: 'gear_chrome', gold: 'gear_gold' },
+  comboStyle: { gold: 'combo_gold', neon: 'combo_neon', rainbow: 'combo_rainbow' },
+};
 const DEFAULT_SKIN = {
   theme: 'classic', colors: { a: '#eef3ff', b: '#3f8cff', c: '#ffc83d' },
   note: 'bar', noteH: 16, laneScale: 1, gearPos: 'center', line: 'red', judgeY: 110,
@@ -72,6 +80,8 @@ const DEFAULT_SKIN = {
   perfectGlint: true,          // PERFECT일 때만 작은 별빛 반짝임을 하나 더
   lineStyle: 'auto',           // 판정선 모양: auto(원형 노트면 원형 받침) | bar | ring | thin
   bgFx: 'soft',                // 배경 연출: off | soft | strong
+  gear: 'metal',               // 기어 테두리 (상점): metal | clear | wood | neon | chrome | gold
+  comboStyle: 'normal',        // 콤보 숫자 (상점): normal | gold | neon | rainbow
 };
 const savedSndV = settings.skin && typeof settings.skin === 'object' ? settings.skin.sndV : 2;   // 저장된 꾸미기가 없으면 새 기본값 그대로
 settings.skin = Object.assign({ ...DEFAULT_SKIN, hitSound: settings.hit ? 'click' : 'off' }, settings.skin || {});
@@ -191,6 +201,7 @@ let hostKey = store.get('hostKey', '');
 async function api(path, { method = 'GET', body } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (hostKey) headers['X-Host-Key'] = hostKey;
+  if (typeof profile !== 'undefined' && profile.tok) headers['X-Profile-Token'] = profile.tok;   // 성장 기록(경험치·♪·미션)은 계정에
   const r = await fetch('/api' + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   let j = {};
   try { j = await r.json(); } catch { /* 무시 */ }
@@ -703,7 +714,18 @@ function helloMsg() {
   const m = { type: 'hello', name: settings.nick || '', avatar: settings.avatar, title: typeof achTitle === 'function' ? achTitle() : '',
     diff: settings.diff, keys: settings.mode, level: typeof myLevel === 'function' ? myLevel() : 0 };
   if (typeof achSummary === 'function') { try { Object.assign(m, achSummary()); } catch { /* 무시 */ } }
+  if (typeof profile !== 'undefined' && profile.tok) m.tok = profile.tok;       // 서버가 계정을 알아야 대결·알림·꾸미기를 이어 줌
+  if (settings.deco) m.deco = settings.deco;
   return m;
+}
+/* 남에게 보이는 이름 꾸미기: 지난주 리그 메달 · 이름 아이콘 · 이름 색 (서버가 가진 것만 보내 줌) */
+const ICON_EMOJI = { icon_note: '🎵', icon_headphone: '🎧', icon_bolt: '⚡', icon_gem: '💎', icon_star: '⭐', icon_fire: '🔥', icon_pumpkin: '🎃', icon_cat: '🐱' };
+const MEDALS = ['', '🥇', '🥈', '🥉'];
+function nameDeco(p, name = p && p.name) {
+  const d = (p && p.deco) || {};
+  const md = p && p.medal ? `<span class="nm-medal" title="지난주 리그 ${p.medal}위">${MEDALS[p.medal] || ''}</span>` : '';
+  const ic = d.icon && ICON_EMOJI[d.icon] ? `<span class="nm-ico">${ICON_EMOJI[d.icon]}</span>` : '';
+  return `${md}${ic}<span class="nm${d.nc ? ' ' + esc(d.nc) : ''}">${esc(name || '')}</span>`;
 }
 const RANKS = ['D', 'C', 'B', 'A', 'S', 'SS', 'SSS', 'MAX'];
 function rankOf(acc) {

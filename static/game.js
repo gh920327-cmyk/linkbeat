@@ -79,16 +79,83 @@ function drawLanes(L, judgeY, pressed, dim) {
     ctx.fillStyle = 'rgba(160,190,255,0.08)';
     ctx.fillRect(x, 0, 1, h);
   }
-  // 금속 레일
-  for (const rx of [x0 - 9, x0 + fieldW + 1]) {
-    const g = ctx.createLinearGradient(rx, 0, rx + 8, 0);
-    g.addColorStop(0, '#2a3148'); g.addColorStop(0.45, '#9aa6c4'); g.addColorStop(0.55, '#d6dcef'); g.addColorStop(1, '#2a3148');
-    ctx.fillStyle = g;
-    ctx.fillRect(rx, 0, 8, h);
-  }
+  drawRails(ctx, x0, fieldW, h);
   ctx.fillStyle = 'rgba(80,140,255,0.5)';
   ctx.fillRect(x0 - 1, 0, 1, h);
   ctx.fillRect(x0 + fieldW, 0, 1, h);
+}
+
+/* 기어 테두리 (꾸미기·상점): 금속(기본) · 투명 · 나무 · 네온 · 크롬 · 황금 */
+const RAIL_STOPS = { metal: ['#2a3148', '#9aa6c4', '#d6dcef', '#2a3148'], wood: ['#3b2412', '#8a5a2e', '#c08a52', '#3b2412'],
+  chrome: ['#4b5160', '#e8edf8', '#ffffff', '#4b5160'], gold: ['#5a3d06', '#d9a520', '#fff1a8', '#5a3d06'] };
+function drawRails(ctx, x0, fieldW, h) {
+  const st = settings.skin.gear || 'metal';
+  if (st === 'clear') {
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
+    ctx.fillRect(x0 - 2, 0, 1, h); ctx.fillRect(x0 + fieldW + 1, 0, 1, h);
+    return;
+  }
+  const now = performance.now();
+  for (const rx of [x0 - 9, x0 + fieldW + 1]) {
+    if (st === 'neon') {
+      ctx.fillStyle = 'rgba(77,225,255,0.12)';
+      ctx.fillRect(rx, 0, 8, h);
+      ctx.save();
+      ctx.shadowColor = '#4de1ff'; ctx.shadowBlur = 14;
+      ctx.fillStyle = `rgba(150,240,255,${(0.75 + 0.25 * Math.sin(now / 260)).toFixed(3)})`;
+      ctx.fillRect(rx + 3, 0, 2, h);
+      ctx.restore();
+      continue;
+    }
+    const c = RAIL_STOPS[st] || RAIL_STOPS.metal;
+    const g = ctx.createLinearGradient(rx, 0, rx + 8, 0);
+    g.addColorStop(0, c[0]); g.addColorStop(0.45, c[1]); g.addColorStop(0.55, c[2]); g.addColorStop(1, c[3]);
+    ctx.fillStyle = g;
+    ctx.fillRect(rx, 0, 8, h);
+    if (st === 'wood') {          // 나뭇결
+      ctx.fillStyle = 'rgba(40,20,5,0.35)';
+      for (let y = (rx * 7) % 19; y < h; y += 19) ctx.fillRect(rx + 1 + ((y * 3) % 3), y, 5, 1);
+    } else if (st === 'gold' || st === 'chrome') {    // 위에서 아래로 흐르는 광택
+      const sy = ((now / 5 + (rx > x0 ? 140 : 0)) % (h + 240)) - 120;
+      const sg = ctx.createLinearGradient(0, sy - 70, 0, sy + 70);
+      sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(0.5, 'rgba(255,255,255,0.6)'); sg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = sg;
+      ctx.fillRect(rx, sy - 70, 8, 140);
+    }
+  }
+}
+/* 흐르는 무지개 (판정선·콤보 꾸미기) */
+function hslHex(h, s, l) {
+  s /= 100; l /= 100;
+  const k = (n) => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  const f = (n) => Math.round(255 * (l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1))))).toString(16).padStart(2, '0');
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+function rainbowAt(now, off = 0) { return hslHex(((now / 9 + off) % 360 + 360) % 360, 95, 62); }
+function rainbowGrad(ctx, x, w, now) {
+  const g = ctx.createLinearGradient(x, 0, x + w, 0);
+  for (let i = 0; i <= 6; i++) g.addColorStop(i / 6, rainbowAt(now, -i * 50));
+  return g;
+}
+/* 노트 모양 꾸미기: 별 · 하트 · 보석 */
+function starPath(ctx, cx, cy, ro, ri, n = 5) {
+  for (let i = 0; i < n * 2; i++) {
+    const r = i % 2 ? ri : ro, a = -Math.PI / 2 + (i * Math.PI) / n;
+    const px = cx + Math.cos(a) * r, py = cy + Math.sin(a) * r;
+    if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+  }
+  ctx.closePath();
+}
+function heartPath(ctx, cx, cy, r) {
+  const top = cy - r * 0.45;
+  ctx.moveTo(cx, cy + r * 0.9);
+  ctx.bezierCurveTo(cx - r * 1.35, cy + r * 0.05, cx - r * 0.95, top - r * 0.75, cx, top);
+  ctx.bezierCurveTo(cx + r * 0.95, top - r * 0.75, cx + r * 1.35, cy + r * 0.05, cx, cy + r * 0.9);
+  ctx.closePath();
+}
+function gemPath(ctx, cx, cy, r) {
+  ctx.moveTo(cx - r * 0.62, cy - r * 0.6); ctx.lineTo(cx + r * 0.62, cy - r * 0.6); ctx.lineTo(cx + r * 1.05, cy - r * 0.12);
+  ctx.lineTo(cx, cy + r * 0.88); ctx.lineTo(cx - r * 1.05, cy - r * 0.12); ctx.closePath();
 }
 
 function drawNote(L, lane, yHead, yTail, state, accent = false) {
@@ -160,6 +227,49 @@ function drawNote(L, lane, yHead, yTail, state, accent = false) {
     ctx.fillStyle = state === 'dead' ? '#4a5066' : '#ffffff';
     ctx.fill();
     return;
+  } else if (sk.note === 'star' || sk.note === 'heart' || sk.note === 'gem') {
+    const dead = state === 'dead';
+    const r = Math.min(nw * 0.42, nh * 0.9 + 7);
+    const cx = x + nw / 2;
+    ctx.beginPath();
+    if (sk.note === 'star') starPath(ctx, cx, yHead, r * 1.12, r * 0.5);
+    else if (sk.note === 'heart') heartPath(ctx, cx, yHead, r);
+    else gemPath(ctx, cx, yHead, r);
+    const sg = ctx.createLinearGradient(0, yHead - r, 0, yHead + r);
+    sg.addColorStop(0, dead ? '#6a7088' : '#ffffff'); sg.addColorStop(0.45, col); sg.addColorStop(1, dead ? '#30354a' : shade(col));
+    ctx.fillStyle = sg;
+    ctx.shadowColor = col;
+    ctx.shadowBlur = dead ? 0 : 9;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    if (!dead) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1.5; ctx.stroke();
+      if (sk.note === 'gem') {        // 보석 면
+        ctx.beginPath();
+        ctx.moveTo(cx - r * 1.05, yHead - r * 0.12); ctx.lineTo(cx + r * 1.05, yHead - r * 0.12);
+        ctx.moveTo(cx - r * 0.3, yHead - r * 0.6); ctx.lineTo(cx - r * 0.45, yHead - r * 0.12); ctx.lineTo(cx, yHead + r * 0.88);
+        ctx.moveTo(cx + r * 0.3, yHead - r * 0.6); ctx.lineTo(cx + r * 0.45, yHead - r * 0.12); ctx.lineTo(cx, yHead + r * 0.88);
+        ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 1; ctx.stroke();
+        const tw = 0.5 + 0.5 * Math.sin(performance.now() / 180 + lane);      // 반짝
+        ctx.fillStyle = `rgba(255,255,255,${(0.35 + 0.5 * tw).toFixed(3)})`;
+        ctx.beginPath(); starPath(ctx, cx - r * 0.4, yHead - r * 0.32, r * 0.28, r * 0.08, 4); ctx.fill();
+      }
+    }
+    return;
+  } else if (sk.note === 'neon') {
+    // 네온 테두리 막대 (속은 은은하게)
+    const dead = state === 'dead';
+    roundRect(ctx, x + 2, yHead - nh / 2 + 1, nw - 4, nh - 2, Math.min(6, nh / 2));
+    ctx.fillStyle = col + (dead ? '18' : '30');
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = dead ? '#4a5066' : col;
+    ctx.shadowColor = col;
+    ctx.shadowBlur = dead ? 0 : 14;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    if (!dead) { ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillRect(x + 6, yHead - 1, nw - 12, 2); }
+    return;
   } else if (sk.note === 'line') {
     // 얇은 빛줄기
     ctx.fillStyle = col;
@@ -188,7 +298,7 @@ function lineStyleOf() {
   const sk = settings.skin;
   const st = sk.lineStyle || 'auto';
   if (st !== 'auto') return st;
-  return sk.note === 'circle' || sk.note === 'hollow' || sk.note === 'diamond' ? 'ring' : 'bar';
+  return ['circle', 'hollow', 'diamond', 'star', 'heart', 'gem'].includes(sk.note) ? 'ring' : 'bar';
 }
 function receptorR(L) {
   const nw = L.laneW - 4;
@@ -201,7 +311,8 @@ function drawJudgeLine(L, judgeY, pressed, fx = null, now = performance.now()) {
   pg.addColorStop(0, '#1a2038'); pg.addColorStop(1, '#0b0e1c');
   ctx.fillStyle = pg;
   const style = lineStyleOf();
-  const lc = LINE_COLORS[settings.skin.line] || C_RED;
+  const rb = settings.skin.line === 'rainbow';
+  const lc = rb ? rainbowAt(now) : (LINE_COLORS[settings.skin.line] || C_RED);
   if (style === 'ring') {
     // 원형 받침 (동그란 노트 전용): 줄마다 노트 크기의 동그란 받침, 누르면 차오르고 칠 때 링이 퍼짐
     const r = receptorR(L);
@@ -239,7 +350,7 @@ function drawJudgeLine(L, judgeY, pressed, fx = null, now = performance.now()) {
   } else {
     ctx.fillRect(x0 - 9, judgeY + 6, fieldW + 18, L.h - judgeY - 6);
     const th = style === 'thin' ? 2 : 6;
-    ctx.fillStyle = lc;
+    ctx.fillStyle = rb ? rainbowGrad(ctx, x0, fieldW, now) : lc;
     ctx.shadowColor = lc;
     ctx.shadowBlur = style === 'thin' ? 12 : 18;
     ctx.fillRect(x0, judgeY - th / 2, fieldW, th);
@@ -290,10 +401,83 @@ function fxNew(nl) {
     holdTick: new Array(nl).fill(0), line: -1e9, bump: -1e9, bumpAmp: 0, shake: -1e9, shakeAmp: 0, mile: null,
   };
 }
+const FX_NEW = { petal: 950, stardust: 800, bolt: 260, fire: 620, snow: 1150 };   // 새 이펙트와 조각이 사는 시간(ms)
+const PETAL_C = ['#ffc4dd', '#ff9cc6', '#ffe1ee', '#ff7fb5'];
+function fxNewParts(fx, lane, e, now) {
+  const R = Math.random;
+  if (e === 'bolt') {
+    const pts = [[0, 0]];
+    for (let y = -24; y > -190; y -= 22 + R() * 14) pts.push([(R() - 0.5) * 26, y]);
+    fx.parts.push({ lane, at: now, kind: e, pts, vx: 0, vy: 0, life: 260 });
+    for (let i = 0; i < 4; i++) fx.parts.push({ lane, at: now, kind: 'boltSpark', vx: (R() - 0.5) * 300, vy: -100 - R() * 220, gr: 700, s: 2 + R() * 2, life: 300 });
+    return;
+  }
+  const n = { petal: 7, stardust: 10, fire: 10, snow: 8 }[e];
+  for (let i = 0; i < n; i++) {
+    const base = { lane, at: now, kind: e, dx: (R() - 0.5) * 0.5, life: FX_NEW[e] * (0.7 + R() * 0.3) };
+    if (e === 'petal') fx.parts.push({ ...base, vx: (R() - 0.5) * 170, vy: -140 - R() * 160, gr: 230, s: 4 + R() * 4, r: R() * 6, vr: (R() - 0.5) * 9, sw: 4 + R() * 4, c: PETAL_C[i % PETAL_C.length] });
+    else if (e === 'stardust') fx.parts.push({ ...base, vx: (R() - 0.5) * 240, vy: -80 - R() * 240, gr: 160, s: 3 + R() * 4, ph: R() * 6, c: R() < 0.5 ? '#fff6c8' : '#ffd84d' });
+    else if (e === 'fire') fx.parts.push({ ...base, vx: (R() - 0.5) * 60, vy: -150 - R() * 170, gr: -60, s: 6 + R() * 6, dx: (R() - 0.5) * 0.6 });
+    else fx.parts.push({ ...base, vx: (R() - 0.5) * 140, vy: -110 - R() * 130, gr: 110, s: 2 + R() * 3, sw: 2 + R() * 3 });
+  }
+}
+function drawFxNew(L, judgeY, fx, now, e) {
+  const { ctx, laneW, x0, colors } = L;
+  for (let l = 0; l < L.nl; l++) {      // 판정선 위 짧은 번쩍임
+    const k = (now - fx.flash[l]) / 140;
+    if (k < 1) {
+      ctx.globalAlpha = (1 - k) * 0.55;
+      ctx.fillStyle = e === 'fire' ? '#ff9d3d' : e === 'petal' ? '#ffb3d1' : e === 'snow' ? '#e8f6ff' : colors[l];
+      roundRect(ctx, x0 + l * laneW + 2, judgeY - 12, laneW - 4, 24, 8);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+  fx.parts = fx.parts.filter((p) => now - p.at < (p.life || 600));
+  ctx.save();
+  if (e !== 'petal' && e !== 'snow') ctx.globalCompositeOperation = 'lighter';
+  for (const p of fx.parts) {
+    const t = (now - p.at) / 1000, k = (now - p.at) / (p.life || 600);
+    const cx = x0 + (p.lane + 0.5 + (p.dx || 0)) * laneW;
+    const x = cx + p.vx * t + (p.sw ? Math.sin(t * p.sw * 3) * 7 : 0), y = judgeY + p.vy * t + (p.gr || 0) * t * t;
+    ctx.globalAlpha = Math.max(0, 1 - k);
+    if (p.kind === 'petal') {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(p.r + t * p.vr);
+      ctx.fillStyle = p.c; ctx.beginPath(); ctx.ellipse(0, 0, p.s, p.s * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    } else if (p.kind === 'stardust') {
+      ctx.globalAlpha = Math.max(0, 1 - k) * (0.55 + 0.45 * Math.sin(t * 28 + p.ph));
+      ctx.fillStyle = p.c; ctx.beginPath(); starPath(ctx, x, y, p.s, p.s * 0.32, 4); ctx.fill();
+    } else if (p.kind === 'fire') {
+      const r = p.s * (1 - k * 0.65);
+      ctx.fillStyle = k < 0.25 ? '#fff3b0' : k < 0.55 ? '#ffb340' : '#ff5a2a';
+      ctx.beginPath(); ctx.arc(x, y, Math.max(0.5, r), 0, Math.PI * 2); ctx.fill();
+    } else if (p.kind === 'snow') {
+      ctx.fillStyle = '#ffffff'; ctx.shadowColor = '#bfe8ff'; ctx.shadowBlur = 6;
+      ctx.beginPath(); ctx.arc(x, y, p.s, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x - p.s * 2, y); ctx.lineTo(x + p.s * 2, y); ctx.moveTo(x, y - p.s * 2); ctx.lineTo(x, y + p.s * 2); ctx.stroke();
+    } else if (p.kind === 'bolt') {
+      ctx.lineJoin = 'round';
+      for (const [w, c] of [[6 * (1 - k) + 2, colors[p.lane]], [2, '#ffffff']]) {
+        ctx.strokeStyle = c; ctx.lineWidth = w; ctx.shadowColor = colors[p.lane]; ctx.shadowBlur = 16;
+        ctx.beginPath();
+        p.pts.forEach(([px, py], i) => (i ? ctx.lineTo(cx + px, judgeY + py) : ctx.moveTo(cx + px, judgeY + py)));
+        ctx.stroke();
+      }
+      ctx.shadowBlur = 0;
+    } else if (p.kind === 'boltSpark') {
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(x - p.s / 2, y - p.s / 2, p.s, p.s);
+    }
+  }
+  ctx.restore();
+}
 function fxHit(fx, lane, now = performance.now()) {
   fx.flash[lane] = now;
   const e = settings.skin.effect;
-  if (e === 'ring') fx.rings.push({ lane, at: now });
+  if (FX_NEW[e]) fxNewParts(fx, lane, e, now);
+  else if (e === 'ring') fx.rings.push({ lane, at: now });
   else if (e === 'spark') {
     for (let i = 0; i < 10; i++) {
       const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2;
@@ -338,6 +522,7 @@ function drawFx(L, judgeY, fx, now) {
   const { ctx, laneW, x0, colors } = L;
   const e = settings.skin.effect;
   if (e === 'off') return;
+  if (FX_NEW[e]) { drawFxNew(L, judgeY, fx, now, e); return; }
   if (e === 'flash' || e === 'ring' || e === 'spark') {
     for (let l = 0; l < L.nl; l++) {
       const k = (now - fx.flash[l]) / (e === 'flash' ? 180 : 120);
@@ -693,7 +878,8 @@ function drawCombo(L, combo, popAt, now, judgeY = judgeLineY(L.h)) {
   const cx = x0 + fieldW / 2, cy = comboY(L, judgeY), fs = comboSize(L);
   const p = clamp((now - popAt) / 140, 0, 1);
   const sc = 1 + 0.14 * punchK() * (1 - p) * (1 - p);
-  const cc = comboColor(combo);
+  const cs = settings.skin.comboStyle || 'normal';
+  const cc = cs === 'gold' ? ['#fff7cc', '#ffb300', 'rgba(255,157,0,0.9)'] : cs === 'neon' ? ['#ffffff', '#4de1ff', '#4de1ff'] : comboColor(combo);
   ctx.save();
   ctx.globalAlpha = 0.88;
   ctx.textAlign = 'center';
@@ -701,13 +887,14 @@ function drawCombo(L, combo, popAt, now, judgeY = judgeLineY(L.h)) {
   ctx.translate(cx, cy);
   ctx.scale(sc, sc);
   numFont(ctx, 800, fs);
-  const cg = ctx.createLinearGradient(0, -fs / 2, 0, fs / 2);
+  let cg = ctx.createLinearGradient(0, -fs / 2, 0, fs / 2);
   cg.addColorStop(0, cc[0]); cg.addColorStop(1, cc[1]);
-  ctx.lineWidth = 5; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(3,6,16,0.55)';
+  if (cs === 'rainbow') cg = rainbowGrad(ctx, -fs, fs * 2, now);
+  ctx.lineWidth = 5; ctx.lineJoin = 'round'; ctx.strokeStyle = cs === 'neon' ? 'rgba(77,225,255,0.35)' : 'rgba(3,6,16,0.55)';
   ctx.strokeText(combo, 0, 0);
   ctx.fillStyle = cg;
-  ctx.shadowColor = cc[2];
-  ctx.shadowBlur = 10;
+  ctx.shadowColor = cs === 'rainbow' ? rainbowAt(now) : cc[2];
+  ctx.shadowBlur = cs === 'neon' ? 22 : 10;
   ctx.fillText(combo, 0, 0);
   ctx.restore();
   ctx.save();

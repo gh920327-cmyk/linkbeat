@@ -49,10 +49,14 @@
         <span id="connDot" class="dot" title="서버 연결 상태"></span>
         <button id="btnOnline" class="ghost on-btn" type="button" title="지금 접속 중인 사람" aria-haspopup="true">👥 <b id="onCount">-</b></button>
         <button id="btnProfile" class="ghost pf-btn" type="button"></button>
+        <button id="btnNotice" class="ghost nt-btn hidden" type="button" title="알림 (기록 뺏김·도전장·보상)" aria-haspopup="true">🔔<b id="ntCount"></b></button>
         <span id="myLv" class="lv-pill" title="레벨">Lv 1</span>
+        <span id="myStreak" class="st-pill hidden"></span>
+        <button id="btnCoins" class="coin-pill hidden" type="button" title="내 ♪ · 누르면 상점"></button>
         <span id="myTitle" class="ptitle my-title hidden" title="내 칭호"></span>
       </div>
       <nav class="tools">
+        <button id="btnShop" class="tool hidden" type="button" title="상점 (♪로 꾸미기 사기)"><i>🛒</i><span>상점</span></button>
         <button id="btnAch" class="tool ach-btn" type="button" title="업적 · 칭호"><i>🏆</i><span>업적</span></button>
         <button id="btnAvatar" class="tool av-btn" type="button" title="내 캐릭터"><canvas id="topAvatar" width="28" height="28"></canvas><span>내 캐릭터</span></button>
         <button id="btnTheme" class="tool" type="button" title="화면 테마 고르기" aria-haspopup="true" aria-expanded="false"><i>🎨</i><span>테마</span></button>
@@ -165,6 +169,12 @@
         <span id="dbTop" class="db-top"></span>
         <span id="dbLeft" class="db-left"></span>
         <span class="db-btns"><button type="button" id="dbGo" class="primary small-btn">도전하기</button><button type="button" id="dbRank" class="small-btn">순위</button></span>
+      </div>
+      <div id="growBar" class="grow-bar hidden">
+        <span id="gbMisHead" class="gb-head">📋 오늘의 미션</span>
+        <div id="gbMis" class="gb-list"></div>
+        <span id="gbRet" class="gb-ret hidden"></span>
+        <button type="button" id="gbLeague" class="gb-league" title="이번 주 리그 순위 보기"></button>
       </div>
       <div class="list-head">
         <h2>곡 목록 <span id="songCount"></span></h2>
@@ -320,16 +330,19 @@
       </div>
       <div id="rBest" class="r-best center"></div>
       <div id="rXp" class="r-xp hidden"><span class="rx-gain"></span><span class="rx-lv"></span><span class="rx-bar"><i></i></span><span class="rx-next"></span><span class="rx-up"></span></div>
+      <div id="rReward" class="r-reward hidden"></div>
       <div id="rGhost" class="r-ghost center hidden"></div>
       <div class="r-buttons">
         <button id="btnRetry" class="primary">다시 하기</button>
         <button id="btnResRank">순위표</button>
         <button id="btnCard" type="button" title="결과를 그림 한 장으로 저장·공유">📸 결과 카드</button>
+        <button id="btnChal" type="button" class="hidden" title="이 곡·난이도로 친구에게 도전장 보내기">⚔️ 도전장</button>
         <button id="btnToLobby">로비로</button>
       </div>
     </div>
     <div id="rMulti" class="panel r-multi hidden">
       <h3>이번 판 순위</h3>
+      <div id="rDuel" class="r-duel hidden"></div>
       <ol id="rMultiList" class="r-multi-list"></ol>
     </div>
   </div>
@@ -630,6 +643,25 @@
 </dialog>
 
 <!-- 꾸미기 -->
+<dialog id="shopDlg" class="shop-dlg">
+  <div class="shop-head"><h3>🛒 상점</h3><span class="shop-coins" title="곡을 끝까지 칠 때마다, 미션·출석·리그·대결로 모여요">♪ <b id="shopCoins">0</b></span>
+    <button type="button" id="shopClose" class="ghost tm-x" aria-label="닫기">✕</button></div>
+  <div class="shop-top">
+    <div class="shop-prev">
+      <div class="shop-cv"><canvas id="shopCanvas"></canvas></div>
+      <div id="shopPrevDeco" class="shop-prev-deco hidden"></div>
+      <div id="shopInfo" class="shop-info"></div>
+      <div id="shopAct" class="shop-act"></div>
+    </div>
+    <div class="shop-side">
+      <section><h4>🔥 오늘의 할인 <small id="shopSaleLeft" class="muted"></small></h4><div id="shopSale" class="shop-row"></div></section>
+      <section><h4>⏳ 이번 주 한정 <small id="shopLimLeft" class="muted"></small></h4><div id="shopLim" class="shop-row"></div></section>
+      <div class="seg shop-tabs" id="shopTabs"></div>
+      <div id="shopGrid" class="shop-grid"></div>
+    </div>
+  </div>
+  <p class="muted small shop-tip">♪는 곡을 끝까지 칠 때마다 쌓이고, 미션·출석·주간 리그·대결로 더 받아요. 게임 안에서만 쓰는 값이라 실제 돈과는 상관없어요. 🔒 표시는 레벨·출석·리그로만 얻는 자랑용이에요.</p>
+</dialog>
 <dialog id="skinDlg">
   <div class="skin-box">
     <div class="skin-head">
@@ -655,6 +687,7 @@
           <h4>노트</h4>
           <div class="opt-row" id="noteShape">
             <button data-v="bar">막대</button><button data-v="round">둥근 캡슐</button><button data-v="circle">원형</button><button data-v="hollow">속 빈 원</button><button data-v="diamond">마름모</button><button data-v="line">얇은 선</button>
+            <button data-v="neon">네온 테두리</button><button data-v="star">별</button><button data-v="heart">하트</button><button data-v="gem">보석</button>
           </div>
           <div class="set-row"><span>두께 <b id="noteHVal"></b></span><input id="noteH" type="range" min="8" max="26" step="1"></div>
         </section>
@@ -667,12 +700,15 @@
           <div class="set-row"><span>판정선 모양 <small class="muted">자동: 동그란 노트면 원형 받침</small></span>
             <div class="opt-row" id="lineStyleOpt"><button data-v="auto">자동</button><button data-v="bar">막대</button><button data-v="ring">원형 받침</button><button data-v="thin">얇은 선</button></div></div>
           <div class="set-row"><span>판정선 색</span><div class="swatches line-sw" id="lineSw"></div></div>
+          <div class="set-row"><span>기어 테두리</span>
+            <div class="opt-row" id="gearOpt"><button data-v="metal">금속</button><button data-v="clear">투명</button><button data-v="wood">나무</button><button data-v="neon">네온</button><button data-v="chrome">크롬</button><button data-v="gold">황금</button></div></div>
           <div class="set-row"><span>판정선 높이 <b id="judgeYVal"></b></span><input id="judgeYIn" type="range" min="70" max="240" step="5"></div>
         </section>
         <section>
           <h4>효과 · 소리</h4>
           <div class="opt-row" id="effectOpt">
-            <button data-v="flash">플래시</button><button data-v="ring">링</button><button data-v="spark">불꽃</button><button data-v="off">끄기</button>
+            <button data-v="flash">플래시</button><button data-v="ring">링</button><button data-v="spark">불꽃</button>
+            <button data-v="petal">벚꽃잎</button><button data-v="stardust">별가루</button><button data-v="bolt">번개</button><button data-v="fire">타오르는 불꽃</button><button data-v="snow">눈송이</button><button data-v="off">끄기</button>
           </div>
           <div class="set-row"><span>타격감 <small class="muted">폭발·파편·반동 세기</small></span>
             <div class="opt-row" id="punchOpt"><button data-v="low">약하게</button><button data-v="mid">보통</button><button data-v="high">강하게</button></div></div>
@@ -696,6 +732,8 @@
           <h4>표시</h4>
           <div class="set-row"><span>배경 연출 <small class="muted">곡 썸네일이 박자에 맞춰 숨 쉬듯</small></span>
             <div class="opt-row" id="bgFxOpt"><button data-v="off">끄기</button><button data-v="soft">은은하게</button><button data-v="strong">강하게</button></div></div>
+          <div class="set-row"><span>콤보 숫자</span>
+            <div class="opt-row" id="comboOpt"><button data-v="normal">기본</button><button data-v="gold">금빛</button><button data-v="neon">네온</button><button data-v="rainbow">무지개</button></div></div>
           <div class="set-row"><span>판정 글자</span>
             <select id="judgeText"><option value="normal">보통</option><option value="small">작게</option><option value="off">숨김</option></select></div>
           <div class="set-row"><span>판정·점수 위치 <small class="muted">판정선 가까이 두면 노트에서 눈을 덜 떼요</small></span>
@@ -777,12 +815,30 @@
     <div class="pl-imgs"><img class="pl-il hidden" alt=""><div class="pl-big hidden"></div><canvas class="pl-dot hidden" width="120" height="150"></canvas></div>
     <div class="pl-faces"></div>
     <div class="pl-acts hidden"><button type="button" class="small-btn pl-give">👑 방장 넘기기</button><button type="button" class="small-btn danger pl-kick">내보내기</button></div>
+    <button type="button" class="small-btn pl-chal hidden" title="내 기록 하나를 골라 이 사람에게 도전장을 보내요">⚔️ 도전장 보내기</button>
+    <div class="pl-grow"></div>
     <div class="pl-stats"></div>
     <div class="pl-badges"></div>
     <div class="pl-tabs" role="tablist"><button type="button" class="pl-tab on" data-t="best">🏅 최고 기록</button><button type="button" class="pl-tab" data-t="songs">🎵 자주 하는 노래</button><span class="pl-sum muted"></span></div>
     <ol class="pl-songs pl-bests"></ol>
     <ol class="pl-songs pl-freq hidden"></ol>
   </div>
+  <div id="ntMenu" class="on-menu nt-menu hidden" role="dialog" aria-label="알림">
+    <div class="tm-head"><b>🔔 알림</b><span class="muted">기록 뺏김 · 도전장 · 보상</span><button type="button" id="ntClose" class="ghost tm-x" aria-label="닫기">✕</button></div>
+    <ul id="ntList" class="nt-list"></ul>
+  </div>
+  <div id="lgMenu" class="on-menu lg-menu hidden" role="dialog" aria-label="주간 리그">
+    <div class="tm-head"><b>🏅 이번 주 리그</b><span class="muted" id="lgSum"></span><button type="button" id="lgClose" class="ghost tm-x" aria-label="닫기">✕</button></div>
+    <ol id="lgList" class="lg-list"></ol>
+    <p class="small muted on-tip" id="lgPrev"></p>
+    <p class="small muted on-tip" id="lgPrize"></p>
+  </div>
+  <div id="chalMenu" class="on-menu ch-menu hidden" role="dialog" aria-label="도전장 보내기">
+    <div class="tm-head"><b id="chHead">📜 도전장 보내기</b><button type="button" id="chClose" class="ghost tm-x" aria-label="닫기">✕</button></div>
+    <ul id="chList" class="ch-list"></ul>
+    <p class="small muted on-tip">받은 사람이 수락할 때 내가 접속해 있으면 실시간 1:1 대결, 아니면 내 기록 고스트와 대결해요.</p>
+  </div>
+  <div id="duelBox" class="duel-box hidden" role="alertdialog" aria-live="assertive"></div>
   <div id="dailyMenu" class="on-menu hidden" role="dialog" aria-label="오늘의 곡 순위">
     <div class="tm-head"><b>🎯 오늘의 곡 순위</b><span class="muted" id="dmSum"></span><button type="button" id="dmClose" class="ghost tm-x" aria-label="닫기">✕</button></div>
     <div id="dmSong" class="dm-song"></div>
@@ -811,5 +867,6 @@
 <script src="/static/card.js"></script>
 <script src="/static/profile.js"></script>
 <script src="/static/gate.js"></script>
+<script src="/static/grow.js"></script>
 </body>
 </html>

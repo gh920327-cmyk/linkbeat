@@ -62,6 +62,9 @@ const ACH = [
   { id: 'multi1', cat: '멀티', name: '같이 하자', desc: '멀티 첫 판' },
   { id: 'multi10', cat: '멀티', name: '단짝', desc: '멀티 10판', goal: 10, stat: 'multi' },
   { id: 'multiwin', cat: '멀티', name: '1등!', desc: '멀티에서 1위 (2명 이상)' },
+  { id: 'duel1', cat: '멀티', name: '정정당당', desc: '도전장·복수전·1:1 대결에서 첫 승리' },
+  { id: 'duel10', cat: '멀티', name: '결투의 달인', desc: '도전장·복수전·1:1 대결 10승', goal: 10, stat: 'duelW' },
+  { id: 'champ1', cat: '멀티', name: '주간 챔피언', desc: '주간 리그 1위' },
   { id: 'multiwin5', cat: '멀티', name: '연전연승', desc: '멀티에서 1위 5번', goal: 5, stat: 'mwin' },
   { id: 'party', cat: '멀티', name: '파티 타임', desc: '4명 이상 같이 한 판' },
   { id: 'close', cat: '멀티', name: '박빙', desc: '2등과 1,000점 차이 안으로 1위' },
@@ -120,6 +123,29 @@ function achStats() {
 }
 const dayKey = (t = new Date()) => `${t.getFullYear()}-${t.getMonth() + 1}-${t.getDate()}`;
 
+/* 새로 딴 업적: 업적 창을 열어 보기 전까지 NEW (처음엔 지금까지 딴 건 다 본 걸로) */
+function achSeen() {
+  let v = store.get('achSeen', null);
+  if (!v || typeof v !== 'object') { v = {}; for (const id of Object.keys(achGot())) v[id] = 1; store.set('achSeen', v); }
+  return v;
+}
+function achNewIds() { const seen = achSeen(); return Object.keys(achGot()).filter((id) => ACH_BY[id] && !seen[id]); }
+function renderAchDot() {
+  const b = $('#btnAch');
+  if (!b) return;
+  const n = achNewIds().length;
+  let d = $('.ach-dot', b);
+  if (!d) { d = document.createElement('b'); d.className = 'ach-dot'; b.appendChild(d); }
+  d.textContent = n > 9 ? '9+' : String(n);
+  d.classList.toggle('hidden', !n);
+  b.title = n ? `업적 · 칭호 (새 업적 ${n}개)` : '업적 · 칭호';
+}
+function achMarkSeen() {
+  const seen = achSeen();
+  for (const id of Object.keys(achGot())) seen[id] = 1;
+  store.set('achSeen', seen);
+  renderAchDot();
+}
 function achUnlock(ids) {
   const got = achGot();
   const fresh = [...new Set(ids)].filter((id) => ACH_BY[id] && !got[id]);
@@ -130,6 +156,7 @@ function achUnlock(ids) {
   store.set('ach', got);
   if (typeof profileSync === 'function') profileSync();
   achPopup(fresh);
+  renderAchDot();
   renderMyTitle();
   return fresh;
 }
@@ -168,7 +195,7 @@ function achProgress(st = achStats(), rec = achFromRecords()) {
   const songN = new Set([...Object.keys(st.songs), ...rec.played]).size;
   const sameMax = Math.max(0, ...Object.values(st.songs).map((v) => +v || 0));
   const today = st.day === dayKey() ? st.dayN : 0;
-  return { ...st, songN, sameMax, dayN: today, dailyN: Object.keys(st.dailyDays || {}).length, sRec: rec.sRec, ssRec: rec.ssRec, maxRec: rec.maxRec, extSSS: rec.extSSS, conquerN: rec.conquerN };
+  return { ...st, songN, sameMax, dayN: today, dailyN: Object.keys(st.dailyDays || {}).length, sRec: rec.sRec, ssRec: rec.ssRec, maxRec: rec.maxRec, extSSS: rec.extSSS, conquerN: rec.conquerN, duelW: +store.get('duelW', 0) || 0 };
 }
 function achGoalIds(pr) { return ACH.filter((a) => a.goal && (pr[a.stat] || 0) >= goalOf(a)).map((a) => a.id); }
 /* 기록만 보고 줄 수 있는 업적 (업적 창을 열 때·판이 끝날 때) */
@@ -333,19 +360,21 @@ function renderAchDlg() {
   $('#achCount').textContent = `${n} / ${ACH.length}`;
   $('#achFill').style.width = `${Math.round((n / ACH.length) * 100)}%`;
   $('#achTitleNow').innerHTML = achTitle() ? `지금 칭호: <b class="${achIsLegend(achTitle()) ? 'ptitle legend' : ''}">${esc(achTitle())}</b> <button type="button" class="ghost small-btn" id="achTitleOff">떼기</button>` : '달성한 업적을 누르면 칭호로 달 수 있어요.';
+  const fresh = new Set(achNewIds());
   $('#achGrid').innerHTML = ACH_CATS.map((cat) => {
     const list = ACH.filter((a) => a.cat === cat);
     const k = list.filter((a) => got[a.id]).length;
+    const nNew = list.filter((a) => fresh.has(a.id)).length;
     const head = cat === '전설' ? '✦ 전설 <em>정말 어려운 업적 · 칭호가 무지개빛으로 반짝여요</em>' : esc(cat);
-    return `<h4 class="ach-cat${cat === '전설' ? ' legend' : ''}">${head} <small>${k}/${list.length}</small></h4>` + list.map((a) => {
+    return `<h4 class="ach-cat${cat === '전설' ? ' legend' : ''}">${head} <small>${k}/${list.length}</small>${nNew ? ` <b class="ach-new-n">NEW ${nNew}</b>` : ''}</h4>` + list.map((a) => {
       const at = got[a.id];
       const d = at ? new Date(at) : null;
       const goal = a.goal ? goalOf(a) : 0;
       const v = goal ? Math.min(goal, pr[a.stat] || 0) : 0;
       const bar = goal && !at ? `<span class="ai-prog"><i style="width:${Math.round((v / goal) * 100)}%"></i></span><span class="ai-num">${v.toLocaleString()} / ${goal.toLocaleString()}</span>` : '';
       const lg = a.tier === 'legend';
-      return `<button type="button" class="ach-item${lg ? ' legend' : ''}${at ? ' got' : ''}${cur === a.id && at ? ' cur' : ''}" data-id="${a.id}" ${at ? '' : 'disabled'}>
-      <span class="ai-ico">${at ? (lg ? '👑' : '🏆') : '🔒'}</span>
+      return `<button type="button" class="ach-item${lg ? ' legend' : ''}${at ? ' got' : ''}${cur === a.id && at ? ' cur' : ''}${fresh.has(a.id) ? ' new' : ''}" data-id="${a.id}" ${at ? '' : 'disabled'}>
+      ${fresh.has(a.id) ? '<span class="ai-new">NEW</span>' : ''}<span class="ai-ico">${at ? (lg ? '👑' : '🏆') : '🔒'}</span>
       <span class="ai-name">${esc(a.name)}</span>
       <span class="ai-desc">${esc(a.desc)}</span>${bar}
       ${d ? `<span class="ai-date">${d.getMonth() + 1}/${d.getDate()}</span>` : ''}</button>`;
@@ -370,7 +399,14 @@ function renderMyTitle() {
   el.classList.toggle('hidden', !t);
   el.classList.toggle('legend', achIsLegend(t));
 }
-$('#btnAch').addEventListener('click', () => { renderAchDlg(); $('#achDlg').showModal(); });
+$('#btnAch').addEventListener('click', () => {
+  renderAchDlg();
+  $('#achDlg').showModal();
+  const g = $('#achGrid .ach-item.new');            // 새 업적이 있으면 그 칸이 보이게
+  if (g) g.scrollIntoView({ block: 'center' });
+});
+$('#achDlg').addEventListener('close', achMarkSeen);  // 창을 닫으면 NEW 표시를 지움
+renderAchDot();
 $('#achClose').addEventListener('click', () => $('#achDlg').close());
 $('#achGrid').addEventListener('click', (e) => {
   const b = e.target.closest('.ach-item.got');
@@ -410,13 +446,30 @@ function sendHelloNow() {
 /* 결과 화면: +경험치 막대 (이전 → 지금), 레벨이 오르면 'LEVEL UP' */
 function gainXp(g, r) {
   const box = $('#rXp');
-  const gain = xpFor(g, r);
   if (!box) return;
+  if (r.incomplete) { box.classList.add('hidden'); return; }
+  if (typeof profile !== 'undefined' && profile.tok) {     // 계정의 경험치는 서버가 계산 (기록 저장 응답으로 옴 → showXpGain)
+    box.classList.remove('hidden', 'up');
+    $('.rx-gain', box).textContent = '경험치 계산 중…';
+    $('.rx-up', box).textContent = '';
+    $('.rx-next', box).textContent = '';
+    return;
+  }
+  const gain = xpFor(g, r);
   box.classList.toggle('hidden', !gain);
   if (!gain) return;
-  const before = xpTotal(), after = before + gain;
-  store.set('xp', after);
+  const before = xpTotal();
+  store.set('xp', before + gain);
   if (typeof profileSync === 'function') profileSync();
+  showXpGain(before, before + gain);
+}
+function showXpGain(before, after) {
+  const box = $('#rXp');
+  if (!box) return;
+  const gain = after - before;
+  box.classList.toggle('hidden', !gain);
+  if (!gain) return;
+  store.set('xp', after);
   const a = levelOf(before), b = levelOf(after);
   $('.rx-gain', box).textContent = `+${gain.toLocaleString()} XP`;
   $('.rx-lv', box).textContent = `Lv ${b.lv}`;
