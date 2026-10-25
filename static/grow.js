@@ -182,15 +182,15 @@ function noticeHtml(n) {
   const here = n.sid && songById(n.sid);
   let body = esc(n.text || ''), acts = '';
   if (n.type === 'beaten') {
-    body = `<b>${esc(n.by)}</b> 님이 내 기록을 넘었어요 ${what}<small class="nt-sc">내 ${fmtN(n.mine)} → ${esc(n.by)} ${fmtN(n.theirs)}</small>`;
+    body = `<span class="nt-line"><b>${esc(n.by)}</b> 님이 내 기록을 넘었어요</span>${what}<small class="nt-sc">내 ${fmtN(n.mine)} → ${esc(n.by)} ${fmtN(n.theirs)}</small>`;
     acts = n.done ? (n.done === 'won' ? '<span class="nt-done win">복수 성공!</span>' : '')
       : here && !n.hl ? `<button type="button" class="small-btn primary nt-rev" data-id="${esc(n.id)}" title="접속 중이면 실시간 대결, 아니면 고스트와 대결">⚔️ 복수하기</button>` : '';
   } else if (n.type === 'chal') {
-    body = `<b>${esc(n.by)}</b> 님의 도전장 ${what}<small class="nt-sc">${fmtN(n.score)}점을 넘어 보세요</small>`;
+    body = `<span class="nt-line"><b>${esc(n.by)}</b> 님의 도전장</span>${what}<small class="nt-sc">${fmtN(n.score)}점을 넘어 보세요</small>`;
     acts = n.done ? (DONE_TXT[n.done] || '') : here
       ? `<button type="button" class="small-btn primary nt-acc" data-id="${esc(n.chal)}" title="접속 중이면 실시간 대결, 아니면 고스트와 대결">수락</button><button type="button" class="small-btn nt-dec" data-id="${esc(n.chal)}">거절</button>` : '';
   } else if (n.type === 'chalres') {
-    body = `${esc(n.text)} ${what}`;
+    body = `<span class="nt-line">${esc(n.text)}</span>${what}`;
   }
   return `<li class="nt-item${n.read ? '' : ' unread'}"><span class="nt-ico">${NT_ICON[n.type] || '🔔'}</span>`
     + `<span class="nt-body">${body}<small class="nt-at">${ago(n.at)}</small></span><span class="nt-acts">${acts}</span></li>`;

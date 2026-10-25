@@ -237,10 +237,10 @@ body.touch .game-info { padding-right: 62px; }
 .small-btn { padding: 5px 10px; font-size: 13px; }
 .room-players { list-style: none; padding: 0; margin: 12px 0; display: flex; flex-direction: column; gap: 4px; }
 .room-players li { padding: 6px 10px; background: rgba(255, 255, 255, .04); display: flex; align-items: center; gap: 6px; border-left: 3px solid var(--line); }
-.room-players li .pn { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; }   /* 칭호는 이름 위 줄에 (이름이 가려지지 않게) */
+.room-players li .pn { flex: none; min-width: 0; max-width: 58%; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; }   /* 칭호는 이름 위 줄에 (이름이 가려지지 않게) */
 .room-players li .pn > .ptitle { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .room-players li .pn-n { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.room-players li .pdiff { margin-left: auto; font-family: var(--head); font-size: 10px; letter-spacing: .5px; white-space: nowrap; color: var(--muted); }
+.room-players li .pdiff { margin-left: auto; min-width: 0; flex: 0 100 auto; overflow: hidden; text-overflow: ellipsis; font-family: var(--head); font-size: 10px; letter-spacing: .5px; white-space: nowrap; color: var(--muted); }   /* 좁으면 이름보다 난이도 칸이 먼저 줄어듦 */
 .room-players li .pdiff .tag { font-size: 9px; padding: 0 4px; }
 .room-players li .small { min-width: 34px; text-align: right; white-space: nowrap; }
 .room-players li.me { border-left-color: var(--cyan); }
