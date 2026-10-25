@@ -561,7 +561,7 @@ const yt = {
     p.pauseVideo();
     p.seekTo(0, true);
     await sleep(250);
-    for (let i = 0; i < 8 && (p.getCurrentTime() || 0) > 0.05; i++) { p.seekTo(0, true); await sleep(100); }
+    for (let i = 0; i < 25 && (p.getCurrentTime() || 0) > 0.05; i++) { p.seekTo(0, true); await sleep(100); }   // 미리듣기 위치 등에서 확실히 0초로
     p.unMute();
     p.setVolume(settings.volume);
     p.setPlaybackRate(1);
