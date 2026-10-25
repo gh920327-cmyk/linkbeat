@@ -83,7 +83,12 @@ h3 small { font-family: 'Noto Sans KR'; font-size: 12px; color: var(--muted); le
 .star-legend .star:first-child { margin-left: 0; }
 
 /* 등급 색 */
-.rank-SS { color: var(--gold); } .rank-S { color: var(--gold); } .rank-A { color: var(--green); }
+.rank-SS { color: var(--gold); } .rank-S { color: var(--gold); }
+.rank-SSS { color: #ffe36b; text-shadow: 0 0 10px rgba(255, 210, 80, .55); }
+.rank-MAX { background: linear-gradient(100deg, #ff6bd5, #ffd45e 35%, #5effc8 65%, #6bb8ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.r-rank.rank-MAX { text-shadow: none; filter: drop-shadow(0 0 22px rgba(255, 220, 140, .55)); }
+html[data-tone="light"] .rank-SSS, html[data-theme] .detail-col .rank-SSS { color: #c98a00; text-shadow: none; }
+html[data-tone="dark"] .detail-col .rank-SSS { color: #ffe36b; } .rank-A { color: var(--green); }
 .rank-B { color: var(--cyan); } .rank-C { color: var(--purple); } .rank-D { color: var(--muted); }
 .fc { color: var(--gold); font-weight: 800; font-family: var(--head); font-size: .85em; }
 

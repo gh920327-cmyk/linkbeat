@@ -121,8 +121,9 @@ function renderSongs() {
         const v = starOf(s, nl, d);
         const r = myRecord(s, nl, d);
         const ap = r && r.counts && r.fc && !r.counts.great && !r.counts.good && !r.counts.miss;
-        const mark = r ? `<b class="rk rank-${esc(r.rank)}">${esc(r.rank)}</b>` : '<i class="nodot"></i>';
-        const tip = `${DIFF_NAME[d]} ★${v.toFixed(1)}${r ? ` · ${r.rank} ${r.score.toLocaleString()}${ap ? ' · ALL PERFECT' : r.fc ? ' · FULL COMBO' : ''}` : ' · 아직 안 해봤어요'}`;
+        const rk = rankFor(r);
+        const mark = r ? `<b class="rk rank-${esc(rk)}">${esc(rk)}</b>` : '<i class="nodot"></i>';
+        const tip = `${DIFF_NAME[d]} ★${v.toFixed(1)}${r ? ` · ${rk} ${r.score.toLocaleString()}${ap ? ' · ALL PERFECT' : r.fc ? ' · FULL COMBO' : ''}` : ' · 아직 안 해봤어요'}`;
         return `<span class="dslot ${starClass(v)}${d === settings.diff ? ' on' : ''}${ap ? ' ap' : r && r.fc ? ' fc' : ''}" title="${esc(tip)}">${mark}<em>${v.toFixed(1)}</em></span>`;
       }).join('');
       const roomSel = net.room && net.room.songId === s.id ? ' roomsel' : '';
@@ -182,7 +183,7 @@ function renderDetail() {
   const top = boardOf(s, nl, settings.diff)[0];
   $('#dTop').innerHTML = top ? `${esc(top.name)} <em>${top.score.toLocaleString()}</em>` : '<span class="none">아직 없음</span>';
   const mine = myRecord(s, nl, settings.diff);
-  $('#dMine').innerHTML = mine ? `<span class="rank-${esc(mine.rank)}">${esc(mine.rank)}</span> <em>${mine.score.toLocaleString()}</em>` : '<span class="none">기록 없음</span>';
+  $('#dMine').innerHTML = mine ? `<span class="rank-${esc(rankFor(mine))}">${esc(rankFor(mine))}</span> <em>${mine.score.toLocaleString()}</em>` : '<span class="none">기록 없음</span>';
   $('#dRate').innerHTML = mine && mine.acc != null ? `<em>${(+mine.acc).toFixed(2)}%</em>${mine.fc ? ' <span class="fc">FC</span>' : ''}` : '';
   const pb = $('#btnPlay');
   const hlOn = hlActive();
@@ -851,7 +852,7 @@ function updateOffsetShow() {
 $('#btnTouchPause').addEventListener('click', () => { if (game && currentScreen === 'game') game.pause(); });
 
 /* ============================================================ 결과 */
-const RANK_ORDER = ['D', 'C', 'B', 'A', 'S', 'SS'];
+const RANK_ORDER = RANKS;
 const rankIdx = (k) => RANK_ORDER.indexOf(k);
 /* 이번 판 전까지의 내 최고 기록 (서버 순위표의 내 기록과 이 컴퓨터의 기록 중 더 좋은 것) */
 function prevBestOf(g) {
@@ -863,7 +864,7 @@ function prevBestOf(g) {
   if (lb) cands.push(lb);
   if (!cands.length) return null;
   const best = cands.reduce((a, b) => (b.score > a.score ? b : a));
-  const bestRank = cands.map((c) => c.rank).filter((k) => rankIdx(k) >= 0).sort((a, b) => rankIdx(b) - rankIdx(a))[0] || best.rank;
+  const bestRank = cands.map((c) => rankFor(c)).filter((k) => rankIdx(k) >= 0).sort((a, b) => rankIdx(b) - rankIdx(a))[0] || best.rank;
   const same = cands.filter((c) => c.score === best.score);      // 같은 기록이 서버·이 브라우저에 있으면 빠진 칸을 서로 채움
   const pick = (k) => { const c = same.find((x) => x[k] != null); return c ? c[k] : null; };
   return { score: best.score || 0, rank: bestRank, acc: pick('acc'), maxCombo: pick('maxCombo'), counts: pick('counts') };
@@ -1022,7 +1023,7 @@ let resultAvRaf = 0;
 function startResultAvatar(r) {
   cancelAnimationFrame(resultAvRaf);
   const stage = new AvatarStage($('#rAvatar'));
-  const good = !r.incomplete && (r.rank === 'SS' || r.rank === 'S');
+  const good = !r.incomplete && rankIdx(r.rank) >= rankIdx('S');
   const bad = r.incomplete || r.rank === 'C' || r.rank === 'D';
   const url = typeof aiIllustUrl === 'function' ? aiIllustUrl(settings.avatar) : '';   // AI 일러스트가 있으면 그걸 크게
   const il = $('#rIllust');
@@ -1152,7 +1153,7 @@ function renderRank() {
   $('#rankList').innerHTML = rows.length ? rows.map((e, i) => {
     const d = new Date(e.at * 1000);
     return `<li class="${e.name === nick ? 'me' : ''}"><span class="pos">${i + 1}</span><span class="n">${esc(e.name)}</span>
-      <span class="rk rank-${esc(e.rank)}">${esc(e.rank)}</span><span class="s">${e.score.toLocaleString()}</span>
+      <span class="rk rank-${esc(rankFor(e))}">${esc(rankFor(e))}</span><span class="s">${e.score.toLocaleString()}</span>
       <span class="a">${e.acc.toFixed(2)}%${e.fc ? ' <b class="fc">FC</b>' : ''}</span>
       <span class="dt">${d.getMonth() + 1}/${d.getDate()}</span></li>`;
   }).join('') : '<li class="muted">아직 기록이 없어요. 첫 번째 주인공이 되어 보세요!</li>';
@@ -1281,7 +1282,7 @@ function plSongsHtml(j) {
     return `<li class="${here ? 'can' : ''}" data-sid="${esc(r.id)}" title="${here ? '눌러서 이 곡 고르기' : ''}"><span class="pl-n">${i + 1}</span>`
       + `<span class="pl-t"><b>${esc(r.title)}</b><small>${esc(r.artist || '')}</small></span>`
       + `<span class="pl-p">${r.plays ? `${r.plays}번` : '기록 있음'}</span>`
-      + `<span class="pl-b">${b ? `<span class="rk rank-${esc(b.rank || '')}">${esc(b.rank || '')}</span><small>${b.keys === 6 ? '6K' : '4K'} ${DIFF_EN[b.diff] || ''}</small>` : ''}</span></li>`;
+      + `<span class="pl-b">${b ? `<span class="rk rank-${esc(rankFor(b))}">${esc(rankFor(b))}</span><small>${b.keys === 6 ? '6K' : '4K'} ${DIFF_EN[b.diff] || ''}</small>` : ''}</span></li>`;
   }).join('');
 }
 async function openPlCard(id, anchor) {

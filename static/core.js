@@ -669,11 +669,25 @@ function setBest(id, diff, nl, r, hl = false, ai = false) {
   }
   return false;
 }
+/* 등급 (정확도): MAX 100%(전부 PERFECT) · SSS 99% · SS 98% · S 95% · A 90% · B 80% · C 70% · D */
+const RANKS = ['D', 'C', 'B', 'A', 'S', 'SS', 'SSS', 'MAX'];
 function rankOf(acc) {
+  if (acc >= 100) return 'MAX';
+  if (acc >= 99) return 'SSS';
   if (acc >= 98) return 'SS';
   if (acc >= 95) return 'S';
   if (acc >= 90) return 'A';
   if (acc >= 80) return 'B';
   if (acc >= 70) return 'C';
   return 'D';
+}
+/* 저장된 기록의 등급: 정확도가 있으면 지금 기준으로 다시 (SSS·MAX가 생기기 전 기록도) — MAX는 판정 개수로도 확인 */
+function rankFor(r) {
+  if (!r) return '';
+  const acc = r.acc != null ? +r.acc : NaN;
+  if (!Number.isFinite(acc)) return r.rank || '';
+  let k = rankOf(acc);
+  const c = r.counts;
+  if (k === 'MAX' && c && (c.great || c.good || c.miss)) k = 'SSS';   // 소수점 반올림으로 100%가 된 경우
+  return k;
 }

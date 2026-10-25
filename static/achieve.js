@@ -67,7 +67,7 @@ function achieveOnResult(g, r) {
   if (clear) ids.push('clearB');
   if (fc) ids.push('fc1');
   if (ap) ids.push('ap1');
-  if (done && r.rank === 'SS') ids.push('ss');
+  if (done && RANKS.indexOf(r.rank) >= RANKS.indexOf('SS')) ids.push('ss');      // SS 이상 (SSS·MAX도)
   if (done && r.acc >= 99.5) ids.push('acc995');
   if (r.maxCombo >= 300) ids.push('combo300');
   if (r.maxCombo >= 1000) ids.push('combo1000');
