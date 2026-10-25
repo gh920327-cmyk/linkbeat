@@ -999,6 +999,11 @@ class Game {
     else if (Math.abs(yt.time() - this.startT) > 0.05) yt.seek(this.startT);    // 영상이 시작 위치에 있는지 한 번 더
     this.clock.set(this.startT - lead * this.rate);
     this.clock.start();
+    // 카운트인: 곡 박자(너무 빠르거나 느리면 0.35~0.8초)로 '딱' 세 번 — 세 번째가 시작 위치
+    const gap = clamp(60 / (+this.song.bpm || 120), 0.35, 0.8) * this.rate;
+    this.clicks = [this.startT - 2 * gap, this.startT - gap, this.startT];
+    this.clickN = this.clicks.filter((c) => c < this.clock.now()).length;   // 이미 지난 박은 건너뜀 (늦게 합류한 멀티 등)
+    this.clickAt = 0;
     this.phase = 'countdown';
   }
 
@@ -1008,6 +1013,10 @@ class Game {
       return;
     }
     if (st === YTS.PLAYING) {
+      if (this.phase === 'countdown') {     // 카운트인 중에 영상이 먼저 켜짐 (폰에서 탭한 재생이 늦게 걸린 경우 등) → 멈추고 시작 위치로
+        try { yt.pause(); yt.seek(this.startT); } catch { /* 무시 */ }
+        return;
+      }
       if (this.phase === 'preroll') {
         // 미리 재생을 요청해 둔 상태: 실제로 걸린 시간을 기억(다음 판 보정)하고, 시계는 멈추지 않고 부드럽게 맞춤
         ytLagLearn((performance.now() - this.playAt) / 1000);
@@ -1020,9 +1029,9 @@ class Game {
         return;
       }
       if (['waitVideo', 'playing', 'resuming'].includes(this.phase)) {
-        if (this.phase === 'waitVideo') ytLagLearn((performance.now() - this.playAt) / 1000);
+        if (this.phase === 'waitVideo') { ytLagLearn((performance.now() - this.playAt) / 1000); this.softUntil = performance.now() + 2000; }
         this.slew = null;
-        this.clock.set(yt.time());
+        this.clock.set(Math.max(this.phase === 'waitVideo' ? this.startT : 0, yt.time()));
         this.clock.start();
         this.lastVT = -1;
         this.phase = 'playing';
@@ -1192,12 +1201,29 @@ class Game {
     const step = () => {
       if (this.phase === 'ended' || this.phase === 'aborted') return;
       const t = this.clock.now();
-      if (this.phase === 'countdown' && t >= this.startT - ytLag * this.rate) {
-        // 유튜브는 재생을 누르고 실제로 소리가 나기까지 시간이 걸려요.
-        // 그만큼 미리 재생을 요청하고, 그동안 화면은 멈추지 않고 계속 흘러가게 함 (시작 렉 방지)
-        this.phase = 'preroll';
-        this.playAt = performance.now();
-        yt.play();
+      if (this.phase === 'countdown') {
+        while (this.clickN < this.clicks.length && t >= this.clicks[this.clickN]) {
+          this.clickN++;
+          this.clickAt = performance.now();
+          sfx.stick(this.clickN === this.clicks.length);
+        }
+        if (t >= this.startT) {
+          // 세 번째 '딱'에 영상을 틀고, 영상이 진짜로 재생될 때까지 시계(노트)를 시작 위치에 멈춰 둠
+          // → 영상이 몇 초 늦게 켜져도 노트가 쫓아가느라 빨라지지 않음
+          this.clock.stop();
+          this.clock.set(this.startT);
+          this.phase = 'waitVideo';
+          this.waitSince = this.playAt = performance.now();
+          this.retryAt = 0;
+          if (yt.state() === YTS.PLAYING) {   // 이미 재생 중이면 '재생됨' 알림이 다시 안 오므로 시작 위치로 맞추고 바로 시작
+            yt.seek(this.startT);
+            this.clock.set(this.startT);
+            this.clock.start();
+            this.softUntil = performance.now() + 2000;
+            this.lastVT = -1;
+            this.phase = 'playing';
+          } else yt.play();
+        }
       }
       if (this.phase === 'preroll') {
         if (t > this.startT + 0.35 * this.rate) {
@@ -1571,7 +1597,8 @@ class Game {
     let msg = '';
     if (this.phase === 'loading') msg = '불러오는 중...';
     else if (this.phase === 'ready') msg = this.multi ? '다른 플레이어를 기다리는 중...' : '';
-    else if (this.phase === 'countdown' && this.clock.now() < this.startT) msg = String(Math.ceil((this.startT - this.clock.now()) / this.rate));
+    else if (this.phase === 'countdown') msg = this.clickN ? String(this.clicks.length + 1 - this.clickN) : 'READY';
+    else if (this.phase === 'waitVideo' && now - this.waitSince <= 600) msg = '1';
     else if (this.phase === 'waitVideo' && now - this.waitSince > 600) msg = '영상 시작 대기 중...';
     if (msg) {
       ctx.textAlign = 'center';
