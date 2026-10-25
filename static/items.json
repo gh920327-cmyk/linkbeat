@@ -1,5 +1,5 @@
 {
-  "_": "상점·꾸미기 아이템 목록 (서버와 화면이 같이 읽음). price가 있으면 상점에서 ♪로 사고, earn이 있으면 조건을 채워야만 얻어요. limited는 주마다 돌아가며 한 개씩만 팔아요. event가 있으면 그 이벤트 기간에만 교환소에서 candy(사탕)로 바꿔요.",
+  "_": "상점·꾸미기 아이템 목록 (서버와 화면이 같이 읽음). price가 있으면 상점에서 ♪로 사고, earn이 있으면 조건을 채워야만 얻어요. limited는 주마다 돌아가며 한 개씩만 팔아요. event가 있으면 그 이벤트 기간에만 교환소에서 candy(사탕)로 바꿔요. season이 있으면 그 시즌 패스 단계 보상으로만 얻어요.",
   "cats": [
     ["note", "노트 모양"], ["fx", "타격 이펙트"], ["line", "판정선 색"], ["gear", "기어 테두리"], ["combo", "콤보 숫자"],
     ["fcfx", "풀콤보 연출"], ["nc", "이름 색"], ["icon", "이름 아이콘"], ["card", "프로필 카드 배경"], ["frame", "결과 카드 테두리"]
@@ -18,6 +18,7 @@
     {"id": "fx_fire", "cat": "fx", "name": "불꽃", "earn": "streak30", "how": "30일 연속 출석"},
     {"id": "fx_snow", "cat": "fx", "name": "눈송이", "price": 800, "limited": true},
     {"id": "fx_bat", "cat": "fx", "name": "박쥐", "candy": 150, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
+    {"id": "fx_leaf", "cat": "fx", "name": "단풍잎", "season": "s1", "how": "시즌 1 패스 10단계"},
 
     {"id": "line_purple", "cat": "line", "name": "보라", "price": 300},
     {"id": "line_green", "cat": "line", "name": "초록", "price": 300},
@@ -48,6 +49,8 @@
     {"id": "nc_lime", "cat": "nc", "name": "연두", "earn": "lv5", "how": "레벨 5"},
     {"id": "nc_rainbow", "cat": "nc", "name": "무지개", "earn": "streak100", "how": "100일 연속 출석"},
     {"id": "nc_hw", "cat": "nc", "name": "할로윈", "candy": 100, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
+    {"id": "nc_autumn", "cat": "nc", "name": "단풍", "season": "s1", "how": "시즌 1 패스 5단계"},
+    {"id": "nc_ice", "cat": "nc", "name": "얼음", "season": "s2", "how": "시즌 2 패스 5단계"},
 
     {"id": "icon_note", "cat": "icon", "name": "음표", "emoji": "🎵", "price": 300},
     {"id": "icon_headphone", "cat": "icon", "name": "헤드폰", "emoji": "🎧", "price": 300},
@@ -58,6 +61,8 @@
     {"id": "icon_pumpkin", "cat": "icon", "name": "호박", "emoji": "🎃", "price": 800, "limited": true},
     {"id": "icon_cat", "cat": "icon", "name": "고양이", "emoji": "🐱", "price": 800, "limited": true},
     {"id": "icon_ghost", "cat": "icon", "name": "유령", "emoji": "👻", "candy": 60, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
+    {"id": "icon_maple", "cat": "icon", "name": "단풍", "emoji": "🍁", "season": "s1", "how": "시즌 1 패스 20단계"},
+    {"id": "icon_snowman", "cat": "icon", "name": "눈사람", "emoji": "⛄", "season": "s2", "how": "시즌 2 패스 20단계"},
 
     {"id": "card_sunset", "cat": "card", "name": "노을", "price": 300},
     {"id": "card_ocean", "cat": "card", "name": "바다", "price": 300},
@@ -67,11 +72,14 @@
     {"id": "card_gold", "cat": "card", "name": "황금", "earn": "lv30", "how": "레벨 30"},
     {"id": "card_halloween", "cat": "card", "name": "할로윈", "price": 800, "limited": true},
     {"id": "card_moon", "cat": "card", "name": "보름달 밤", "candy": 120, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
+    {"id": "card_autumn", "cat": "card", "name": "가을 숲", "season": "s1", "how": "시즌 1 패스 15단계"},
+    {"id": "card_snow", "cat": "card", "name": "눈 내리는 밤", "season": "s2", "how": "시즌 2 패스 15단계"},
 
     {"id": "frame_silver", "cat": "frame", "name": "은", "price": 300},
     {"id": "frame_gold", "cat": "frame", "name": "금", "price": 800},
     {"id": "frame_neon", "cat": "frame", "name": "네온", "price": 800},
     {"id": "frame_rainbow", "cat": "frame", "name": "무지개", "price": 2000},
-    {"id": "frame_legend", "cat": "frame", "name": "전설", "earn": "lv50", "how": "레벨 50"}
+    {"id": "frame_legend", "cat": "frame", "name": "전설", "earn": "lv50", "how": "레벨 50"},
+    {"id": "frame_ice", "cat": "frame", "name": "얼음", "season": "s2", "how": "시즌 2 패스 10단계"}
   ]
 }

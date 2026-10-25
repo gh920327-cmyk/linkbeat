@@ -146,10 +146,12 @@ class SkinPreview {
 /* ---------------- 창 */
 let skinPrev = null;
 /* 이벤트 물건: 이벤트가 끝났는데 못 얻었으면 숨김 */
-function evItemOf(id) { const it = typeof itemOf === 'function' ? itemOf(id) : null; return it && it.event ? it : null; }
+function evItemOf(id) { const it = typeof itemOf === 'function' ? itemOf(id) : null; return it && (it.event || it.season) ? it : null; }
 function evItemGone(id) {
   const it = evItemOf(id);
-  return !!it && !(typeof myGrow !== 'undefined' && myGrow && myGrow.event && myGrow.event.id === it.event);
+  if (!it) return false;
+  const g = typeof myGrow !== 'undefined' ? myGrow : null;
+  return it.event ? !(g && g.event && g.event.id === it.event) : !(g && g.season && g.season.id === it.season);
 }
 /* 상점에서 사야 하는 꾸미기: 안 가졌으면 🔒 — 누르면 상점의 그 물건으로 */
 function skinLock(key, v) {
@@ -169,7 +171,7 @@ function markLocks() {
       const id = skinLock(key, b.dataset.v);
       b.classList.toggle('locked', !!id);
       b.classList.toggle('hidden', !!id && evItemGone(id));
-      b.title = id ? (evItemOf(id) ? '🎃 할로윈 이벤트 교환소에서 얻어요 (누르면 보기)' : '🔒 상점에서 열 수 있어요 (누르면 상점으로)') : '';
+      b.title = id ? (evItemOf(id) ? (evItemOf(id).season ? `🎫 ${evItemOf(id).how} 보상이에요` : '🎃 할로윈 이벤트 교환소에서 얻어요 (누르면 보기)') : '🔒 상점에서 열 수 있어요 (누르면 상점으로)') : '';
     });
   }
   $$('#lineSw button[data-line]').forEach((b) => {

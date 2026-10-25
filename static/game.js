@@ -701,8 +701,9 @@ function fxNew(nl) {
     holdTick: new Array(nl).fill(0), line: -1e9, bump: -1e9, bumpAmp: 0, shake: -1e9, shakeAmp: 0, mile: null,
   };
 }
-const FX_NEW = { petal: 950, stardust: 800, bolt: 260, fire: 620, snow: 1150, bat: 900 };   // 새 이펙트와 조각이 사는 시간(ms)
+const FX_NEW = { petal: 950, stardust: 800, bolt: 260, fire: 620, snow: 1150, bat: 900, leaf: 1050 };   // 새 이펙트와 조각이 사는 시간(ms)
 const PETAL_C = ['#ffc4dd', '#ff9cc6', '#ffe1ee', '#ff7fb5'];
+const LEAF_C = ['#ff8a1e', '#e2451b', '#ffc93d', '#c8321b'];
 function fxNewParts(fx, lane, e, now) {
   const R = Math.random;
   if (e === 'bolt') {
@@ -712,10 +713,11 @@ function fxNewParts(fx, lane, e, now) {
     for (let i = 0; i < 4; i++) fx.parts.push({ lane, at: now, kind: 'boltSpark', vx: (R() - 0.5) * 300, vy: -100 - R() * 220, gr: 700, s: 2 + R() * 2, life: 300 });
     return;
   }
-  const n = { petal: 7, stardust: 10, fire: 10, snow: 8, bat: 3 }[e];
+  const n = { petal: 7, stardust: 10, fire: 10, snow: 8, bat: 3, leaf: 6 }[e];
   for (let i = 0; i < n; i++) {
     const base = { lane, at: now, kind: e, dx: (R() - 0.5) * 0.5, life: FX_NEW[e] * (0.7 + R() * 0.3) };
     if (e === 'petal') fx.parts.push({ ...base, vx: (R() - 0.5) * 170, vy: -140 - R() * 160, gr: 230, s: 4 + R() * 4, r: R() * 6, vr: (R() - 0.5) * 9, sw: 4 + R() * 4, c: PETAL_C[i % PETAL_C.length] });
+    else if (e === 'leaf') fx.parts.push({ ...base, vx: (R() - 0.5) * 180, vy: -150 - R() * 150, gr: 240, s: 5 + R() * 4, r: R() * 6, vr: (R() - 0.5) * 7, sw: 3 + R() * 3, c: LEAF_C[i % LEAF_C.length] });
     else if (e === 'stardust') fx.parts.push({ ...base, vx: (R() - 0.5) * 240, vy: -80 - R() * 240, gr: 160, s: 3 + R() * 4, ph: R() * 6, c: R() < 0.5 ? '#fff6c8' : '#ffd84d' });
     else if (e === 'fire') fx.parts.push({ ...base, vx: (R() - 0.5) * 60, vy: -150 - R() * 170, gr: -60, s: 6 + R() * 6, dx: (R() - 0.5) * 0.6 });
     else if (e === 'bat') fx.parts.push({ ...base, vx: (i - 1) * (70 + R() * 60), vy: -170 - R() * 120, gr: -40, s: 8 + R() * 3, ph: R() * 6 });
@@ -728,7 +730,7 @@ function drawFxNew(L, judgeY, fx, now, e) {
     const k = (now - fx.flash[l]) / 140;
     if (k < 1) {
       ctx.globalAlpha = (1 - k) * 0.55;
-      ctx.fillStyle = e === 'fire' || e === 'bat' ? '#ff9d3d' : e === 'petal' ? '#ffb3d1' : e === 'snow' ? '#e8f6ff' : colors[l];
+      ctx.fillStyle = e === 'fire' || e === 'bat' || e === 'leaf' ? '#ff9d3d' : e === 'petal' ? '#ffb3d1' : e === 'snow' ? '#e8f6ff' : colors[l];
       roundRect(ctx, x0 + l * laneW + 2, judgeY - 12, laneW - 4, 24, 8);
       ctx.fill();
     }
@@ -736,7 +738,7 @@ function drawFxNew(L, judgeY, fx, now, e) {
   ctx.globalAlpha = 1;
   fx.parts = fx.parts.filter((p) => now - p.at < (p.life || 600));
   ctx.save();
-  if (e !== 'petal' && e !== 'snow' && e !== 'bat') ctx.globalCompositeOperation = 'lighter';
+  if (e !== 'petal' && e !== 'snow' && e !== 'bat' && e !== 'leaf') ctx.globalCompositeOperation = 'lighter';
   for (const p of fx.parts) {
     const t = (now - p.at) / 1000, k = (now - p.at) / (p.life || 600);
     const cx = x0 + (p.lane + 0.5 + (p.dx || 0)) * laneW;
@@ -761,6 +763,11 @@ function drawFxNew(L, judgeY, fx, now, e) {
       ctx.beginPath(); ctx.moveTo(x - p.s * 2, y); ctx.lineTo(x + p.s * 2, y); ctx.moveTo(x, y - p.s * 2); ctx.lineTo(x, y + p.s * 2); ctx.stroke();
     } else if (p.kind === 'bat') {
       drawBat(ctx, x, y, p.s, t * 22 + p.ph);
+    } else if (p.kind === 'leaf') {            // 단풍잎: 다섯 갈래 잎 + 꼭지
+      ctx.save(); ctx.translate(x, y); ctx.rotate(p.r + t * p.vr);
+      ctx.fillStyle = p.c; ctx.beginPath(); starPath(ctx, 0, 0, p.s, p.s * 0.48, 5); ctx.fill();
+      ctx.strokeStyle = 'rgba(90,30,0,0.6)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, p.s * 1.1); ctx.stroke();
+      ctx.restore();
     } else if (p.kind === 'bolt') {
       ctx.lineJoin = 'round';
       for (const [w, c] of [[6 * (1 - k) + 2, colors[p.lane]], [2, '#ffffff']]) {

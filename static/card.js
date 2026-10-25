@@ -233,6 +233,10 @@ function cardFrame(ctx, id) {
   } else if (id === 'frame_neon') {
     st = '#4de1ff';
     ctx.shadowColor = '#4de1ff'; ctx.shadowBlur = 30;
+  } else if (id === 'frame_ice') {        // 얼음 (시즌 2): 하늘빛 + 서리
+    st = ctx.createLinearGradient(0, 0, W, H);
+    ['#bfeaff', '#ffffff', '#7fd0ff', '#e8f8ff', '#5ab4ff'].forEach((x, i) => st.addColorStop(i / 4, x));
+    ctx.shadowColor = '#9fe0ff'; ctx.shadowBlur = 22;
   } else {
     st = ctx.createLinearGradient(0, 0, W, H);
     ['#ff4fd8', '#ffcf4d', '#4dffc3', '#4da6ff', '#b06bff', '#ff4fd8'].forEach((x, i) => st.addColorStop(i / 5, x));
