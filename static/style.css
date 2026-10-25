@@ -237,7 +237,9 @@ body.touch .game-info { padding-right: 62px; }
 .small-btn { padding: 5px 10px; font-size: 13px; }
 .room-players { list-style: none; padding: 0; margin: 12px 0; display: flex; flex-direction: column; gap: 4px; }
 .room-players li { padding: 6px 10px; background: rgba(255, 255, 255, .04); display: flex; align-items: center; gap: 6px; border-left: 3px solid var(--line); }
-.room-players li .pn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room-players li .pn { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; }   /* 칭호는 이름 위 줄에 (이름이 가려지지 않게) */
+.room-players li .pn > .ptitle { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.room-players li .pn-n { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .room-players li .pdiff { margin-left: auto; font-family: var(--head); font-size: 10px; letter-spacing: .5px; white-space: nowrap; color: var(--muted); }
 .room-players li .pdiff .tag { font-size: 9px; padding: 0 4px; }
 .room-players li .small { min-width: 34px; text-align: right; white-space: nowrap; }
@@ -387,6 +389,9 @@ dialog::backdrop { background: rgba(0, 0, 0, .65); backdrop-filter: blur(3px); }
 .calib-panel select { width: 100%; color: var(--text); }
 .cal-result:empty { display: none; }
 .cal-ms { font-family: var(--head); font-size: 34px; font-weight: 900; color: var(--cyan); }
+.calib-panel .cal-chk { flex-direction: row; align-items: center; gap: 6px; cursor: pointer; }
+.cal-result { display: flex; flex-direction: column; gap: 4px; }
+.cal-tip { margin: 0; line-height: 1.6; }
 
 .toast {
   position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
@@ -566,7 +571,6 @@ dialog::backdrop { background: rgba(0, 0, 0, .65); backdrop-filter: blur(3px); }
   .g-title { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #livePanel, .hint { display: none; }
   #screen-calib .info-col { flex-direction: column; overflow: auto; max-height: 50vh; }
-  #screen-calib .info-col .yt-slot { width: 100%; max-width: 260px; }
   .r-top { flex-direction: column; gap: 6px; }
   .r-rank { font-size: 80px; }
   .rank-list li { grid-template-columns: 26px 1fr 32px auto; }
@@ -1083,7 +1087,29 @@ html[data-theme] #screen-game, html[data-theme] #screen-calib { background: #040
 .pl-acts.hidden { display: none; }
 .pl-acts button { flex: 1; }
 .pl-kick.sure { background: color-mix(in srgb, var(--red) 22%, transparent); color: #fff; border-color: var(--red); }
-.pl-sum { font-weight: 500; font-size: 11px; }
+.pl-sum { font-weight: 500; font-size: 11px; margin-left: auto; }
+/* 프로필 카드: Lv·업적·기록 칩, 등급 개수, 대표 업적, 탭 */
+.pl-stats:empty, .pl-badges:empty { display: none; }
+.pl-stats { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.pl-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 6px; }
+.pl-chip { display: flex; flex-direction: column; align-items: center; padding: 6px 4px; background: color-mix(in srgb, var(--text) 6%, transparent); border: 1px solid var(--line2); }
+.pl-chip small { font-size: 10px; color: var(--muted); }
+.pl-chip b { font-family: var(--head); font-size: 16px; font-weight: 900; white-space: nowrap; }
+.pl-chip b i { font-style: normal; font-size: 11px; color: var(--muted); font-weight: 700; margin-left: 1px; }
+.pl-chip.lv { border-color: color-mix(in srgb, var(--cyan) 55%, transparent); background: color-mix(in srgb, var(--cyan) 12%, transparent); }
+.pl-chip.lv b { color: var(--cyan); }
+.pl-rks { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; font-size: 12px; font-weight: 700; color: var(--muted); }
+.pl-rk { display: inline-flex; align-items: baseline; gap: 3px; }
+.pl-rk .rk { font-family: var(--head); font-weight: 900; font-size: 14px; }
+.pl-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.pl-badges > small { font-size: 11px; margin-right: 2px; }
+.pl-badge { font-size: 11px; font-weight: 800; padding: 3px 8px; border: 1px solid color-mix(in srgb, var(--gold, #ffc83d) 55%, transparent); color: var(--gold, #ffc83d); background: color-mix(in srgb, var(--gold, #ffc83d) 10%, transparent); }
+.pl-badge.legend { color: #fff; border-color: transparent; background: linear-gradient(90deg, #ff5f6d, #ffc83d, #4de1ff, #b98cff); text-shadow: 0 1px 2px rgba(0, 0, 0, .45); }
+.pl-tabs { display: flex; align-items: center; gap: 4px; margin: 12px 0 6px; }
+.pl-tab { padding: 4px 10px; font-size: 12px; font-weight: 800; background: none; border: 1px solid var(--line2); color: var(--muted); }
+.pl-tab.on { color: var(--text); border-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 14%, transparent); }
+.pl-songs.hidden { display: none; }
+.pl-fc { font-style: normal; font-size: 10px; font-weight: 900; color: var(--gold, #ffc83d); margin-left: 3px; }
 .pl-songs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .pl-songs li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto 56px; gap: 8px; align-items: center; padding: 6px 8px; background: color-mix(in srgb, var(--text) 5%, transparent); }
 .pl-songs li.can:hover { background: color-mix(in srgb, var(--cyan) 14%, transparent); cursor: pointer; }

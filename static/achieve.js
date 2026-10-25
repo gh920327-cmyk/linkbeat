@@ -103,6 +103,15 @@ function achIsLegend(t) { return !!t && LEGEND_TITLES.has(t); }
 const ACH_BY = Object.fromEntries(ACH.map((a) => [a.id, a]));
 
 function achGot() { const v = store.get('ach', {}); return v && typeof v === 'object' ? v : {}; }
+/* 프로필 카드용 요약: 업적 수와 대표 업적 3개 (전설 → 어려운 묶음 → 나중에 나온 것 순) */
+const ACH_HARD_CATS = new Set(['등급', '콤보', '난이도', '도전']);
+function achRankKey(a) { return (a.tier === 'legend' ? 2000 : ACH_HARD_CATS.has(a.cat) ? 1000 : 0) + ACH.indexOf(a); }
+function achSummary() {
+  const got = achGot();
+  const have = ACH.filter((a) => got[a.id]);
+  const top = have.slice().sort((a, b) => achRankKey(b) - achRankKey(a)).slice(0, 3).map((a) => a.id);
+  return { ach: have.length, achTotal: ACH.length, achTop: top };
+}
 function achTitle() { const id = store.get('title', ''); return (ACH_BY[id] && achGot()[id]) ? ACH_BY[id].name : ''; }
 function achStats() {
   const st = Object.assign({ plays: 0, fc: 0, ap: 0, hl: 0, multi: 0, ai: 0, perf: 0, ghost: 0, mwin: 0, songs: {}, day: '', dayN: 0, streak: 0 }, store.get('achStats', {}) || {});
@@ -350,7 +359,7 @@ function achSetTitle(id) {
   if (typeof profileSync === 'function') profileSync();
   renderAchDlg();
   renderMyTitle();
-  net.send({ type: 'hello', name: settings.nick || '', avatar: settings.avatar, title: achTitle(), diff: settings.diff, keys: settings.mode, level: typeof myLevel === 'function' ? myLevel() : 0 });
+  net.send(helloMsg());
   if (id) toast(`칭호 '${ACH_BY[id].name}'을(를) 달았어요.`);
 }
 function renderMyTitle() {
@@ -396,7 +405,7 @@ function xpFor(g, r) {
   return Math.round(x);
 }
 function sendHelloNow() {
-  net.send({ type: 'hello', name: settings.nick || '', avatar: settings.avatar, title: achTitle(), diff: settings.diff, keys: settings.mode, level: myLevel() });
+  net.send(helloMsg());
 }
 /* 결과 화면: +경험치 막대 (이전 → 지금), 레벨이 오르면 'LEVEL UP' */
 function gainXp(g, r) {

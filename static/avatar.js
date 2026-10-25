@@ -399,7 +399,7 @@ function avatarChanged() {
   saveSettings();
   renderAvatarEditor();
   if (typeof renderMyChar === 'function') renderMyChar();
-  net.send({ type: 'hello', name: settings.nick || '', avatar: settings.avatar, title: typeof achTitle === 'function' ? achTitle() : '', diff: settings.diff, keys: settings.mode, level: typeof myLevel === 'function' ? myLevel() : 0 });
+  net.send(helloMsg());
 }
 function openAvatar() {
   renderAvatarEditor();

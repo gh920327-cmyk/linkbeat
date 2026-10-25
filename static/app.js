@@ -1188,13 +1188,13 @@ function renderRoom() {
       const tag = r.phase === 'lobby' && (p.state === 'idle' || !p.state)
         ? (lead ? '<span class="rdy lead">방장</span>' : p.ready ? '<span class="rdy on">✓ 준비</span>' : '<span class="rdy">대기</span>')
         : `<span class="muted small">${stateName[p.state] || ''}</span>`;
-      return `<li class="${p.id === net.id ? 'me' : ''}${!lead && p.ready ? ' ready' : ''}" data-pl="${esc(p.id)}" title="눌러서 ${esc(p.name)} 님 캐릭터·자주 하는 노래 보기">${miniHtml(p.avatar)}${lead ? '<span class="crown">👑</span>' : ''}<span class="pn">${typeof lvTag === 'function' ? lvTag(p.level) : ''}${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}${esc(p.name)}</span>
+      return `<li class="${p.id === net.id ? 'me' : ''}${!lead && p.ready ? ' ready' : ''}" data-pl="${esc(p.id)}" title="눌러서 ${esc(p.name)} 님 캐릭터·자주 하는 노래 보기">${miniHtml(p.avatar)}${lead ? '<span class="crown">👑</span>' : ''}<span class="pn">${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}<span class="pn-n">${typeof lvTag === 'function' ? lvTag(p.level) : ''}${esc(p.name)}</span></span>
         <span class="pdiff"><span class="tag">${pk}K</span> ${DIFF_EN[pd] || ''}${st}</span>
         ${tag}</li>`;
     }).join('');
     $('#roomPlayers').insertAdjacentHTML('beforeend', (r.watchers || []).map((p) => {
       plRemember(p);
-      return `<li class="watch${p.id === net.id ? ' me' : ''}" data-pl="${esc(p.id)}" title="게임이 끝나면 같이 해요">${miniHtml(p.avatar)}<span class="pn">${typeof lvTag === 'function' ? lvTag(p.level) : ''}${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}${esc(p.name)}</span><span class="rdy watch">👀 구경 중</span></li>`;
+      return `<li class="watch${p.id === net.id ? ' me' : ''}" data-pl="${esc(p.id)}" title="게임이 끝나면 같이 해요">${miniHtml(p.avatar)}<span class="pn">${p.title ? `<span class="${ptCls(p.title)}">${esc(p.title)}</span>` : ''}<span class="pn-n">${typeof lvTag === 'function' ? lvTag(p.level) : ''}${esc(p.name)}</span></span><span class="rdy watch">👀 구경 중</span></li>`;
     }).join(''));
     paintMinis($('#roomPlayers'));
     $('#roomSong').textContent = r.songId ? r.songTitle : '방장이 곡을 고르는 중...';
@@ -1288,6 +1288,43 @@ function plSongsHtml(j) {
       + `<span class="pl-b">${b ? `<span class="rk rank-${esc(rankFor(b))}">${esc(rankFor(b))}</span><small>${b.keys === 6 ? '6K' : '4K'} ${DIFF_EN[b.diff] || ''}</small>` : ''}</span></li>`;
   }).join('');
 }
+/* 프로필 카드: 최고 기록 (등급 → 별 → 난이도 순) */
+function plBestsHtml(j) {
+  const b = j.bests || [];
+  if (!b.length) return '<li class="muted pl-empty">아직 남긴 기록이 없어요.</li>';
+  return b.map((r, i) => {
+    const here = !!songById(r.id), rk = r.rank || '';
+    const tags = `${r.keys === 6 ? '6K' : '4K'} ${DIFF_EN[r.diff] || ''}${r.stars ? ` ★${(+r.stars).toFixed(1)}` : ''}${r.ai ? ' · AI' : ''}`;
+    return `<li class="${here ? 'can' : ''}" data-sid="${esc(r.id)}" title="${here ? '눌러서 이 곡 고르기' : ''}"><span class="pl-n">${i + 1}</span>`
+      + `<span class="pl-t"><b>${esc(r.title)}</b><small>${esc(tags)}</small></span>`
+      + `<span class="pl-p">${Number.isFinite(+r.acc) ? (+r.acc).toFixed(2) + '%' : ''}${r.fc && rk !== 'MAX' ? ' <em class="pl-fc">FC</em>' : ''}</span>`
+      + `<span class="pl-b"><span class="rk rank-${esc(rk)}">${esc(rk)}</span></span></li>`;
+  }).join('');
+}
+/* 프로필 카드: Lv · 업적 · 등급 통계 · 대표 업적 */
+function plStatsHtml(j, lv, ach) {
+  const st = j.stats || {}, rk = st.ranks || {};
+  const chips = [];
+  if (lv > 0) chips.push(`<span class="pl-chip lv"><small>레벨</small><b>Lv ${lv}</b></span>`);
+  if (ach && ach.n != null) chips.push(`<span class="pl-chip"><small>업적</small><b>🏆 ${ach.n}${ach.total ? `<i>/${ach.total}</i>` : ''}</b></span>`);
+  chips.push(`<span class="pl-chip"><small>기록</small><b>${st.records || 0}<i>개</i></b></span>`);
+  if (st.fc) chips.push(`<span class="pl-chip"><small>풀콤보</small><b>${st.fc}</b></span>`);
+  const rows = ['MAX', 'SSS', 'SS', 'S'].filter((k) => rk[k]).map((k) => `<span class="pl-rk"><span class="rk rank-${k}">${k}</span>×${rk[k]}</span>`).join('');
+  return `<div class="pl-chips">${chips.join('')}</div>${rows ? `<div class="pl-rks">${rows}</div>` : ''}`;
+}
+function plBadgesHtml(ids) {
+  const list = (ids || []).map((id) => (typeof ACH_BY !== 'undefined' ? ACH_BY[id] : null)).filter(Boolean);
+  if (!list.length) return '';
+  return '<small class="muted">대표 업적</small>' + list.map((a) => `<span class="pl-badge${a.tier === 'legend' ? ' legend' : ''}" title="${esc(a.desc)}">${a.tier === 'legend' ? '👑' : '🏆'} ${esc(a.name)}</span>`).join('');
+}
+let plTab = 'best';
+function plSetTab(t) {
+  plTab = t;
+  const card = $('#plCard');
+  $$('.pl-tab', card).forEach((b) => b.classList.toggle('on', b.dataset.t === t));
+  $('.pl-bests', card).classList.toggle('hidden', t !== 'best');
+  $('.pl-freq', card).classList.toggle('hidden', t !== 'songs');
+}
 async function openPlCard(id, anchor) {
   const p = plLookup(id);
   if (!p) return;
@@ -1312,7 +1349,10 @@ async function openPlCard(id, anchor) {
   kb.classList.remove('sure');
   kb.textContent = '내보내기';
   $('.pl-sum', card).textContent = '';
-  $('.pl-songs', card).innerHTML = '<li class="muted pl-empty">불러오는 중...</li>';
+  $('.pl-stats', card).innerHTML = '';
+  $('.pl-badges', card).innerHTML = '';
+  $$('.pl-songs', card).forEach((el) => { el.innerHTML = '<li class="muted pl-empty">불러오는 중...</li>'; });
+  plSetTab(plTab);
   card.classList.remove('hidden');
   // 자리: 누른 줄 옆 (오른쪽 → 안 되면 왼쪽), 화면 밖으로 안 나가게
   const r = anchor.getBoundingClientRect(), w = card.offsetWidth, h = card.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
@@ -1328,10 +1368,24 @@ async function openPlCard(id, anchor) {
     const j = await res.json();
     if (my !== plReq) return;
     if (!res.ok) throw new Error(j.error || res.status);
-    $('.pl-songs', card).innerHTML = plSongsHtml(j);
-    $('.pl-sum', card).textContent = j.totalPlays ? `· 지금까지 ${j.totalPlays}판 · ${j.songCount}곡` : j.songCount ? `· ${j.songCount}곡` : '';
+    $('.pl-freq', card).innerHTML = plSongsHtml(j);
+    $('.pl-bests', card).innerHTML = plBestsHtml(j);
+    $('.pl-sum', card).textContent = j.totalPlays ? `지금까지 ${j.totalPlays}판 · ${j.songCount}곡` : j.songCount ? `${j.songCount}곡` : '';
+    const pf = j.prof || {};
+    const me = mine && typeof achSummary === 'function' ? achSummary() : null;     // 내 카드는 이 기기의 값 (가장 최신)
+    const ach = me ? { n: me.ach, total: me.achTotal } : pf.ach != null ? { n: pf.ach, total: pf.achTotal || 0 } : null;
+    const lv2 = lv || pf.lv || 0;
+    if (lv2 && !lv) $('.pl-name', card).innerHTML = (typeof lvTag === 'function' ? lvTag(lv2) : '') + esc(p.name);
+    if (!p.title && pf.title) {      // 지금 접속 안 한 사람: 저장된 칭호
+      $('.pl-title', card).textContent = pf.title;
+      $('.pl-title', card).classList.remove('hidden');
+      $('.pl-title', card).classList.toggle('legend', ptCls(pf.title) !== 'ptitle');
+    }
+    $('.pl-stats', card).innerHTML = plStatsHtml(j, lv2, ach);
+    $('.pl-badges', card).innerHTML = plBadgesHtml(me ? me.achTop : pf.top);
+    if (!(j.bests || []).length && j.songs.length && plTab === 'best') plSetTab('songs');
   } catch (e) {
-    if (my === plReq) $('.pl-songs', card).innerHTML = '<li class="muted pl-empty">노래 기록을 불러오지 못했어요.</li>';
+    if (my === plReq) $$('.pl-songs', card).forEach((el) => { el.innerHTML = '<li class="muted pl-empty">기록을 불러오지 못했어요.</li>'; });
   }
   // 위치 다시 맞춤 (목록이 채워지며 길어졌을 때)
   const h2 = card.offsetHeight;
@@ -1370,6 +1424,8 @@ $('#plCard').addEventListener('click', (e) => {
     closePlCard();
     return;
   }
+  const tab = e.target.closest('.pl-tab');
+  if (tab) { plSetTab(tab.dataset.t); return; }
   const li = e.target.closest('.pl-songs li.can');
   if (li && currentScreen === 'lobby') { select(li.dataset.sid); closePlCard(); }
 });
@@ -1821,15 +1877,15 @@ $('#edTest').addEventListener('click', async () => {
   try { await g.load(); if (g.phase === 'ready') g.begin(2); } catch (e) { g.abort(e.message); }
 });
 
-/* ============================================================ 싱크 자동 맞추기 */
+/* ============================================================ 싱크 맞추기 (박자 소리) */
+function calNowShow() { $('#calNow').textContent = `${settings.offset > 0 ? '+' : ''}${settings.offset}ms`; }
 function openCalib() {
-  if (!songs.length) { toast('먼저 곡을 하나 추가해 주세요.'); return; }
   if ($('#settingsDlg').open) $('#settingsDlg').close();
   stopPreview();
-  const last = store.get('calSong', selId);
-  $('#calSong').innerHTML = songs.map((s) => `<option value="${s.id}">${esc(s.title)} (BPM ${Math.round(s.bpm)})</option>`).join('');
-  if (songs.find((s) => s.id === last)) $('#calSong').value = last;
-  $('#calNow').textContent = `${settings.offset > 0 ? '+' : ''}${settings.offset}ms`;
+  $('#calBpm').innerHTML = CAL_BPMS.map(([v, n]) => `<option value="${v}">${n}</option>`).join('');
+  $('#calBpm').value = String(store.get('calBpm', 100));
+  $('#calHide').checked = !!store.get('calHide', false);
+  calNowShow();
   if (calib) calib.close();
   calib = new Calibrator();
   calib.render();
@@ -1841,14 +1897,13 @@ function closeCalib() {
   renderSongs();
 }
 $('#btnCalib').addEventListener('click', openCalib);
-$('#calStart').addEventListener('click', () => {
-  store.set('calSong', $('#calSong').value);
-  if (calib) calib.start($('#calSong').value);
-});
+$('#calBpm').addEventListener('change', (e) => { store.set('calBpm', +e.target.value); if (calib && calib.state === 'run') calib.start(); });
+$('#calHide').addEventListener('change', (e) => store.set('calHide', e.target.checked));
+$('#calStart').addEventListener('click', (e) => { e.currentTarget.blur(); if (calib) calib.start(); });   // 포커스가 남으면 Space가 버튼을 다시 누름
 $('#calApply').addEventListener('click', () => {
   if (!calib) return;
   calib.apply();
-  $('#calNow').textContent = `${settings.offset > 0 ? '+' : ''}${settings.offset}ms`;
+  calNowShow();
   updateOffsetShow();
 });
 $('#calExit').addEventListener('click', closeCalib);
@@ -1980,7 +2035,7 @@ $('#nick').value = settings.nick || '';
 $('#nick').addEventListener('change', (e) => {
   settings.nick = e.target.value.trim().slice(0, 16);
   saveSettings();
-  net.send({ type: 'hello', name: settings.nick, avatar: settings.avatar, title: typeof achTitle === 'function' ? achTitle() : '', diff: settings.diff, keys: settings.mode, level: typeof myLevel === 'function' ? myLevel() : 0 });
+  net.send(helloMsg());
   renderSongs();
 });
 

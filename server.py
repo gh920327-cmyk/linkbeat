@@ -55,6 +55,7 @@ SCORES.mkdir(parents=True, exist_ok=True)
 REQ_FILE = DATA / "requests.json"
 DAILY_FILE = DATA / "daily.json"         # 오늘의 곡 (날마다 한 곡·난이도, 그날의 순위)
 PLAYS_FILE = DATA / "plays.json"         # 이름별 곡마다 플레이 횟수 (다른 사람을 누르면 '자주 하는 노래')
+PSTATS_FILE = DATA / "pstats.json"       # 이름별 프로필 요약: Lv·업적 수·대표 업적·칭호 (다른 사람 카드, 접속하지 않았을 때도)
 PROFILES_FILE = DATA / "profiles.json"   # 친구들 프로필 (설정·기록 백업)
 MAIN_LOOP = None
 PORT = int(os.environ.get("PORT", "8800"))
@@ -580,18 +581,66 @@ def record_play(name, sid):
     write_json_atomic(PLAYS_FILE, d)
 
 
+_PSTATS_MEM = {}
+ACH_ID_RE = re.compile(r"^[A-Za-z0-9_]{1,24}$")
+
+
+def pstats_save(name, prof):
+    """hello로 받은 프로필 요약을 이름별로 저장 (바뀌었을 때만 씀)"""
+    if not name or _PSTATS_MEM.get(name) == prof:
+        return
+    _PSTATS_MEM[name] = dict(prof)
+    with FILE_LOCK:
+        d = read_json(PSTATS_FILE, {})
+        if not isinstance(d, dict):
+            d = {}
+        d[name] = dict(prof, at=int(time.time()))
+        if len(d) > 3000:       # 이름이 아주 많으면 오래 안 들어온 사람부터 정리
+            d = dict(sorted(d.items(), key=lambda kv: -int((kv[1] or {}).get("at", 0)))[:3000])
+        write_json_atomic(PSTATS_FILE, d)
+
+
+RANK_LIST = ["D", "C", "B", "A", "S", "SS", "SSS", "MAX"]
+DIFF_LIST = ["easy", "normal", "hard", "extreme"]
+
+
+def entry_rank(e):
+    """화면의 rankFor와 같은 기준 (정확도로 다시 계산, 반올림 100%는 SSS)"""
+    try:
+        acc = float(e.get("acc"))
+    except (TypeError, ValueError):
+        return e.get("rank") if e.get("rank") in RANK_LIST else "D"
+    k = ("MAX" if acc >= 100 else "SSS" if acc >= 99 else "SS" if acc >= 98 else "S" if acc >= 95 else
+         "A" if acc >= 90 else "B" if acc >= 80 else "C" if acc >= 70 else "D")
+    c = e.get("counts") if isinstance(e.get("counts"), dict) else {}
+    if k == "MAX" and (c.get("great") or c.get("good") or c.get("miss")):
+        k = "SSS"
+    return k
+
+
 def player_info(name):
-    """다른 사람 정보: 자주 하는 노래 (플레이 횟수 순, 횟수를 세기 전 기록은 '기록 있음')"""
+    """다른 사람 정보: 프로필 요약(Lv·업적·칭호), 등급 통계, 최고 기록, 자주 하는 노래 (플레이 횟수 순, 횟수를 세기 전 기록은 '기록 있음')"""
     name = str(name or "").strip()[:16]
     if not name:
         raise HttpError(400, "이름이 없어요.")
     with FILE_LOCK:
         d = read_json(PLAYS_FILE, {})
+        pd = read_json(PSTATS_FILE, {})
     mine = d.get(name) if isinstance(d, dict) and isinstance(d.get(name), dict) else {}
+    prof = pd.get(name) if isinstance(pd, dict) and isinstance(pd.get(name), dict) else {}
     rows = []
+    recs = []
     for s in list_songs():
         sid = s["id"]
         ents = [e for e in s.get("board", []) if e.get("name") == name]
+        for e in ents:
+            if e.get("hl"):
+                continue
+            k = 6 if e.get("keys") == 6 else 4
+            st = ((s.get("ai") or {}).get("stars") or {}) if e.get("ai") else ((s.get("stars") or {}).get(str(k)) or {})
+            recs.append({"id": sid, "title": s.get("title", sid), "artist": s.get("artist", ""), "diff": e.get("diff"), "keys": k,
+                         "ai": bool(e.get("ai")), "fc": bool(e.get("fc")), "acc": e.get("acc"), "score": e.get("score", 0),
+                         "rank": entry_rank(e), "stars": st.get(e.get("diff")) or 0})
         c = mine.get(sid)
         cnt, last = (int(c[0]), int(c[1])) if isinstance(c, list) and len(c) == 2 else (0, 0)
         if not ents and not cnt:
@@ -603,7 +652,15 @@ def player_info(name):
             "best": {k: best.get(k) for k in ("score", "rank", "diff", "keys", "fc", "acc", "ai", "hl")} if best else None,
         })
     rows.sort(key=lambda r: (-r["plays"], -r["last"]))
-    return {"name": name, "songs": rows[:6], "songCount": len(rows), "totalPlays": sum(r["plays"] for r in rows)}
+    ranks = {}
+    for r in recs:
+        ranks[r["rank"]] = ranks.get(r["rank"], 0) + 1
+    recs.sort(key=lambda r: (-RANK_LIST.index(r["rank"]), -(r["stars"] or 0), -(DIFF_LIST.index(r["diff"]) if r["diff"] in DIFF_LIST else 0),
+                             -(r["score"] or 0)))
+    return {"name": name, "songs": rows[:6], "songCount": len(rows), "totalPlays": sum(r["plays"] for r in rows),
+            "prof": {k: prof.get(k) for k in ("lv", "ach", "achTotal", "top", "title") if k in prof},
+            "stats": {"records": len(recs), "ranks": ranks, "fc": sum(1 for r in recs if r["fc"])},
+            "bests": recs[:5]}
 
 
 # ============================================================ 채보 생성 작업
@@ -3307,6 +3364,15 @@ def handle_msg(c, m):
         lv = m.get("level")
         if isinstance(lv, int) and not isinstance(lv, bool) and 0 < lv < 1000:
             c.level = lv
+        an = m.get("ach")
+        if c.name and isinstance(an, int) and not isinstance(an, bool) and 0 <= an < 1000:   # 프로필 카드용 요약 저장
+            top = m.get("achTop") if isinstance(m.get("achTop"), list) else []
+            at = m.get("achTotal")
+            try:
+                pstats_save(c.name, {"lv": c.level, "ach": an, "achTotal": at if isinstance(at, int) and 0 < at < 1000 else 0,
+                                     "top": [str(x) for x in top[:3] if isinstance(x, str) and ACH_ID_RE.match(x)], "title": c.title})
+            except Exception as e:      # 저장 실패해도 접속은 그대로
+                log("프로필 요약 저장 실패:", e)
         set_my_diff(c, m)
         if room:
             room.push()
