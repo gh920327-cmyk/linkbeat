@@ -5,7 +5,7 @@
 let myGrow = null;        // 서버가 준 내 진행
 let SHOP = null;          // items.json (아이템 목록)
 const DECO_CATS = ['nc', 'icon', 'card', 'frame'];
-const NT_ICON = { welcome: '🎁', return: '👋', item: '🎁', league: '🏅', beaten: '⚔️', chal: '📜', chalres: '⚔️' };
+const NT_ICON = { welcome: '🎁', return: '👋', item: '🎁', league: '🏅', beaten: '⚔️', chal: '📜', chalres: '⚔️', event: '🎃' };
 const fmtN = (n) => (+n || 0).toLocaleString();
 const loggedIn = () => typeof profile !== 'undefined' && !!profile.tok;
 
@@ -98,6 +98,7 @@ function setMe(j) {
 function renderGrowAll() {
   renderGrowTop();
   renderGrowBar();
+  renderEvent();
   if ($('#shopDlg').open) renderShop();
   if (ntOpen()) renderNotices();
   if (typeof markLocks === 'function' && $('#skinDlg').open) markLocks();
@@ -282,6 +283,11 @@ function growOnResult(g, r, res) {
   if (rw.levelUp) L.push(`<div class="rw-line rw-lv">⬆ 레벨 업! Lv ${rw.levelUp.from} → ${rw.levelUp.to} · +${100 * (rw.levelUp.to - rw.levelUp.from)}♪</div>`);
   if (rw.items.length) L.push(`<div class="rw-line rw-items">🎁 새 꾸미기: ${rw.items.map((id) => `<b>${esc((itemOf(id) || {}).name || id)}</b>`).join(', ')} <button type="button" class="small-btn" id="rwShop">상점에서 보기</button></div>`);
   if (rw.league && rw.league.rank) L.push(`<div class="rw-line rw-lg">🏅 이번 주 리그 <b>${rw.league.rank}위</b> · ${fmtN(rw.league.pts)} XP</div>`);
+  if (rw.event) {
+    const ev = rw.event;
+    L.push(`<div class="rw-line rw-ev">🎃 할로윈 <b>${ev.cur} +${fmtN(ev.gain)}</b> <small>${ev.parts.map(([k, v]) => `${esc(k)} ${fmtN(v)}`).join(' · ')}</small> <span class="rw-total">보유 ${ev.cur}${fmtN(ev.total)}</span>`
+      + (ev.missions.length ? `<span class="rw-evm">${ev.missions.map((m) => `✅ ${esc(m.text)}`).join(' ')}${ev.allDone ? ' 🎉 이벤트 미션 모두 완료!' : ''}</span>` : '') + '</div>');
+  }
   box.innerHTML = L.join('');
   box.classList.remove('hidden');
   const sb = $('#rwShop');
@@ -436,8 +442,10 @@ class ShopPreview extends SkinPreview {
     try { super.frame(); } finally { settings.skin = real; }
   }
 }
-const SW_GLYPH = { note_neon: '▭', note_star: '★', note_heart: '♥', note_gem: '◆', fx_petal: '🌸', fx_bolt: '⚡', fx_star: '✨', fx_fire: '🔥', fx_snow: '❄️',
-  combo_gold: '123', combo_neon: '123', combo_rainbow: '123' };
+const SW_GLYPH = { note_neon: '▭', note_star: '★', note_heart: '♥', note_gem: '◆', note_pumpkin: '🎃', fx_petal: '🌸', fx_bolt: '⚡', fx_star: '✨', fx_fire: '🔥', fx_snow: '❄️', fx_bat: '🦇',
+  combo_gold: '123', combo_neon: '123', combo_rainbow: '123', fc_fireworks: '🎆', fc_stars: '🌟', fc_hero: '🙌', fc_bats: '🦇', gear_hw: '🎃' };
+const evNow = (it) => !!(it && it.event && myGrow && myGrow.event && myGrow.event.id === it.event);   // 지금 교환소에서 바꿀 수 있는 물건
+const evGone = (it) => !!(it && it.event && !evNow(it));
 function swInner(it) {
   if (it.cat === 'icon') return it.emoji || '';
   if (it.cat === 'nc') return '가';
@@ -449,10 +457,11 @@ function shopItemHtml(id) {
   const own = itemOwned(id), on = own && itemEquipped(id);
   const price = (myGrow.shop.prices || {})[id], base = it.price;
   const st = on ? '<b class="si-on">장착 중</b>' : own ? '<span class="si-own">보유</span>'
+    : it.event ? (evNow(it) ? `<b class="si-candy">🍬${fmtN(it.candy)}</b>` : '<span class="si-lock">이벤트 끝남</span>')
     : it.earn ? `<span class="si-lock">🔒 ${esc(it.how || '')}</span>`
       : price < base ? `<s>♪${fmtN(base)}</s> <b class="si-sale">♪${fmtN(price)}</b>` : `<b>♪${fmtN(price)}</b>`;
   return `<button type="button" class="shop-item${own ? ' own' : ''}${on ? ' on' : ''}${shopSel === id ? ' sel' : ''}${it.earn && !own ? ' earn' : ''}" data-id="${esc(id)}">`
-    + `<span class="si-sw sw-${esc(id)}">${swInner(it)}</span><span class="si-name">${esc(it.name)}${it.limited ? ' <em>한정</em>' : ''}</span><span class="si-st">${st}</span></button>`;
+    + `<span class="si-sw sw-${esc(id)}">${swInner(it)}</span><span class="si-name">${esc(it.name)}${it.limited ? ' <em>한정</em>' : ''}${it.event ? ' <em class="ev">🎃 이벤트</em>' : ''}</span><span class="si-st">${st}</span></button>`;
 }
 function renderShop() {
   if (!myGrow || !SHOP) return;
@@ -463,10 +472,10 @@ function renderShop() {
   $('#shopLim').innerHTML = sh.limited ? shopItemHtml(sh.limited) : '<span class="muted small">이번 주 한정 상품이 없어요.</span>';
   $('#shopLimLeft').textContent = sh.limited ? `${fmtDur(sh.limitedEnds)} 남음 · 지나면 다시 돌아올 때까지 못 사요` : '';
   $('#shopTabs').innerHTML = SHOP.cats.map(([c, n]) => {
-    const k = SHOP.items.filter((i) => i.cat === c && itemOwned(i.id)).length, t = SHOP.items.filter((i) => i.cat === c).length;
+    const k = SHOP.items.filter((i) => i.cat === c && itemOwned(i.id)).length, t = SHOP.items.filter((i) => i.cat === c && (!evGone(i) || itemOwned(i.id))).length;
     return `<button type="button" data-c="${c}" class="${c === shopTab ? 'on' : ''}">${esc(n)} <small>${k}/${t}</small></button>`;
   }).join('');
-  $('#shopGrid').innerHTML = SHOP.items.filter((i) => i.cat === shopTab && (!i.limited || i.id === sh.limited || itemOwned(i.id))).map((i) => shopItemHtml(i.id)).join('');
+  $('#shopGrid').innerHTML = SHOP.items.filter((i) => i.cat === shopTab && (!i.limited || i.id === sh.limited || itemOwned(i.id)) && (!evGone(i) || itemOwned(i.id))).map((i) => shopItemHtml(i.id)).join('');
   renderShopSel();
 }
 function renderShopSel() {
@@ -475,7 +484,12 @@ function renderShopSel() {
   const deco = it && DECO_CATS.includes(it.cat);
   $('#shopCanvas').parentElement.classList.toggle('hidden', !!deco);
   $('#shopPrevDeco').classList.toggle('hidden', !deco);
-  if (shopPrev) { const o = it && skinOverOf(it.id); shopPrev.over = o ? { [o[0]]: o[1] } : null; }
+  if (shopPrev) {
+    const o = it && skinOverOf(it.id);
+    shopPrev.over = o ? { [o[0]]: o[1] } : null;
+    shopPrev.fcLoop = !!(it && it.cat === 'fcfx');        // 풀콤보 연출은 미리보기에서 계속 보여 줌
+    if (!shopPrev.fcLoop) shopPrev.fcAt = 0;
+  }
   if (!it) {
     info.innerHTML = '<b>물건을 눌러 보세요</b><small>왼쪽에서 바로 미리 볼 수 있어요.</small>';
     act.innerHTML = '';
@@ -491,9 +505,14 @@ function renderShopSel() {
   const own = itemOwned(it.id), on = own && itemEquipped(it.id);
   const price = (myGrow.shop.prices || {})[it.id];
   const catN = (SHOP.cats.find((c) => c[0] === it.cat) || [0, ''])[1];
-  info.innerHTML = `<b>${esc(it.name)}</b><small>${esc(catN)}${it.limited ? ' · 이번 주 한정' : ''}${it.earn ? ` · 얻는 법: ${esc(it.how || '')}` : ''}</small>`;
+  info.innerHTML = `<b>${esc(it.name)}</b><small>${esc(catN)}${it.limited ? ' · 이번 주 한정' : ''}${it.event ? ' · 🎃 할로윈 이벤트 교환소 (이번에만)' : ''}${it.earn ? ` · 얻는 법: ${esc(it.how || '')}` : ''}</small>`;
   if (own) act.innerHTML = `<button type="button" class="${on ? '' : 'primary'}" id="shopEquip">${on ? '빼기 (기본으로)' : '장착하기'}</button>`;
-  else if (it.earn) act.innerHTML = `<span class="si-lock">🔒 ${esc(it.how || '')} 하면 얻어요 (상점에서 못 사요)</span>`;
+  else if (it.event) {
+    const ev = myGrow.event, lack = ev ? it.candy - ev.candy : 0;
+    act.innerHTML = !evNow(it) ? '<span class="si-lock">이벤트가 끝나서 더는 못 얻어요</span>'
+      : lack > 0 ? `<button type="button" disabled>🍬${fmtN(it.candy)} · ${fmtN(lack)}개 더 필요</button>`
+        : `<button type="button" class="primary ev-btn" id="shopBuy">${buyArm === it.id ? `정말 바꿀까요? 🍬${fmtN(it.candy)} — 한 번 더 누르기` : `🍬${fmtN(it.candy)}로 바꾸기`}</button>`;
+  } else if (it.earn) act.innerHTML = `<span class="si-lock">🔒 ${esc(it.how || '')} 하면 얻어요 (상점에서 못 사요)</span>`;
   else {
     const lack = price - myGrow.coins;
     act.innerHTML = lack > 0 ? `<button type="button" disabled>♪${fmtN(price)} · ${fmtN(lack)}♪ 더 필요</button>`
@@ -524,14 +543,22 @@ function equipItem(id, on) {
 async function buyItem(id) {
   if (buyArm !== id) { buyArm = id; renderShopSel(); setTimeout(() => { if (buyArm === id) { buyArm = null; renderShopSel(); } }, 4000); return; }
   buyArm = null;
+  const it = itemOf(id);
   try {
-    const j = await api('/shop/buy', { method: 'POST', body: { id } });
-    myGrow.coins = j.coins;
-    myGrow.owned = j.owned;
-    store.set('ownedCache', j.owned);
+    if (it && it.event) {
+      const j = await api('/event/buy', { method: 'POST', body: { id } });
+      if (myGrow.event) myGrow.event.candy = j.candy;
+      myGrow.owned = j.owned;
+    } else {
+      const j = await api('/shop/buy', { method: 'POST', body: { id } });
+      myGrow.coins = j.coins;
+      myGrow.owned = j.owned;
+    }
+    store.set('ownedCache', myGrow.owned);
     renderGrowTop();
+    renderEvent();
     sfx.ding();
-    toast(`🎉 '${itemOf(id).name}'을(를) 샀어요! 바로 장착했어요.`);
+    toast(`🎉 '${it.name}'을(를) ${it && it.event ? '받았어요' : '샀어요'}! 바로 장착했어요.`);
     equipItem(id, true);
   } catch (e) { toast(e.message, 3000); renderShopSel(); }
 }
@@ -568,6 +595,67 @@ $('#shopDlg').addEventListener('click', (e) => {
   renderShopSel();
   if (shopPrev) shopPrev.reset();
 });
+
+/* ------------------------------------------------------------ 🎃 이벤트 (기간 한정) */
+function evLeftText(sec) {
+  const end = new Date(Date.now() + (sec - 60) * 1000);   // 끝나는 순간(다음 날 0시)의 1분 전 날짜
+  const d = end.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
+  return `${d} 밤 12시까지 · ${fmtDur(sec)} 남음`;
+}
+function renderEvent() {
+  const ev = myGrow && myGrow.event;
+  const bar = $('#evBar');
+  bar.classList.toggle('hidden', !ev);
+  renderEvDeco(!!ev);
+  if (!ev) { if ($('#eventDlg').open) $('#eventDlg').close(); return; }
+  const done = ev.missions.filter((m) => m.done).length;
+  bar.innerHTML = `<span class="evb-t">🎃 ${esc(ev.name)}</span><span class="evb-c">🍬 <b>${fmtN(ev.candy)}</b></span>`
+    + `<span class="evb-m">미션 ${done}/${ev.missions.length}</span><span class="evb-l">${fmtDur(ev.endsIn)} 남음</span><span class="evb-go">교환소 ▸</span>`;
+  if ($('#eventDlg').open) renderEventDlg();
+}
+function renderEventDlg() {
+  const ev = myGrow && myGrow.event;
+  if (!ev) return;
+  $('#evTitle').textContent = ev.name;
+  $('#evCandy').textContent = fmtN(ev.candy);
+  $('#evLeft').textContent = evLeftText(ev.endsIn);
+  const done = ev.missions.filter((m) => m.done).length;
+  $('#evMisSum').textContent = `${done}/${ev.missions.length}${ev.all ? ' · 🎉 모두 완료!' : ` · 모두 하면 🍬 +${ev.allBonus} 더`}`;
+  $('#evMis').innerHTML = ev.missions.map((m) => `<div class="ev-m${m.done ? ' done' : ''}"><span class="evm-t">${m.done ? '✅ ' : ''}${esc(m.text)}</span>`
+    + `<span class="evm-n">${m.done ? '완료' : `${fmtN(m.prog)}/${fmtN(m.goal)}`}</span><span class="evm-r">🍬+${m.reward}</span>`
+    + `<span class="gb-p"><i style="width:${Math.round((m.prog / m.goal) * 100)}%"></i></span></div>`).join('');
+  const items = SHOP ? SHOP.items.filter((i) => i.event === ev.id) : [];
+  $('#evShop').innerHTML = items.map((it) => {
+    const own = itemOwned(it.id), on = own && itemEquipped(it.id);
+    const catN = (SHOP.cats.find((c) => c[0] === it.cat) || [0, ''])[1];
+    return `<button type="button" class="ev-item${own ? ' own' : ''}${!own && ev.candy >= it.candy ? ' can' : ''}" data-id="${esc(it.id)}">`
+      + `<span class="si-sw sw-${esc(it.id)}">${swInner(it)}</span><span class="evi-n">${esc(it.name)}<small>${esc(catN)}</small></span>`
+      + `<span class="evi-p">${on ? '<b class="si-on">장착 중</b>' : own ? '<span class="si-own">받음</span>' : `🍬${fmtN(it.candy)}`}</span></button>`;
+  }).join('');
+}
+async function openEvent() {
+  if (!myGrow || !myGrow.event) return;
+  await loadShopItems();
+  renderEventDlg();
+  if (!$('#eventDlg').open) $('#eventDlg').showModal();
+  loadMe();
+}
+$('#evBar').addEventListener('click', openEvent);
+$('#evClose').addEventListener('click', () => $('#eventDlg').close());
+$('#evShop').addEventListener('click', (e) => {
+  const b = e.target.closest('.ev-item');
+  if (!b) return;
+  $('#eventDlg').close();
+  openShop(b.dataset.id);
+});
+/* 로비 배경에 박쥐·호박이 천천히 떠다님 (이벤트 동안만) */
+function renderEvDeco(on) {
+  const box = $('#evDeco');
+  box.classList.toggle('hidden', !on);
+  if (!on || box.childElementCount) return;
+  const marks = ['🦇', '🎃', '🦇', '👻', '🦇', '🎃', '🦇', '🍬'];
+  box.innerHTML = marks.map((m, i) => `<span style="--x:${(i * 13 + 5) % 92}%;--y:${(i * 29 + 8) % 80}%;--d:${16 + (i * 7) % 11}s;--dl:-${(i * 3.7) % 14}s;--s:${0.8 + ((i * 5) % 4) * 0.25}">${m}</span>`).join('');
+}
 
 /* ------------------------------------------------------------ 시작 */
 net.on('status', (ok) => { if (ok && myGrow) loadMe(); });

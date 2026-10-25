@@ -7,7 +7,7 @@
 <title>링크비트</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Orbitron:wght@600;800;900&family=Saira:ital,wdth,wght@0,75..100,500..900;1,75..100,500..900&family=Noto+Sans+KR:wght@400;500;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Gaegu:wght@700&family=Orbitron:wght@600;800;900&family=Saira:ital,wdth,wght@0,75..100,500..900;1,75..100,500..900&family=Noto+Sans+KR:wght@400;500;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -38,6 +38,7 @@
 
 <!-- ======================= 로비 (곡 선택) ======================= -->
 <section id="screen-lobby" class="screen active">
+  <div id="evDeco" class="ev-deco hidden" aria-hidden="true"></div>
   <header class="topbar">
     <h1 class="logo"><span class="logo-mark"></span>LINK<b>BEAT</b></h1>
     <div class="seg mode-seg" id="modeTabs">
@@ -170,6 +171,7 @@
         <span id="dbLeft" class="db-left"></span>
         <span class="db-btns"><button type="button" id="dbGo" class="primary small-btn">도전하기</button><button type="button" id="dbRank" class="small-btn">순위</button></span>
       </div>
+      <button type="button" id="evBar" class="ev-bar hidden" title="이벤트 미션·교환소 보기"></button>
       <div id="growBar" class="grow-bar hidden">
         <span id="gbMisHead" class="gb-head">📋 오늘의 미션</span>
         <div id="gbMis" class="gb-list"></div>
@@ -237,7 +239,7 @@
           <div id="roomWait" class="muted small center hidden">방장이 시작하길 기다리는 중...</div>
           <div class="chat">
             <div id="chatLog" class="chat-log"></div>
-            <input id="chatInput" maxlength="200" placeholder="채팅 (Enter)" autocomplete="off">
+            <div class="chat-in"><input id="chatInput" maxlength="200" placeholder="채팅 (Enter)" autocomplete="off"><button type="button" id="emoBtn" class="emo-open" title="이모티콘 보내기">😊</button></div>
           </div>
         </div>
       </div>
@@ -334,7 +336,7 @@
       </div>
     </div>
     <div id="rMulti" class="panel r-multi hidden">
-      <h3>이번 판 순위</h3>
+      <h3>이번 판 순위 <button type="button" id="rEmoBtn" class="emo-open small-btn" title="이모티콘 보내기">😊 이모티콘</button></h3>
       <div id="rDuel" class="r-duel hidden"></div>
       <ol id="rMultiList" class="r-multi-list"></ol>
     </div>
@@ -596,6 +598,7 @@
   <div class="skin-box">
     <div class="skin-head">
       <h3>WATCHING<small id="wTitle">구경 중</small></h3>
+      <button id="wEmoBtn" class="emo-open small-btn" type="button" title="이모티콘으로 응원하기">😊 응원</button>
       <button id="wClose" class="ghost small-btn" type="button">닫기</button>
     </div>
     <p class="small muted" id="wNote">게임이 끝나면 다음 판부터 같이 할 수 있어요.</p>
@@ -644,6 +647,18 @@
 </dialog>
 
 <!-- 꾸미기 -->
+<dialog id="eventDlg" class="ev-dlg">
+  <div class="ev-head"><h3>🎃 <span id="evTitle">할로윈 이벤트</span></h3><span class="ev-candy" title="사탕">🍬 <b id="evCandy">0</b></span>
+    <button type="button" id="evClose" class="ghost tm-x" aria-label="닫기">✕</button></div>
+  <p id="evLeft" class="ev-left"></p>
+  <p class="muted small ev-how">곡을 끝까지 칠 때마다 🍬를 받아요 (S 랭크·풀콤보면 더) · <b>친구와 멀티면 2배</b> · 가끔 나오는 <b>호박 노트</b>를 치면 하나에 +1 (한 판 최대 30)</p>
+  <h4>📋 이벤트 미션 <small id="evMisSum" class="muted"></small></h4>
+  <div id="evMis" class="ev-mis"></div>
+  <h4>🛍 교환소 <small class="muted">이번 이벤트에만 얻을 수 있어요 · 눌러서 미리 보기</small></h4>
+  <div id="evShop" class="ev-shop"></div>
+  <p class="muted small ev-tip">이벤트가 끝나면 남은 🍬는 1개당 2♪로 바꿔 드려요. 받은 꾸미기는 끝난 뒤에도 계속 쓸 수 있어요.</p>
+</dialog>
+
 <dialog id="shopDlg" class="shop-dlg">
   <div class="shop-head"><h3>🛒 상점</h3><span class="shop-coins" title="곡을 끝까지 칠 때마다, 미션·출석·리그·대결로 모여요">♪ <b id="shopCoins">0</b></span>
     <button type="button" id="shopClose" class="ghost tm-x" aria-label="닫기">✕</button></div>
@@ -688,7 +703,7 @@
           <h4>노트</h4>
           <div class="opt-row" id="noteShape">
             <button data-v="bar">막대</button><button data-v="round">둥근 캡슐</button><button data-v="circle">원형</button><button data-v="hollow">속 빈 원</button><button data-v="diamond">마름모</button><button data-v="line">얇은 선</button>
-            <button data-v="neon">네온 테두리</button><button data-v="star">별</button><button data-v="heart">하트</button><button data-v="gem">보석</button>
+            <button data-v="neon">네온 테두리</button><button data-v="star">별</button><button data-v="heart">하트</button><button data-v="gem">보석</button><button data-v="pumpkin">🎃 호박</button>
           </div>
           <div class="set-row"><span>두께 <b id="noteHVal"></b></span><input id="noteH" type="range" min="8" max="26" step="1"></div>
         </section>
@@ -702,14 +717,14 @@
             <div class="opt-row" id="lineStyleOpt"><button data-v="auto">자동</button><button data-v="bar">막대</button><button data-v="ring">원형 받침</button><button data-v="thin">얇은 선</button></div></div>
           <div class="set-row"><span>판정선 색</span><div class="swatches line-sw" id="lineSw"></div></div>
           <div class="set-row"><span>기어 테두리</span>
-            <div class="opt-row" id="gearOpt"><button data-v="metal">금속</button><button data-v="clear">투명</button><button data-v="wood">나무</button><button data-v="neon">네온</button><button data-v="chrome">크롬</button><button data-v="gold">황금</button></div></div>
+            <div class="opt-row" id="gearOpt"><button data-v="metal">금속</button><button data-v="clear">투명</button><button data-v="wood">나무</button><button data-v="neon">네온</button><button data-v="chrome">크롬</button><button data-v="gold">황금</button><button data-v="halloween">🎃 할로윈</button></div></div>
           <div class="set-row"><span>판정선 높이 <b id="judgeYVal"></b></span><input id="judgeYIn" type="range" min="70" max="240" step="5"></div>
         </section>
         <section>
           <h4>효과 · 소리</h4>
           <div class="opt-row" id="effectOpt">
             <button data-v="flash">플래시</button><button data-v="ring">링</button><button data-v="spark">불꽃</button>
-            <button data-v="petal">벚꽃잎</button><button data-v="stardust">별가루</button><button data-v="bolt">번개</button><button data-v="fire">타오르는 불꽃</button><button data-v="snow">눈송이</button><button data-v="off">끄기</button>
+            <button data-v="petal">벚꽃잎</button><button data-v="stardust">별가루</button><button data-v="bolt">번개</button><button data-v="fire">타오르는 불꽃</button><button data-v="snow">눈송이</button><button data-v="bat">🦇 박쥐</button><button data-v="off">끄기</button>
           </div>
           <div class="set-row"><span>타격감 <small class="muted">폭발·파편·반동 세기</small></span>
             <div class="opt-row" id="punchOpt"><button data-v="low">약하게</button><button data-v="mid">보통</button><button data-v="high">강하게</button></div></div>
@@ -726,8 +741,10 @@
             <label><input type="checkbox" id="optBreakSnd"> 콤보 끊김 소리</label>
             <button id="fxSndTest" class="small-btn" type="button">▶ 들어보기</button>
           </div>
-          <div class="set-row"><label><input type="checkbox" id="optApplause"> 풀콤보 박수 <small class="muted">ALL PERFECT면 더 크게</small></label>
+          <div class="set-row"><label><input type="checkbox" id="optApplause"> 풀콤보 박수·연출 소리 <small class="muted">ALL PERFECT면 더 크게</small></label>
             <div class="hit-row"><button id="applauseTest" class="small-btn" type="button">▶ 풀콤보</button><button id="applauseTestAp" class="small-btn" type="button">▶ 올퍼펙트</button></div></div>
+          <div class="set-row col"><span>풀콤보 연출 <small class="muted">풀콤보 때 화면에 나오는 것 · 고르면 미리보기에서 보여 줘요</small></span>
+            <div class="opt-row" id="fcFxOpt"><button data-v="basic">기본</button><button data-v="fireworks">🎆 불꽃놀이</button><button data-v="stars">🌟 별가루 폭죽</button><button data-v="hero">🙌 내 캐릭터 승리</button><button data-v="bats">🦇 박쥐 떼</button></div></div>
         </section>
         <section>
           <h4>표시</h4>
@@ -856,6 +873,7 @@
     <h5>어두운</h5><div class="tm-grid" data-g="dark"></div>
     <h5>밝은</h5><div class="tm-grid" data-g="light"></div>
   </div>
+<div id="emoPal" class="emo-pal hidden"></div>
 <script src="/static/core.js"></script>
 <script src="/static/game.js"></script>
 <script src="/static/editor.js"></script>
@@ -869,5 +887,6 @@
 <script src="/static/profile.js"></script>
 <script src="/static/gate.js"></script>
 <script src="/static/grow.js"></script>
+<script src="/static/emote.js"></script>
 </body>
 </html>

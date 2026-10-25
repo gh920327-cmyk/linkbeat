@@ -843,6 +843,7 @@ def prog_of(acct, pr=None, nick=None, claim_xp=None):
     if nick:
         p["nick"] = str(nick)[:16]
     p["lastSeen"] = time.time()
+    _ev_settle(p)
     return p
 
 
@@ -1111,6 +1112,11 @@ def on_play(acct, pr, nick, sid, diff, keys, data):
         p["lastPlay"] = time.time()
         out.update({"xp": {"gain": xp, "before": before, "after": p["xp"]}, "coins": {"gain": coins, "total": p["coins"]},
                     "streakN": p["streak"]["n"], "shields": p["streak"].get("shields", 0)})
+        # 이벤트 (기간 한정)
+        try:
+            _ev_play(p, info, data, out)
+        except Exception as e:
+            log("이벤트 기록 실패:", e)
         # 리그
         out["league"] = league_add(acct, p["nick"], xp)
         _prog_save()
@@ -1195,6 +1201,123 @@ def league_public(acct=None, limit=10):
         me = next(({"rank": i + 1, "pts": v["pts"]} for i, (a, v) in enumerate(ranked) if a == acct), None)
         prev = [{"nick": t["nick"], "pts": t["pts"]} for t in (L.get("prev") or {}).get("top", [])]
         return {"week": L["week"], "endsIn": _week_left(), "top": rows, "me": me, "n": len(ranked), "prev": prev, "prize": LEAGUE_PRIZE}
+
+
+# ---- 기간 한정 이벤트 (할로윈 2026): 🍬 사탕 · 호박 노트 · 이벤트 미션 · 교환소
+def _kst_ts(y, mo, d, h=0):
+    import calendar
+    return calendar.timegm((y, mo, d, h, 0, 0)) - KST
+
+
+EVENT = {"id": "hw26", "name": "할로윈 이벤트", "start": _kst_ts(2026, 10, 25), "end": _kst_ts(2026, 11, 2),
+         "cur": "🍬", "curName": "사탕", "conv": 2}          # 끝나면 남은 사탕 1개 = 2♪
+EV_MISSIONS = [("plays10", "아무 곡이나 10판 끝까지", 10, 30), ("s5", "S 랭크 이상 5번", 5, 40), ("multi3", "친구와 멀티 3판", 3, 50),
+               ("fc1", "풀콤보 1번", 1, 40), ("pk30", "호박 노트 30개 치기", 30, 30)]
+EV_ALL = 60          # 이벤트 미션을 다 하면 사탕 더
+EV_PK_MAX = 30       # 한 판에 호박 노트로 받는 사탕 최대
+
+
+def ev_active(t=None):
+    t = time.time() if t is None else t
+    return EVENT["start"] <= t < EVENT["end"]
+
+
+def _ev_of(p):
+    return p.setdefault("ev", {}).setdefault(EVENT["id"], {"candy": 0, "earned": 0, "prog": {}, "done": [], "all": False, "pk": 0})
+
+
+def _ev_settle(p):
+    """이벤트가 끝났으면 남은 사탕을 ♪로 바꿔 줌 (한 번만) — FILE_LOCK 안에서"""
+    if ev_active() or time.time() < EVENT["end"]:
+        return
+    e = (p.get("ev") or {}).get(EVENT["id"])
+    if not e or e.get("settled"):
+        return
+    e["settled"] = True
+    left = int(e.get("candy", 0))
+    if left > 0:
+        c = left * EVENT["conv"]
+        e["candy"] = 0
+        p["coins"] = p.get("coins", 0) + c
+        p["earned"] = p.get("earned", 0) + c
+        _notice(p, {"type": "event", "text": f"{EVENT['name']}가 끝났어요! 남은 {EVENT['cur']} {left}개를 {c:,}♪로 바꿔 드렸어요."})
+
+
+def ev_public(p):
+    if not ev_active():
+        return None
+    e = _ev_of(p)
+    ms = [{"id": mid, "text": text, "goal": goal, "prog": min(goal, int(e["prog"].get(mid, 0))), "done": mid in e["done"], "reward": rew}
+          for mid, text, goal, rew in EV_MISSIONS]
+    return {"id": EVENT["id"], "name": EVENT["name"], "cur": EVENT["cur"], "curName": EVENT["curName"], "endsIn": int(EVENT["end"] - time.time()),
+            "candy": e["candy"], "earned": e["earned"], "pk": e.get("pk", 0), "missions": ms, "all": bool(e.get("all")), "allBonus": EV_ALL,
+            "conv": EVENT["conv"], "pkMax": EV_PK_MAX}
+
+
+def _ev_play(p, info, data, out):
+    """끝까지 한 판: 사탕 (기본 + 멀티 2배 + 호박 노트) · 이벤트 미션 — FILE_LOCK 안에서"""
+    if not ev_active():
+        return
+    e = _ev_of(p)
+    rk = RANK_AT.get(info["rank"], 0)
+    base = 5 + (3 if rk >= RANK_AT["S"] else 0) + (2 if info["fc"] else 0)
+    parts = []
+    if info["multi"]:
+        base *= 2
+        parts.append(["플레이 (멀티 ×2)", base])
+    else:
+        parts.append(["플레이", base])
+    try:
+        pk = int(data.get("pumpkins") or 0)
+    except (TypeError, ValueError):
+        pk = 0
+    pk = max(0, min(pk, EV_PK_MAX, math.ceil(info["units"] * 0.06)))
+    if pk:
+        parts.append([f"호박 노트 {pk}개", pk])
+    gain = base + pk
+    e["pk"] = int(e.get("pk", 0)) + pk
+    newly = []
+    for mid, text, goal, rew in EV_MISSIONS:
+        if mid in e["done"]:
+            continue
+        inc = {"plays10": 1, "s5": int(rk >= RANK_AT["S"]), "multi3": int(info["multi"]), "fc1": int(info["fc"]), "pk30": pk}.get(mid, 0)
+        e["prog"][mid] = int(e["prog"].get(mid, 0)) + inc
+        if e["prog"][mid] >= goal:
+            e["done"].append(mid)
+            gain += rew
+            newly.append({"id": mid, "text": text, "reward": rew})
+    if newly:
+        parts.append([f"이벤트 미션 {len(newly)}개", sum(m["reward"] for m in newly)])
+    all_now = len(e["done"]) >= len(EV_MISSIONS) and not e.get("all")
+    if all_now:
+        e["all"] = True
+        gain += EV_ALL
+        parts.append(["이벤트 미션 모두 완료", EV_ALL])
+    e["candy"] = int(e.get("candy", 0)) + gain
+    e["earned"] = int(e.get("earned", 0)) + gain
+    out["event"] = {"cur": EVENT["cur"], "gain": gain, "parts": parts, "total": e["candy"], "missions": newly, "allDone": all_now, "pk": pk}
+
+
+def event_buy(acct, pr, data):
+    iid = str(data.get("id", ""))
+    it = ITEMS.get(iid)
+    if not it or it.get("event") != EVENT["id"] or not it.get("candy"):
+        raise HttpError(400, "이벤트 교환소 물건이 아니에요.")
+    if not ev_active():
+        raise HttpError(400, "이벤트가 끝났어요.")
+    price = int(it["candy"])
+    with FILE_LOCK:
+        p = prog_of(acct, pr)
+        e = _ev_of(p)
+        if iid in p["owned"]:
+            raise HttpError(400, "이미 가지고 있어요.")
+        if e["candy"] < price:
+            raise HttpError(400, f"{EVENT['curName']}이 모자라요. {EVENT['cur']} {price - e['candy']}개 더 모아 주세요.")
+        e["candy"] -= price
+        p["owned"].append(iid)
+        _prog_save()
+        log("이벤트 교환:", acct, iid, price)
+        return {"ok": True, "candy": e["candy"], "owned": p["owned"]}
 
 
 # ---- 상점
@@ -1424,7 +1547,7 @@ def me_summary(acct, pr, data):
                "streak": {"n": st["n"] if alive else 0, "best": st.get("best", 0), "shields": st.get("shields", 0), "today": st.get("last") == day},
                "ret": p.get("ret", 0), "missions": mis, "misAll": p.get("misAll", 0), "notices": p["notices"][-30:],
                "unread": sum(1 for n in p["notices"] if not n.get("read")), "chal": p["chal"], "champ": p.get("champ", 0),
-               "chalOut": out_ch, "deco": p.get("deco", {})}
+               "chalOut": out_ch, "deco": p.get("deco", {}), "event": ev_public(p)}
     res["league"] = league_public(acct)
     res["shop"] = dict(shop_today(), prices={i: price_of(i) for i in ITEMS if ITEMS[i].get("price")})
     res["medal"] = medal_of(acct)
@@ -3592,6 +3715,9 @@ async def api(method, path, headers, body):
     if parts == ["shop", "buy"] and method == "POST":
         acct, pr = acct_need(headers)
         return shop_buy(acct, pr, json_body(body))
+    if parts == ["event", "buy"] and method == "POST":
+        acct, pr = acct_need(headers)
+        return event_buy(acct, pr, json_body(body))
     if parts == ["notices", "read"] and method == "POST":
         acct, _ = acct_need(headers)
         return notices_read(acct)
@@ -4540,6 +4666,13 @@ def handle_msg(c, m):
         text = str(m.get("text", "")).strip()[:200]
         if text:
             room.broadcast({"type": "chat", "name": c.name, "text": text})
+        return
+    if t == "emote" and room:
+        e = str(m.get("e", ""))
+        now = time.time()
+        if re.fullmatch(r"[a-z]{2,8}", e) and now - getattr(c, "emoAt", 0) >= 1.0:     # 이모티콘 (너무 자주는 못 보냄)
+            c.emoAt = now
+            room.broadcast({"type": "emote", "id": c.id, "name": c.name, "e": e})
         return
     if not room:
         return
