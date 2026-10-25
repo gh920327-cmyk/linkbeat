@@ -1778,7 +1778,7 @@ net.on('prepare', async (m) => {
 function startMulti(g, at) {
   g.gotStart = true;
   const lead = (at - net.serverNow()) / 1000;
-  g.begin(Math.max(0.3, lead));
+  g.begin(Math.max(2.0, lead));      // 늦게 합류해도 카운트인 세 번은 다 듣고 시작 (점수는 각자라 조금 늦어도 괜찮음)
 }
 
 net.on('start', (m) => {

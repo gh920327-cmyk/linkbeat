@@ -1,7 +1,8 @@
 /* 링크비트 플레이 화면 */
 'use strict';
 
-const JUDGE = { perfect: 0.055, great: 0.09, good: 0.14, bad: 0.18 };   // PERFECT ±55ms (예전 ±45ms에서 조금 넓힘)
+const JUDGE = { perfect: 0.055, great: 0.09, good: 0.14, bad: 0.18 };
+const EARLIEST_NOTE = 0.15;   // 곡 처음부터 할 때 이보다 앞(또는 음수 시간)의 노트는 빼요   // PERFECT ±55ms (예전 ±45ms에서 조금 넓힘)
 const WEIGHT = { perfect: 1, great: 0.7, good: 0.4, miss: 0 };
 const JUDGE_COLORS = { perfect: '#ffe45e', great: '#5effa1', good: '#5ec8ff', miss: '#ff5a6e' };
 const JUDGE_TEXT = { perfect: 'PERFECT', great: 'GREAT', good: 'GOOD', miss: 'MISS' };
@@ -1024,7 +1025,8 @@ class Game {
     const from = practice ? (practice.from ?? practice.start) : 0;
     const shift = (+song.noteShift || 0) / 1000;   // 곡마다 노트 전체 타이밍 (호스트가 곡 정보에서 ±)
     this.notes = src.map((n) => ({ t: +n.t + shift, l: map[n.l | 0] ?? (n.l | 0), d: +n.d || 0, a: n.a ? 1 : 0, head: null, tail: null }))
-      .filter((n) => n.l >= 0 && n.l < this.nl && (!practice || (n.t >= from - 0.001 && n.t <= practice.end)))
+      .filter((n) => n.l >= 0 && n.l < this.nl && (!practice || (n.t >= from - 0.001 && n.t <= practice.end))
+        && (practice || n.t >= EARLIEST_NOTE))   // 곡 맨 앞(영상이 켜지는 순간)에 있는 노트는 칠 수 없어서 뺌
       .sort((a, b) => a.t - b.t || a.l - b.l);
     this.hl = !!(practice && practice.hl);
     // 후렴 구간들 (들어갈 때 연출) — 하이라이트 모드면 시작부터 후렴
@@ -1189,6 +1191,8 @@ class Game {
     // 카운트인: 곡 박자(너무 빠르거나 느리면 0.35~0.8초)로 '딱' 세 번 — 세 번째가 시작 위치
     const gap = clamp(60 / (+this.song.bpm || 120), 0.35, 0.8) * this.rate;
     this.clicks = [this.startT - 2 * gap, this.startT - gap, this.startT];
+    this.seekFixAt = 0;
+    this.jumpFixAt = 0;
     this.clickN = this.clicks.filter((c) => c < this.clock.now()).length;   // 이미 지난 박은 건너뜀 (늦게 합류한 멀티 등)
     this.clickAt = 0;
     this.phase = 'countdown';
@@ -1213,6 +1217,17 @@ class Game {
         this.softUntil = performance.now() + 2000;
         this.lastVT = -1;
         this.phase = 'playing';
+        return;
+      }
+      if (this.phase === 'waitVideo' && Math.abs(yt.time() - this.startT) > 0.5) {
+        // 영상이 시작 위치가 아닌 곳(미리듣기로 듣던 후렴 등)에서 재생됨 → 시계를 그쪽으로 뛰지 않고 시작 위치로 되감은 뒤 다시 기다림
+        yt.seek(this.startT);
+        this.seekFixAt = performance.now();
+        return;
+      }
+      if ((this.phase === 'playing' || this.phase === 'resuming') && Math.abs(yt.time() - this.clock.now()) > 1.2 * this.rate) {
+        yt.seek(this.clock.now());      // 다시 재생될 때 엉뚱한 위치면 시계를 뛰지 않고 영상을 되돌림
+        this.jumpFixAt = performance.now();
         return;
       }
       if (['waitVideo', 'playing', 'resuming'].includes(this.phase)) {
@@ -1426,10 +1441,32 @@ class Game {
         const wait = performance.now() - this.waitSince;
         if (wait > 10000) { this.abort('영상이 시작되지 않아요. 인터넷 연결을 확인하고 다시 시도해 주세요.'); return; }
         if (wait - (this.retryAt || 0) > 1000 && yt.state() !== YTS.PLAYING && yt.state() !== YTS.BUFFERING) { this.retryAt = wait; yt.play(); }
+        if (this.seekFixAt && yt.state() === YTS.PLAYING && performance.now() - this.seekFixAt > 250) {
+          const vt = yt.time();
+          if (Math.abs(vt - this.startT) <= 0.5) {          // 시작 위치로 잘 돌아옴 → 지금부터 시작
+            this.seekFixAt = 0;
+            this.clock.set(Math.max(this.startT, vt));
+            this.clock.start();
+            this.softUntil = performance.now() + 2000;
+            this.lastVT = -1;
+            this.phase = 'playing';
+          } else if (performance.now() - this.seekFixAt > 1200) { yt.seek(this.startT); this.seekFixAt = performance.now(); }   // 아직이면 한 번 더
+        }
       }
       if (this.phase === 'playing') {
         const vt = yt.time();
-        if (vt !== this.lastVT) {
+        const now = performance.now();
+        if (!this.clock.running && yt.state() === YTS.PLAYING && Math.abs(vt - this.clock.now()) <= 1.2 * this.rate && now - (this.jumpFixAt || 0) > 250) {
+          this.clock.set(vt);             // 되돌린 뒤 '재생됨' 알림이 다시 안 와도 시계를 다시 움직임
+          this.clock.start();
+          this.lastVT = vt;
+        }
+        if (vt !== this.lastVT && Math.abs(vt - this.clock.now()) > 1.2 * this.rate && now - (this.jumpFixAt || 0) > 1500) {
+          // 영상 위치가 갑자기 크게 바뀜(엉뚱한 위치에서 재생·되감김) → 노트가 몰려 사라지지 않게 영상을 게임 위치로
+          this.jumpFixAt = now;
+          yt.seek(this.clock.now());
+          this.lastVT = vt;
+        } else if (vt !== this.lastVT) {
           if (this.nextNoteT() > Math.max(this.clock.now(), vt) + this.lookahead() + 0.3) this.clock.set(vt);   // 화면에 노트가 없으면 바로 맞춤 (눈에 안 보임)
           // 노트가 보일 땐 빠르기만 살짝 바꿔 따라감. 시작 직후 2초는 유튜브 시간이 들쭉날쭉해서 더 너그럽게
           else this.clock.follow(vt, performance.now() < (this.softUntil || 0) ? 0.6 : 0.4);
