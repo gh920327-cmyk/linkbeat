@@ -204,9 +204,9 @@ function toast(msg, ms = 2200) {
 
 /* ------------------------------------------------------------ 시계 */
 class SongClock {
-  constructor() { this.running = false; this.base = 0; this.anchor = 0; }
-  now(perf = performance.now()) { return this.running ? this.base + (perf - this.anchor) / 1000 * (this.rate || 1) : this.base; }
-  set(t, perf = performance.now()) { this.base = t; this.anchor = perf; }
+  constructor() { this.running = false; this.base = 0; this.anchor = 0; this.adj = 0; }
+  now(perf = performance.now()) { return this.running ? this.base + (perf - this.anchor) / 1000 * (this.rate || 1) * (1 + this.adj) : this.base; }
+  set(t, perf = performance.now()) { this.base = t; this.anchor = perf; this.adj = 0; }
   start(perf = performance.now()) { if (!this.running) { this.anchor = perf; this.running = true; } }
   stop() { if (this.running) { this.base = this.now(); this.running = false; } }
   /* 유튜브 시간과 맞추기: 크게 어긋나면 바로, 조금이면 부드럽게 */
@@ -215,6 +215,14 @@ class SongClock {
     const err = vt - cur;
     if (Math.abs(err) > snap) this.set(vt);
     else this.set(cur + err * k);
+  }
+  /* 플레이용: 위치를 건드리지 않고 흐르는 빠르기만 살짝(최대 ±6%) 바꿔서 유튜브를 따라감 → 노트가 갑자기 빨라지거나 튀지 않음.
+     아주 크게 어긋났을 때(snap)만 바로 맞춤 (최대 ±8%) */
+  follow(vt, snap = 0.4, maxAdj = 0.08) {
+    const p = performance.now(), cur = this.now(p), err = vt - cur;
+    if (Math.abs(err) > snap) { this.set(vt, p); return; }
+    const a = Math.abs(err) < 0.012 ? 0 : clamp(err * 0.8, -maxAdj, maxAdj);
+    if (a !== this.adj) { this.base = cur; this.anchor = p; this.adj = a; }
   }
 }
 
@@ -246,6 +254,19 @@ const sfx = {
 };
 /* 타격감 소리 (직접 합성): 강타 · 롱노트 마무리 · 콤보 끊김 — 음량은 전체 음량을 따름 */
 sfx.fxVol = function (k) { return clamp((settings.volume ?? 80) / 100, 0, 1) * k; };
+/* 시작 카운트인: 드럼 스틱 '딱' (마지막은 조금 더 세게) */
+sfx.stick = function (accent = false) {
+  const ctx = this.ensure();
+  if (!ctx) return;
+  const t = ctx.currentTime + 0.005, v = this.fxVol(accent ? 0.55 : 0.4);
+  const n = this.noise(ctx, 0.06); const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = accent ? 2500 : 3100; bp.Q.value = 2.5;
+  const g = ctx.createGain(); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+  n.connect(bp).connect(g).connect(ctx.destination); n.start(t); n.stop(t + 0.06);
+  const o = ctx.createOscillator(); o.type = 'triangle';            // 나무가 부딪히는 '똑' 울림
+  o.frequency.setValueAtTime(accent ? 1500 : 1850, t); o.frequency.exponentialRampToValueAtTime(accent ? 850 : 1050, t + 0.045);
+  const g2 = ctx.createGain(); g2.gain.setValueAtTime(v * 0.7, t); g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+  o.connect(g2).connect(ctx.destination); o.start(t); o.stop(t + 0.08);
+};
 /* 방: 모두 준비됐을 때 방장에게 '띵-동' */
 sfx.ding = function () {
   const ctx = this.ensure();
@@ -523,6 +544,7 @@ const yt = {
     p.pauseVideo();
     p.seekTo(0, true);
     await sleep(250);
+    for (let i = 0; i < 8 && (p.getCurrentTime() || 0) > 0.05; i++) { p.seekTo(0, true); await sleep(100); }
     p.unMute();
     p.setVolume(settings.volume);
     p.setPlaybackRate(1);
