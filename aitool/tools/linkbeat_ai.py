@@ -417,6 +417,16 @@ class Mug:
         return results
 
 
+_MUG = []
+
+
+def get_mug():
+    """AI 모델은 한 번만 불러서 계속 씀 (여러 곡을 연달아 만들 때 그래픽카드 메모리가 쌓이지 않게)"""
+    if not _MUG:
+        _MUG.append(Mug())
+    return _MUG[0]
+
+
 # ------------------------------------------------------------------ 명령
 def cmd_check():
     ok = True
@@ -446,9 +456,9 @@ def cmd_check():
     return ok
 
 
-def cmd_make(link):
+def cmd_make(link, mode="", srv=None):
     import chartgen
-    srv = get_server(need_key=True)
+    srv = srv or get_server(need_key=True)
     vid = parse_vid(link)
     if not vid:
         raise SystemExit("유튜브 링크를 알아볼 수 없어요.")
@@ -469,7 +479,7 @@ def cmd_make(link):
     wav, info = download_audio(vid, wdir)
 
     say("\n[3/4] AI 채보 만들기 (그래픽카드로 2~5분)")
-    body, chosen = make_charts(vid, wav, targets, title, song.get("artist", ""), song.get("duration") or 900)
+    body, chosen = make_charts(vid, wav, targets, title, song.get("artist", ""), song.get("duration") or 900, mode=mode)
 
     say("\n[4/4] 서버에 'AI 채보'로 따로 저장 (기본 채보는 그대로)")
     r = upload(srv, vid, body)
@@ -602,8 +612,8 @@ def load_cands(odir, duration):
     return cands
 
 
-def write_summary(odir, vid, title, seed, model, targets, chosen, cands):
-    summary = {"vid": vid, "title": title, "at": time.time(), "seed": seed, "model": model, "targets": targets,
+def write_summary(odir, vid, title, seed, model, targets, chosen, cands, mode=""):
+    summary = {"vid": vid, "title": title, "at": time.time(), "seed": seed, "model": model, "targets": targets, "mode": mode,
                "chosen": {d: {"file": c[2], "stars": c[0], "notes": len(c[1])} for d, c in chosen.items()},
                "candidates": [{"file": c[2], "stars": c[0], "notes": len(c[1])} for c in sorted(cands, key=lambda c: c[0])]}
     (odir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -615,6 +625,272 @@ def demucs_ok():
         return True
     except Exception:
         return False
+
+
+# ------------------------------------------------------------------ 일관성 (소리별로 박자 이끄는 소리를 정해서 후보 고르기)
+STEM_W = {"drums": 1.0, "bass": 0.8, "other": 1.0, "vocals": 0.6}   # 보컬은 점수 낮춤 (보컬만 따라가는 채보 방지)
+PHRASE_BEATS = 16      # 4마디씩 묶음
+SIM_SAME = 0.75        # 묶음끼리 이만큼 비슷하면 '반복 구간' (같은 소리를 따라감)
+SWITCH_COST = 0.08     # 후보를 바꾸는 비용 (너무 자주 바꾸지 않게)
+NEAR_STAR = 0.8        # 본 채보와 별 차이가 이 안인 후보만 섞음
+MAIN_BONUS = 0.05      # 본 채보(평소 방식으로 고른 것)는 조금 우대 — 확실히 더 맞을 때만 바꿈
+STAR_KEEP = 0.6        # 다 이어 붙인 뒤 별이 이만큼 넘게 달라지면 그 난이도는 평소 방식 그대로
+HIT_WIN = 0.04         # 노트가 소리에 맞았다고 보는 범위(초)
+
+
+def analyze_stems(ys, harm, sr=22050, hop=512):
+    """소리별(드럼·베이스·나머지·보컬) 박자 위치·세기, 박(beat) 위치, 박마다 음 높이 분포(반복 구간 찾기용)"""
+    import numpy as np
+    import librosa
+    env_sum = None
+    stems = {}
+    for n, y in ys.items():
+        env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop)
+        env_sum = env if env_sum is None else env_sum[:len(env)] + env[:len(env_sum)]
+        fr = librosa.onset.onset_detect(onset_envelope=env, sr=sr, hop_length=hop, backtrack=False, delta=0.05)
+        rms = librosa.feature.rms(y=y, hop_length=hop)[0]
+        top = float(np.percentile(env[fr], 95)) if len(fr) else 1.0
+        stems[n] = {"on": [[round(float(t), 3), round(float(min(1.5, env[f] / max(top, 1e-6))), 3), round(float(rms[min(f, len(rms) - 1)]), 4)]
+                           for f, t in zip(fr, librosa.frames_to_time(fr, sr=sr, hop_length=hop))]}
+    _, beats = librosa.beat.beat_track(onset_envelope=env_sum, sr=sr, hop_length=hop, units="frames")
+    btimes = librosa.frames_to_time(beats, sr=sr, hop_length=hop)
+    chroma = librosa.feature.chroma_stft(y=harm, sr=sr, hop_length=hop)
+    sync = librosa.util.sync(chroma, beats, aggregate=np.mean)[:, 1:] if len(beats) else chroma[:, :0]   # 첫 칸은 첫 박 앞
+    loud = {}
+    for n, y in ys.items():                     # 박마다 소리 크기 (어느 소리가 크게 들리는지)
+        rms = librosa.feature.rms(y=y, hop_length=hop)[0]
+        loud[n] = [round(float(v), 4) for v in (librosa.util.sync(rms[None], beats, aggregate=np.mean)[0][1:] if len(beats) else [])]
+    return {"beats": [round(float(t), 3) for t in btimes], "stems": stems, "loud": loud,
+            "chroma": [[round(float(v), 2) for v in col] for col in sync.T]}
+
+
+def phrases_of(stems, duration):
+    """박 위치 → 4마디 묶음 [(시작, 끝, 첫 박 번호, 끝 박 번호)]"""
+    beats = stems.get("beats") or []
+    if len(beats) < PHRASE_BEATS * 2:
+        return []
+    out = []
+    for i in range(0, len(beats), PHRASE_BEATS):
+        a = 0.0 if i == 0 else beats[i] - 0.06
+        j = min(len(beats), i + PHRASE_BEATS)
+        b = duration + 1 if j >= len(beats) else beats[j] - 0.06
+        out.append((a, b, i, j))
+    if len(out) > 1 and out[-1][3] - out[-1][2] < PHRASE_BEATS // 2:     # 짧은 끝 묶음은 앞에 붙임
+        a, _, i, _ = out[-2]
+        out[-2:] = [(a, out[-1][1], i, out[-1][3])]
+    return out
+
+
+def lead_scores(stems, phrases):
+    """묶음마다 소리별 '박자를 또렷하게 이끄는 정도': 박 쪼갬(16분) 위에 찍힌 세기 합 × 그 소리 크기(상대) × 가중치"""
+    import bisect
+    beats = stems["beats"]
+    grid = []
+    for a, b in zip(beats, beats[1:]):
+        grid += [a + (b - a) * k / 4 for k in range(4)]
+    grid.append(beats[-1])
+    res = []
+    for a, b, i, j in phrases:
+        loud = {}
+        for n, v in (stems.get("loud") or {}).items():
+            seg = v[i:j] or [0.0]
+            loud[n] = sum(seg) / len(seg)
+        mx = max(loud.values() or [1e-6]) or 1e-6
+        sc = {}
+        for n, st in stems["stems"].items():
+            on = st["on"]
+            ts = [x[0] for x in on]
+            lo, hi = bisect.bisect_left(ts, a), bisect.bisect_left(ts, b)
+            acc = 0.0
+            for t, strength, _ in on[lo:hi]:
+                g = bisect.bisect_left(grid, t)
+                near = min((abs(grid[k] - t) for k in (g - 1, g) if 0 <= k < len(grid)), default=1)
+                if near <= 0.035:
+                    acc += min(1.0, strength)
+            sc[n] = acc / max(1.0, b - a) * (loud.get(n, 0) / mx) ** 0.5 * STEM_W.get(n, 0.8)
+        res.append(sc)
+    return res
+
+
+def _cos(u, v):
+    import math
+    nu = math.sqrt(sum(x * x for x in u)) or 1e-9
+    nv = math.sqrt(sum(x * x for x in v)) or 1e-9
+    return sum(x * y for x, y in zip(u, v)) / (nu * nv)
+
+
+def lead_labels(stems, phrases, scores):
+    """묶음마다 따라갈 소리: 반복 구간끼리는 같은 소리(점수 합이 가장 큰 것), 혼자 튀는 묶음은 이웃에 맞춤"""
+    chroma = stems.get("chroma") or []
+    feats = []
+    for a, b, i, j in phrases:
+        f = []
+        for k in range(i, i + PHRASE_BEATS):
+            if k < min(j, len(chroma)):
+                m = sum(chroma[k]) / 12
+                f += [x - m for x in chroma[k]]       # 박마다 평균을 빼야 '다른 화음'끼리 덜 비슷하게 나옴
+            else:
+                f += [0.0] * 12
+        feats.append(f)
+    parent = list(range(len(phrases)))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    for x in range(len(phrases)):
+        for y in range(x):
+            if _cos(feats[x], feats[y]) >= SIM_SAME:
+                parent[find(x)] = find(y)
+    groups = {}
+    for x in range(len(phrases)):
+        groups.setdefault(find(x), []).append(x)
+    labels = [None] * len(phrases)
+    for members in groups.values():
+        tot = {}
+        for x in members:
+            for n, v in scores[x].items():
+                tot[n] = tot.get(n, 0) + v
+        best = max(tot, key=tot.get) if tot else "drums"
+        for x in members:
+            labels[x] = best
+    for x in range(1, len(phrases) - 1):          # 혼자 튀면 (점수 차가 작을 때만) 이웃 따라감
+        l, r = labels[x - 1], labels[x + 1]
+        if l == r != labels[x] and len(groups[find(x)]) == 1:
+            s = scores[x]
+            if s.get(l, 0) >= 0.85 * s.get(labels[x], 0):
+                labels[x] = l
+    return labels, [find(x) for x in range(len(phrases))]
+
+
+def _near_count(times, ref, win):
+    import bisect
+    k = 0
+    for t in times:
+        i = bisect.bisect_left(ref, t)
+        if any(0 <= j < len(ref) and abs(ref[j] - t) <= win for j in (i - 1, i)):
+            k += 1
+    return k
+
+
+def _lag(times, ref):
+    """후보 노트와 소리 위치 사이 전체 어긋남(초) — 분리한 소리 위치는 조금 늦게 잡혀서 그만큼 빼고 비교"""
+    import bisect
+    ds = []
+    for t in times:
+        i = bisect.bisect_left(ref, t)
+        best = None
+        for j in (i - 1, i):
+            if 0 <= j < len(ref) and abs(ref[j] - t) <= 0.06 and (best is None or abs(ref[j] - t) < abs(best)):
+                best = ref[j] - t
+        if best is not None:
+            ds.append(best)
+    ds.sort()
+    return ds[len(ds) // 2] if ds else 0.0
+
+
+def consist_one(main, pool, stems, phrases, labels, duration):
+    """한 난이도: 묶음마다 '따라갈 소리'에 가장 잘 맞는 후보를 고르되 (밀도는 본 채보와 비슷하게, 바꾸는 비용 있음)
+    AI 노트는 그대로, 묶음 단위로 이어 붙임 → (노트, [묶음마다 고른 후보 이름])"""
+    import bisect
+    import math
+    star = main[0]
+    cands = [main] + [c for c in pool if c[2] != main[2] and abs(c[0] - star) <= NEAR_STAR]
+    alignedc = []
+    for c in cands:
+        sh = 0.0 if c is main else _align(c[1], main[1])
+        alignedc.append((c, sorted((dict(n, t=round(n["t"] + sh, 3)) for n in c[1]), key=lambda n: (n["t"], n["l"]))))
+    ref = {n: sorted(x[0] for x in st["on"] if x[1] >= 0.15) for n, st in stems["stems"].items()}
+    allref = sorted(t for v in ref.values() for t in v)
+    lag = _lag(sorted({n["t"] for n in main[1]}), allref)
+    P, C = len(phrases), len(alignedc)
+    tlist = [[n["t"] for n in ns] for _, ns in alignedc]
+    score = [[-9.0] * C for _ in range(P)]
+    for p, (a, b, _, _) in enumerate(phrases):
+        lead = ref.get(labels[p]) or allref
+        mlo, mhi = bisect.bisect_left(tlist[0], a), bisect.bisect_left(tlist[0], b)
+        dm = len({round(t, 3) for t in tlist[0][mlo:mhi]})
+        for k in range(C):
+            lo, hi = bisect.bisect_left(tlist[k], a), bisect.bisect_left(tlist[k], b)
+            ts = sorted({round(t + lag, 3) for t in tlist[k][lo:hi]})
+            if not ts:
+                score[p][k] = -1.0 if dm else 0.0
+                continue
+            r = len(ts) / max(1, dm)
+            if k and dm and not (0.8 <= r <= 1.25):
+                continue                          # 그 구간만 확 어려워지거나 쉬워지는 후보는 안 씀
+            prec = _near_count(ts, lead, HIT_WIN) / len(ts)
+            strong = [t for t in lead if a <= t < b]
+            rec = _near_count(strong, ts, HIT_WIN) / max(1, len(strong))
+            score[p][k] = (1.25 * prec * rec / max(1e-6, 0.25 * prec + rec)) - (0.3 * abs(math.log(r)) if dm else 0) + (MAIN_BONUS if k == 0 else 0)
+    # 바꾸는 비용을 넣고 처음부터 끝까지 가장 좋은 길 (비터비)
+    best = [score[0][:]]
+    back = [[0] * C]
+    for p in range(1, P):
+        row, br = [], []
+        for k in range(C):
+            prev = max(range(C), key=lambda q: best[-1][q] - (SWITCH_COST if q != k else 0))
+            row.append(best[-1][prev] - (SWITCH_COST if prev != k else 0) + score[p][k])
+            br.append(prev)
+        best.append(row)
+        back.append(br)
+    k = max(range(C), key=lambda q: best[-1][q])
+    path = [k]
+    for p in range(P - 1, 0, -1):
+        k = back[p][k]
+        path.append(k)
+    path.reverse()
+    out = []
+    for p, (a, b, _, _) in enumerate(phrases):
+        nxt = path[p + 1] if p + 1 < P else path[p]
+        for n in alignedc[path[p]][1]:
+            if a <= n["t"] < b:
+                n = dict(n)
+                if nxt != path[p] and n["t"] + float(n.get("d", 0) or 0) > b - 0.08:
+                    d = b - 0.08 - n["t"]
+                    n["d"] = round(d, 3) if d >= 0.25 else 0.0      # 이음새를 넘는 롱노트는 자름
+                out.append(n)
+    names = [c[2] for c, _ in alignedc]
+    table = [{names[k]: round(score[p][k], 3) for k in range(C) if score[p][k] > -9} for p in range(P)]
+    return sorted(out, key=lambda n: (n["t"], n["l"])), [names[k] for k in path], table
+
+
+def choose_consist(cands, targets, duration, stems):
+    """일관성 방식: 평소처럼 난이도마다 본 채보를 고른 뒤, 묶음마다 따라갈 소리에 맞는 후보로 갈아 끼움 → (chosen, 기록)"""
+    import chartgen
+    base = choose(cands, targets, duration)
+    phrases = phrases_of(stems or {}, duration)
+    if not phrases:
+        return base, None
+    main_c = [c for c in cands if not c[2].endswith("_i")] or cands
+    inst_c = [c for c in cands if c[2].endswith("_i") and len(c[1]) >= 50]
+    active = active_secs(main_c, duration)
+    pool = [c for c in main_c if coverage(c[1], active) >= MIN_COVER]
+    byname = {c[2]: c for c in cands}
+    scores = lead_scores(stems, phrases)
+    labels, groups = lead_labels(stems, phrases, scores)
+    log = {"phrases": [{"t": [round(a, 2), round(b, 2)], "lead": labels[p], "group": groups[p],
+                        "scores": {n: round(v, 3) for n, v in scores[p].items()}} for p, (a, b, _, _) in enumerate(phrases)],
+           "picks": {}}
+    chosen = {}
+    for d, c in base.items():
+        main = byname.get(c[2].split("+")[0])
+        if not main:
+            chosen[d] = c
+            continue
+        notes, path, table = consist_one(main, pool, stems, phrases, labels, duration)
+        log.setdefault("table", {})[d] = table
+        notes, used = fill_gaps((main[0], notes, main[2]), main_c, inst_c, duration)
+        star = chartgen.star_rating(notes, 4)
+        if abs(star - c[0]) > STAR_KEEP:
+            chosen[d] = c
+            log["picks"][d] = f"평소 방식 그대로 (별 {c[0]:.1f}→{star:.1f}로 너무 달라짐)"
+            continue
+        tag = "일관성" + (("+" + "+".join(f"{n}({s:.0f}초)" for n, s in used[:3])) if used else "")
+        chosen[d] = (star, notes, f"{main[2]}·{tag}")
+        log["picks"][d] = path
+    return chosen, log
 
 
 def separate(wav, folder):
@@ -656,31 +932,39 @@ def separate(wav, folder):
         inst_path = folder / "inst.wav"
         soundfile.write(str(inst_path), inst_mono.astype(np.float32), 22050)
         onsets = []
+        ys = {}
         for i, n in enumerate(names):                # 소리마다 시작 위치 (보컬 포함 — '소리 없는 곳' 판단용)
             y = librosa.resample(out[i].mean(0), orig_sr=sr, target_sr=22050)
             if float(np.sqrt(np.mean(y ** 2))) < 1e-4:
                 continue
+            ys[n] = y
             ts = librosa.onset.onset_detect(y=y, sr=22050, units="time", backtrack=False, delta=0.07)
             onsets += [float(t) for t in ts]
         onsets.sort()
+        stems = None
+        try:
+            stems = analyze_stems(ys, inst_mono)
+        except Exception as e:
+            traceback.print_exc()
+            say(f"  ⚠ 소리별 분석을 건너뛰어요: {e}")
         merged = []
         for t in onsets:                              # 20ms 안에 겹치면 하나로
             if not merged or t - merged[-1] > 0.02:
                 merged.append(round(t, 3))
         say(f"  소리 분리 끝: 소리 위치 {len(merged)}개")
-        return {"inst": inst_path, "onsets": merged[:20000]}
+        return {"inst": inst_path, "onsets": merged[:20000], "stems": stems}
     except Exception as e:
         traceback.print_exc()
         say(f"  ⚠ 소리 분리를 건너뛰어요: {e}")
         return None
 
 
-def make_charts(vid, wav, targets, title, artist, duration):
+def make_charts(vid, wav, targets, title, artist, duration, mode=""):
     """AI로 후보 채보를 여러 개 만들고, 기존 채보 ★와 비슷한 걸 난이도마다 하나씩 → (서버에 보낼 body, chosen)
     out\\<곡ID>\\ 에 후보 .osu · summary.json · upload.json 보관"""
     import chartgen
     t0 = time.time()
-    mug = Mug()
+    mug = get_mug()
     odir = OUT / vid
     if odir.exists():
         shutil.rmtree(odir, ignore_errors=True)
@@ -696,13 +980,23 @@ def make_charts(vid, wav, targets, title, artist, duration):
     cands = load_cands(odir, duration)
     if not cands:
         raise RuntimeError("AI가 채보를 제대로 만들지 못했어요.")
-    chosen = choose(cands, targets, duration)
+    chosen, log = choose(cands, targets, duration), None
+    if sep and sep.get("stems"):
+        (odir / "stems.json").write_text(json.dumps(sep["stems"]), encoding="utf-8")   # 다시 고를 때 쓰려고 보관
+        if mode == "consist":
+            try:
+                chosen, log = choose_consist(cands, targets, duration, sep["stems"])
+            except Exception as e:
+                traceback.print_exc()
+                say(f"  ⚠ 일관성 방식에서 문제가 생겨서 평소 방식으로 만들어요: {e}")
+    if log:
+        (odir / "sections.json").write_text(json.dumps(log, ensure_ascii=False, indent=1), encoding="utf-8")
     say(f"  {len(cands)}개 만들었어요 ({time.time() - t0:.0f}초)")
     body = {"charts": {d: c[1] for d, c in chosen.items()}, "by": f"MuG Diffusion v{mug.version}", "style": "rc"}
     if onsets:
         body["onsets"] = onsets      # 소리 분리로 찾은 진짜 소리 위치 → 서버가 '소리 없는 곳' 판단에 씀
     (odir / "upload.json").write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
-    write_summary(odir, vid, title, seed, body["by"], targets, chosen, cands)
+    write_summary(odir, vid, title, seed, body["by"], targets, chosen, cands, mode="consist" if log else "")
     return body, chosen
 
 
@@ -716,7 +1010,17 @@ def cmd_gen(vid, audio, targets_file, out_file, title="", artist="", duration=90
     try:
         say("AI: 오디오 준비 중...")
         wav = to_wav(Path(audio), wdir)
-        body, _ = make_charts(vid, wav, targets, title, artist, duration)
+        body = None
+        try:                                   # 새 AI(Mapperatorinator)가 깔려 있으면 그걸로 (문제가 생기면 MuG로)
+            import mapper_test
+            if mapper_test.ready():
+                body = mapper_test.make_body(vid, wav, targets, duration, title)
+        except Exception as e:
+            traceback.print_exc()
+            say(f"AI: 새 AI에서 문제가 생겨서 MuG로 만들어요: {e}")
+            body = None
+        if body is None:
+            body, _ = make_charts(vid, wav, targets, title, artist, duration, mode="consist")   # 8번(전체 새로 만들기)과 같은 방식
         Path(out_file).write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
         say("AI: 완료")
     finally:
@@ -783,6 +1087,18 @@ def rebuild(srv, vid):
     song = srv.call("GET", f"songs/{vid}")
     duration = float(song.get("duration") or 900)
     cands = load_cands(odir, duration)
+    stp = odir / "stems.json"
+    if summary.get("mode") == "consist" and stp.exists():        # 일관성 방식으로 만든 곡은 그 방식으로 다시
+        basic = song.get("charts") or {}
+        targets = summary.get("targets") or {d: chartgen.star_rating(basic[d], 4) for d in DIFF_ORDER if basic.get(d)}
+        chosen, log = choose_consist(cands, targets, duration, json.loads(stp.read_text(encoding="utf-8")))
+        if log:
+            (odir / "sections.json").write_text(json.dumps(log, ensure_ascii=False, indent=1), encoding="utf-8")
+        body = dict(old, charts={d: c[1] for d, c in chosen.items()})
+        up.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+        write_summary(odir, vid, summary.get("title", ""), summary.get("seed"), summary.get("model", ""),
+                      targets, chosen, cands, mode="consist" if log else "")
+        return body
     byname = {c[2]: c for c in cands}
     main_c = [c for c in cands if not c[2].endswith("_i")] or cands
     inst_c = [c for c in cands if c[2].endswith("_i") and len(c[1]) >= 50]
@@ -867,8 +1183,152 @@ def cmd_undo(vid=None):
     say(f"AI 채보 {len(ids)}곡을 서버에서 지웠어요. 기본 채보와 기록은 그대로예요.")
 
 
+def cmd_spectro(link, diffs):
+    """채보 점검 그림: 노래 소리(스펙트로그램·소리별 시작 위치·박) 위에 AI·기존 채보를 겹쳐 그림 → spectro\\<곡ID>\\*.png"""
+    import spectro
+    srv = get_server(need_key=True)
+    vid = parse_vid(link) or link
+    song = srv.call("GET", f"songs/{vid}")
+    say(f"채보 점검 그림: {song.get('title', vid)}")
+    wdir = WORK / ("spec_" + vid)
+    try:
+        wav, _ = download_audio(vid, wdir)
+        stems = None
+        sf = OUT / vid / "stems.json"
+        if sf.exists():
+            stems = json.loads(sf.read_text(encoding="utf-8"))
+        else:
+            sep = separate(wav, WORK / ("sep_" + vid))
+            stems = sep.get("stems") if sep else None
+        say("  그림 그리는 중...")
+        out = ROOT / "spectro" / vid
+        if out.exists():
+            shutil.rmtree(out, ignore_errors=True)
+        files = spectro.render(wav, song, out, [d for d in diffs if d in DIFF_ORDER] or ["hard"], stems, song.get("title", ""))
+        say(f"\n만들었어요: {out} ({len(files)}장)")
+    finally:
+        shutil.rmtree(wdir, ignore_errors=True)
+        shutil.rmtree(WORK / ("sep_" + vid), ignore_errors=True)
+
+
+BACKUP = ROOT / "backup"     # 시험 전 AI 채보 보관 (되돌리기용)
+
+
+def cmd_consist(ids):
+    """일관성 방식 시험: 곡마다 지금 AI 채보(out 폴더)를 backup 에 보관 → 일관성 방식으로 새로 만들어 서버에 올림"""
+    srv = get_server(need_key=True)
+    ids = [parse_vid(x) or x for x in ids if x.strip()]
+    say(f"일관성 방식 시험: {len(ids)}곡 (곡마다 3~5분)")
+    done = []
+    for k, vid in enumerate(ids):
+        say(f"\n========== {k + 1}/{len(ids)}: {vid} ==========")
+        src = OUT / vid
+        if src.exists() and not (BACKUP / vid).exists():      # 맨 처음 것만 보관 (여러 번 시험해도 원래 것으로 되돌아가게)
+            shutil.copytree(src, BACKUP / vid)
+            say(f"  지금 AI 채보를 보관했어요: backup\\{vid}")
+        try:
+            cmd_make(vid, mode="consist", srv=srv)
+            done.append(vid)
+        except SystemExit as e:
+            say(f"  건너뜀: {e}")
+        except Exception as e:
+            traceback.print_exc()
+            say(f"  건너뜀: {e}")
+    say(f"\n끝! {len(done)}/{len(ids)}곡을 일관성 방식으로 바꿨어요. 게임을 새로고침하고 쳐 보세요.")
+    say("마음에 안 들면 7_일관성시험되돌리기.bat 을 실행하면 시험 전 AI 채보로 돌아가요.")
+
+
+RUN_FILE = BACKUP / "_last_run.json"     # 전체 새로 만들기 진행 상황 (중간에 꺼져도 이어서)
+
+
+def cmd_remake_all(skip):
+    """서버의 곡 전부를 일관성 방식으로 새로 만들기 (skip 곡 빼고). 곡마다 지금 AI 채보를 backup 에 보관, 끝난 곡은 다시 실행해도 건너뜀"""
+    srv = get_server(need_key=True)
+    skip = {parse_vid(x) or x for x in skip}
+    run = {}
+    if RUN_FILE.exists():
+        try:
+            run = json.loads(RUN_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            run = {}
+    if not run or run.get("finished"):
+        lst = srv.call("GET", "songs").get("songs", [])
+        run = {"ids": [s0["id"] for s0 in lst if s0.get("id") not in skip], "done": [], "failed": {}, "at": time.time()}
+    else:
+        say("지난번에 하다 만 게 있어서 이어서 해요.")
+    BACKUP.mkdir(parents=True, exist_ok=True)
+
+    def save():
+        RUN_FILE.write_text(json.dumps(run, ensure_ascii=False, indent=1), encoding="utf-8")
+    save()
+    todo = [v for v in run["ids"] if v not in run["done"] and v not in run["failed"]]
+    say(f"새로 만들 곡: {len(todo)}곡 (전체 {len(run['ids'])}곡, 곡마다 3~5분) — 중간에 창을 닫아도 다시 실행하면 이어서 해요")
+    t0 = time.time()
+    for k, vid in enumerate(todo):
+        say(f"\n========== {k + 1}/{len(todo)}: {vid} ==========")
+        src = OUT / vid
+        if src.exists() and not (BACKUP / vid).exists():
+            shutil.copytree(src, BACKUP / vid)
+        try:
+            cmd_make(vid, mode="consist", srv=srv)
+            run["done"].append(vid)
+        except SystemExit as e:
+            run["failed"][vid] = str(e)[:200]
+            say(f"  건너뜀: {e}")
+        except Exception as e:
+            traceback.print_exc()
+            run["failed"][vid] = str(e)[:200]
+            say(f"  건너뜀: {e}")
+        save()
+        left = len(todo) - k - 1
+        if left:
+            say(f"  남은 곡 {left}개 · 예상 {int((time.time() - t0) / (k + 1) * left / 60) + 1}분")
+    run["finished"] = True
+    save()
+    say(f"\n끝! {len(run['done'])}곡을 새로 만들었어요. 게임을 새로고침하면 반영돼요.")
+    if run["failed"]:
+        say(f"못 만든 곡 {len(run['failed'])}개:")
+        for v, e in run["failed"].items():
+            say(f"  {v}: {e[:100]}")
+    say("마음에 안 드는 곡은 7_일관성시험되돌리기.bat 으로 곡별로 되돌릴 수 있어요.")
+
+
+def cmd_restore_test(ids=None):
+    """되돌리기: backup 에 보관한 AI 채보를 out 폴더로 되돌리고 서버에 다시 보냄
+    ids 가 없으면 '전체 새로 만들기'로 만든 곡만 (그 전에 시험한 곡은 링크/ID를 넣어야 되돌림)"""
+    srv = get_server(need_key=True)
+    if not ids:
+        run = json.loads(RUN_FILE.read_text(encoding="utf-8")) if RUN_FILE.exists() else {}
+        ids = run.get("done") or []
+        if not ids:
+            say("되돌릴 곡이 없어요. 되돌릴 곡의 링크나 ID를 넣어 주세요.")
+            return
+        say(f"'전체 새로 만들기'로 만든 {len(ids)}곡을 되돌려요.")
+    n = 0
+    for vid in ids:
+        d = BACKUP / vid
+        if not d.is_dir():
+            say(f"  보관한 게 없어요: {vid}")
+            continue
+        dst = OUT / vid
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(d, dst)
+        r = upload(srv, vid, json.loads((dst / "upload.json").read_text(encoding="utf-8"))) if (dst / "upload.json").exists() else {}
+        shutil.rmtree(d)
+        n += 1
+        say(f"  되돌렸어요: {vid} {r.get('stars', '')}")
+    say(f"\n{n}곡을 예전 AI 채보로 되돌렸어요. 게임을 새로고침하면 반영돼요.")
+
+
 def main():
     ap = argparse.ArgumentParser(description="링크비트 AI 채보 도구")
+    ap.add_argument("--consist", nargs="+", default=None, help="일관성 방식으로 다시 만들기 (곡 ID 여러 개)")
+    ap.add_argument("--restore-test", nargs="*", default=None, help="되돌리기 (곡 링크/ID, 없으면 전체 새로 만들기로 만든 곡)")
+    ap.add_argument("--remake-all", action="store_true", help="곡 전부 새로 만들기 (--skip 곡 빼고)")
+    ap.add_argument("--skip", nargs="*", default=[])
+    ap.add_argument("--spectro", default="", help="채보 점검 그림 (곡 링크/ID)")
+    ap.add_argument("--diffs", default="hard,extreme", help="점검 그림 난이도 (쉼표로)")
     ap.add_argument("link", nargs="?", default="")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--undo", action="store_true")
@@ -886,7 +1346,7 @@ def main():
     # 유튜브 ID가 '-'로 시작하면(예: -tKVN2mAKRI) 옵션으로 오해하지 않게 '--gen=ID' 꼴로 바꿈
     argv = sys.argv[1:]
     for i, x in enumerate(argv[:-1]):
-        if x in ("--gen", "--upload", "--title", "--artist") and argv[i + 1].startswith("-"):
+        if x in ("--gen", "--upload", "--title", "--artist", "--spectro") and argv[i + 1].startswith("-"):
             argv[i:i + 2] = [f"{x}={argv[i + 1]}"]
             break
     a = ap.parse_args(argv)
@@ -896,6 +1356,19 @@ def main():
             return
         if a.check:
             sys.exit(0 if cmd_check() else 1)
+        if a.spectro:
+            cmd_spectro(a.spectro, [x.strip() for x in a.diffs.split(",") if x.strip()])
+            return
+        if a.consist:
+            cmd_consist(a.consist)
+            return
+        if a.restore_test is not None:
+            ids = [parse_vid(x) or x for x in " ".join(a.restore_test).split() if x.strip()]
+            cmd_restore_test(ids)
+            return
+        if a.remake_all:
+            cmd_remake_all(a.skip)
+            return
         if a.resend_all:
             cmd_resend_all()
             return

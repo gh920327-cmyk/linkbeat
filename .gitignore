@@ -7,3 +7,7 @@ __pycache__/
 desktop/node_modules/
 desktop/dist/
 desktop/engine/
+
+# AI 채보 도구: 호스트 키 등 PC에만 두는 것
+aitool/settings.json
+aitool/tools/__pycache__/
