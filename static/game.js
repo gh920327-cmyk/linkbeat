@@ -1562,7 +1562,7 @@ class Game {
     n.head = kind;
     if (kind !== 'miss') { this.offsets.push(dt); (this.errHist || (this.errHist = [])).push({ dt, kind, at: performance.now() }); if (this.errHist.length > 40) this.errHist.shift(); }
     this.judge(kind, lane, dt, false, n.t);
-    if (n.pk && kind !== 'miss') { this.pumpkins = (this.pumpkins || 0) + 1; (this.candyPops ||= []).push({ lane, at: performance.now() }); sfx.candy(); }
+    if (n.pk && kind !== 'miss') { this.pumpkins = (this.pumpkins || 0) + 1; (this.candyPops ||= []).push({ lane, at: performance.now() }); }   // 소리 없이 🍬 +1만
     if (n.a && kind !== 'miss') { fxAccent(this.fx, lane, kind); sfx.accent(); }   // 드럼 강타: 크게 터지고 묵직한 소리
     if (n.d > 0) {
       if (kind === 'miss') { n.tail = 'miss'; this.judge('miss', lane, 0, true, n.t + n.d); }
