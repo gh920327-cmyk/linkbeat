@@ -49,6 +49,7 @@
         <span id="connDot" class="dot" title="서버 연결 상태"></span>
         <button id="btnOnline" class="ghost on-btn" type="button" title="지금 접속 중인 사람" aria-haspopup="true">👥 <b id="onCount">-</b></button>
         <button id="btnProfile" class="ghost pf-btn" type="button"></button>
+        <span id="myLv" class="lv-pill" title="레벨">Lv 1</span>
         <span id="myTitle" class="ptitle my-title hidden" title="내 칭호"></span>
       </div>
       <nav class="tools">
@@ -157,6 +158,13 @@
           <button id="btnReq" class="link-go">곡 신청</button>
         </div>
         <div id="reqStatus" class="add-status"></div>
+      </div>
+      <div id="dailyBar" class="daily-bar hidden">
+        <span class="db-tag">🎯 오늘의 곡</span>
+        <span class="db-song"><b id="dbTitle"></b> <small id="dbArtist"></small> <span id="dbDiff" class="tag"></span></span>
+        <span id="dbTop" class="db-top"></span>
+        <span id="dbLeft" class="db-left"></span>
+        <span class="db-btns"><button type="button" id="dbGo" class="primary small-btn">도전하기</button><button type="button" id="dbRank" class="small-btn">순위</button></span>
       </div>
       <div class="list-head">
         <h2>곡 목록 <span id="songCount"></span></h2>
@@ -311,10 +319,12 @@
         <div id="rtSuggest" class="rt-suggest small"></div>
       </div>
       <div id="rBest" class="r-best center"></div>
+      <div id="rXp" class="r-xp hidden"><span class="rx-gain"></span><span class="rx-lv"></span><span class="rx-bar"><i></i></span><span class="rx-next"></span><span class="rx-up"></span></div>
       <div id="rGhost" class="r-ghost center hidden"></div>
       <div class="r-buttons">
         <button id="btnRetry" class="primary">다시 하기</button>
         <button id="btnResRank">순위표</button>
+        <button id="btnCard" type="button" title="결과를 그림 한 장으로 저장·공유">📸 결과 카드</button>
         <button id="btnToLobby">로비로</button>
       </div>
     </div>
@@ -388,22 +398,24 @@
   <div class="stage">
     <div class="field-col"><canvas id="calibCanvas"></canvas></div>
     <div class="info-col">
-      <div class="yt-slot" id="slotCalib"></div>
       <div class="panel calib-panel">
-        <h3>싱크 자동 맞추기</h3>
+        <h3>싱크 맞추기</h3>
         <ol class="small muted cal-steps">
-          <li>박자가 뚜렷한 곡을 고르세요.</li>
-          <li>시작을 누르고, 노래의 강한 박(쿵)에 맞춰 키를 32번 누르세요.</li>
-          <li>계산된 값을 적용하면 끝!</li>
+          <li>시작을 누르면 노트가 박자에 맞춰 내려오고, 판정선에 닿는 순간 <b>'딱'</b> 소리가 나요.</li>
+          <li>처음 4번(하나·둘·셋·넷)은 듣기만 하고, 그다음부터 소리에 맞춰 <b>아무 키나 Space</b>(폰은 화면 탭)를 눌러요.</li>
+          <li>24번 누르면 평균을 계산해서 알려줘요. 적용을 누르면 끝!</li>
         </ol>
-        <label class="small muted">곡 <select id="calSong"></select></label>
+        <label class="small muted">박자 빠르기 <select id="calBpm"></select></label>
+        <label class="small muted cal-chk"><input type="checkbox" id="calHide"> 노트 숨기고 소리만 듣고 맞추기</label>
         <div class="muted small">지금 싱크: <b id="calNow"></b></div>
+        <div id="calVolWarn" class="warn small hidden">음량이 0이에요. 설정에서 음량을 올려 주세요.</div>
         <div id="calResult" class="cal-result"></div>
         <div class="ed-buttons">
           <button id="calStart" class="primary">시작</button>
           <button id="calApply" class="primary hidden">이 값으로 적용</button>
           <button id="calExit" class="ghost">닫기</button>
         </div>
+        <p class="muted small cal-tip">이어폰(특히 블루투스)·스피커를 바꾸면 다시 맞춰 주세요. 게임할 때와 같은 기기로 맞추는 게 가장 정확해요.</p>
       </div>
     </div>
   </div>
@@ -444,7 +456,7 @@
     <div class="set-row"><span>노트 속도 <b id="speedVal"></b></span><input id="setSpeed" type="range" min="1" max="10" step="0.5"></div>
     <div class="set-row"><span>싱크 (ms) <b id="offsetVal"></b></span><input id="setOffset" type="range" min="-300" max="300" step="5"></div>
     <p class="small muted">노트보다 소리가 늦게 들리면 + 쪽으로, 빨리 들리면 - 쪽으로 옮기세요.</p>
-    <button type="button" id="btnCalib" class="wide">🎯 싱크 자동 맞추기</button>
+    <button type="button" id="btnCalib" class="wide">🎯 싱크 맞추기 (박자 소리에 맞춰 누르기)</button>
     <div class="set-row"><span>음량 <b id="volVal"></b></span><input id="setVol" type="range" min="0" max="100" step="5"></div>
     <div class="set-row"><span>타격음 <small class="muted">키를 누를 때 나는 소리</small></span>
       <div class="hit-row"><select id="setHit"></select><button id="setHitTest" class="small-btn" type="button">▶ 들어보기</button></div></div>
@@ -577,6 +589,19 @@
       <div class="panel spec" id="wPanel"><h4>친구 화면 <span id="wCount" class="muted"></span></h4><div id="wGrid" class="spec-grid"></div></div>
       <div class="panel live"><h4 id="wBoardHead">실시간 순위</h4><ol id="wBoard" class="live-board"></ol></div>
     </div>
+  </div>
+</dialog>
+
+<!-- 결과 카드 (그림 한 장으로 저장·공유) -->
+<dialog id="cardDlg" class="card-dlg">
+  <div class="skin-box">
+    <div class="skin-head">
+      <h3>RESULT CARD<small>저장해서 친구들에게 자랑해 보세요</small></h3>
+      <button id="cardClose" class="ghost small-btn" type="button">닫기</button>
+    </div>
+    <img id="cardImg" class="card-img" alt="결과 카드">
+    <div class="card-btns"><button id="cardSave" class="primary skew" type="button">💾 저장</button><button id="cardShare" class="skew hidden" type="button">↗ 공유</button><button id="cardCopy" class="skew hidden" type="button">📋 복사</button></div>
+    <p class="small muted center" id="cardMsg"></p>
   </div>
 </dialog>
 
@@ -752,8 +777,17 @@
     <div class="pl-imgs"><img class="pl-il hidden" alt=""><div class="pl-big hidden"></div><canvas class="pl-dot hidden" width="120" height="150"></canvas></div>
     <div class="pl-faces"></div>
     <div class="pl-acts hidden"><button type="button" class="small-btn pl-give">👑 방장 넘기기</button><button type="button" class="small-btn danger pl-kick">내보내기</button></div>
-    <h5>자주 하는 노래 <span class="pl-sum muted"></span></h5>
-    <ol class="pl-songs"></ol>
+    <div class="pl-stats"></div>
+    <div class="pl-badges"></div>
+    <div class="pl-tabs" role="tablist"><button type="button" class="pl-tab on" data-t="best">🏅 최고 기록</button><button type="button" class="pl-tab" data-t="songs">🎵 자주 하는 노래</button><span class="pl-sum muted"></span></div>
+    <ol class="pl-songs pl-bests"></ol>
+    <ol class="pl-songs pl-freq hidden"></ol>
+  </div>
+  <div id="dailyMenu" class="on-menu hidden" role="dialog" aria-label="오늘의 곡 순위">
+    <div class="tm-head"><b>🎯 오늘의 곡 순위</b><span class="muted" id="dmSum"></span><button type="button" id="dmClose" class="ghost tm-x" aria-label="닫기">✕</button></div>
+    <div id="dmSong" class="dm-song"></div>
+    <ol id="dmList" class="dm-list"></ol>
+    <p class="small muted on-tip" id="dmPrev"></p>
   </div>
   <div id="onMenu" class="on-menu hidden" role="dialog" aria-label="지금 접속 중">
     <div class="tm-head"><b>지금 접속 중</b><span class="muted" id="onSum"></span><button type="button" id="onClose" class="ghost tm-x" aria-label="닫기">✕</button></div>
@@ -774,6 +808,7 @@
 <script src="/static/spectate.js"></script>
 <script src="/static/app.js"></script>
 <script src="/static/achieve.js"></script>
+<script src="/static/card.js"></script>
 <script src="/static/profile.js"></script>
 <script src="/static/gate.js"></script>
 </body>

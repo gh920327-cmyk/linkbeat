@@ -53,7 +53,9 @@ SONGS.mkdir(parents=True, exist_ok=True)
 SCORES = DATA / "scores"
 SCORES.mkdir(parents=True, exist_ok=True)
 REQ_FILE = DATA / "requests.json"
+DAILY_FILE = DATA / "daily.json"         # 오늘의 곡 (날마다 한 곡·난이도, 그날의 순위)
 PLAYS_FILE = DATA / "plays.json"         # 이름별 곡마다 플레이 횟수 (다른 사람을 누르면 '자주 하는 노래')
+PSTATS_FILE = DATA / "pstats.json"       # 이름별 프로필 요약: Lv·업적 수·대표 업적·칭호 (다른 사람 카드, 접속하지 않았을 때도)
 PROFILES_FILE = DATA / "profiles.json"   # 친구들 프로필 (설정·기록 백업)
 MAIN_LOOP = None
 PORT = int(os.environ.get("PORT", "8800"))
@@ -468,11 +470,98 @@ def _submit_score(sid, diff, keys, name, data):
             record_play(name, sid)
         except Exception as e:
             log("플레이 횟수 저장 실패:", e)
+        if keys == 4 and not hl:
+            try:
+                daily_record(sid, diff, name, entry, ai)
+            except Exception as e:
+                log("오늘의 곡 기록 실패:", e)
     board = sorted([e for e in sc["entries"] if _same_board(e, diff, keys, hl, ai)],
                    key=lambda e: -e["score"])
     mine = next((e for e in board if e["name"] == name), None)
     pos = (1 + sum(1 for e in board if e["score"] > mine["score"])) if mine else None   # 동점은 같은 순위
     return {"newBest": new_best, "position": pos, "total": len(board), "plays": sc["plays"]}
+
+
+# ---- 오늘의 곡: 한국 시간 날짜마다 한 곡 · 난이도(요일마다), 그날 그 곡의 최고 기록끼리 순위 (4키 · 전체곡)
+KST = 9 * 3600
+DAILY_DIFFS = ["normal", "hard", "hard", "extreme", "normal", "hard", "extreme"]      # 월 ~ 일
+
+
+def _kst_day(t=None):
+    return time.strftime("%Y-%m-%d", time.gmtime((time.time() if t is None else t) + KST))
+
+
+def _daily_pick(day, avoid=None):
+    import datetime
+    diff = DAILY_DIFFS[datetime.date.fromisoformat(day).weekday()]
+    songs = list_songs()
+    cands = sorted(s["id"] for s in songs if (s.get("counts") or {}).get(diff, 0) > 0)
+    if not cands:                 # 그 난이도가 있는 곡이 없으면 보통
+        diff = "normal"
+        cands = sorted(s["id"] for s in songs if (s.get("counts") or {}).get(diff, 0) > 0)
+    if not cands:
+        return None
+    rnd = random.Random(f"linkbeat-daily-{day}")
+    pick = rnd.choice(cands)
+    if pick == avoid and len(cands) > 1:          # 어제와 같은 곡은 피함
+        pick = rnd.choice([x for x in cands if x != avoid])
+    return {"songId": pick, "diff": diff, "entries": []}
+
+
+def daily_state():
+    """오늘의 곡 (없거나 곡이 지워졌으면 새로 고름) — FILE_LOCK 안에서"""
+    d = read_json(DAILY_FILE, {})
+    days = d.get("days") if isinstance(d, dict) and isinstance(d.get("days"), dict) else {}
+    today = _kst_day()
+    cur = days.get(today)
+    changed = False
+    if not cur or not song_path(cur.get("songId", "")).exists():
+        prev = days.get(_kst_day(time.time() - 86400)) or {}
+        cur = _daily_pick(today, prev.get("songId"))
+        if not cur:
+            return days, None
+        days[today] = cur
+        changed = True
+    for k in sorted(days)[:-14]:      # 2주치만 보관
+        days.pop(k, None)
+        changed = True
+    if changed:
+        write_json_atomic(DAILY_FILE, {"days": days})
+    return days, today
+
+
+def daily_record(sid, diff, name, entry, ai):
+    days, today = daily_state()
+    cur = days.get(today) if today else None
+    if not cur or cur["songId"] != sid or cur["diff"] != diff:
+        return
+    ents = [e for e in cur.get("entries", []) if e.get("name") != name]
+    old = next((e for e in cur.get("entries", []) if e.get("name") == name), None)
+    if old and old.get("score", 0) >= entry["score"]:
+        return
+    ents.append({"name": name, "score": entry["score"], "acc": entry["acc"], "rank": entry["rank"], "fc": entry["fc"],
+                 "counts": entry.get("counts"), "ai": bool(ai), "at": entry["at"]})
+    cur["entries"] = sorted(ents, key=lambda e: -e["score"])[:100]
+    write_json_atomic(DAILY_FILE, {"days": days})
+
+
+def daily_info():
+    with FILE_LOCK:
+        days, today = daily_state()
+    cur = days.get(today) if today else None
+    if not cur:
+        return {"day": today, "songId": None}
+    song = load_song(cur["songId"]) or {}
+    now = time.time()
+    ends = int(86400 - ((now + KST) % 86400))
+    out = {"day": today, "songId": cur["songId"], "title": song.get("title", cur["songId"]), "artist": song_artist(song)[0] if song else "",
+           "diff": cur["diff"], "keys": 4, "board": cur.get("entries", [])[:30], "endsIn": ends}
+    yd = days.get(_kst_day(now - 86400))
+    if yd and yd.get("entries"):
+        ys = load_song(yd["songId"]) or {}
+        w = yd["entries"][0]
+        out["prev"] = {"title": ys.get("title", yd["songId"]), "diff": yd["diff"], "winner": w["name"], "score": w["score"]}
+    return out
 
 
 def record_play(name, sid):
@@ -492,18 +581,66 @@ def record_play(name, sid):
     write_json_atomic(PLAYS_FILE, d)
 
 
+_PSTATS_MEM = {}
+ACH_ID_RE = re.compile(r"^[A-Za-z0-9_]{1,24}$")
+
+
+def pstats_save(name, prof):
+    """hello로 받은 프로필 요약을 이름별로 저장 (바뀌었을 때만 씀)"""
+    if not name or _PSTATS_MEM.get(name) == prof:
+        return
+    _PSTATS_MEM[name] = dict(prof)
+    with FILE_LOCK:
+        d = read_json(PSTATS_FILE, {})
+        if not isinstance(d, dict):
+            d = {}
+        d[name] = dict(prof, at=int(time.time()))
+        if len(d) > 3000:       # 이름이 아주 많으면 오래 안 들어온 사람부터 정리
+            d = dict(sorted(d.items(), key=lambda kv: -int((kv[1] or {}).get("at", 0)))[:3000])
+        write_json_atomic(PSTATS_FILE, d)
+
+
+RANK_LIST = ["D", "C", "B", "A", "S", "SS", "SSS", "MAX"]
+DIFF_LIST = ["easy", "normal", "hard", "extreme"]
+
+
+def entry_rank(e):
+    """화면의 rankFor와 같은 기준 (정확도로 다시 계산, 반올림 100%는 SSS)"""
+    try:
+        acc = float(e.get("acc"))
+    except (TypeError, ValueError):
+        return e.get("rank") if e.get("rank") in RANK_LIST else "D"
+    k = ("MAX" if acc >= 100 else "SSS" if acc >= 99 else "SS" if acc >= 98 else "S" if acc >= 95 else
+         "A" if acc >= 90 else "B" if acc >= 80 else "C" if acc >= 70 else "D")
+    c = e.get("counts") if isinstance(e.get("counts"), dict) else {}
+    if k == "MAX" and (c.get("great") or c.get("good") or c.get("miss")):
+        k = "SSS"
+    return k
+
+
 def player_info(name):
-    """다른 사람 정보: 자주 하는 노래 (플레이 횟수 순, 횟수를 세기 전 기록은 '기록 있음')"""
+    """다른 사람 정보: 프로필 요약(Lv·업적·칭호), 등급 통계, 최고 기록, 자주 하는 노래 (플레이 횟수 순, 횟수를 세기 전 기록은 '기록 있음')"""
     name = str(name or "").strip()[:16]
     if not name:
         raise HttpError(400, "이름이 없어요.")
     with FILE_LOCK:
         d = read_json(PLAYS_FILE, {})
+        pd = read_json(PSTATS_FILE, {})
     mine = d.get(name) if isinstance(d, dict) and isinstance(d.get(name), dict) else {}
+    prof = pd.get(name) if isinstance(pd, dict) and isinstance(pd.get(name), dict) else {}
     rows = []
+    recs = []
     for s in list_songs():
         sid = s["id"]
         ents = [e for e in s.get("board", []) if e.get("name") == name]
+        for e in ents:
+            if e.get("hl"):
+                continue
+            k = 6 if e.get("keys") == 6 else 4
+            st = ((s.get("ai") or {}).get("stars") or {}) if e.get("ai") else ((s.get("stars") or {}).get(str(k)) or {})
+            recs.append({"id": sid, "title": s.get("title", sid), "artist": s.get("artist", ""), "diff": e.get("diff"), "keys": k,
+                         "ai": bool(e.get("ai")), "fc": bool(e.get("fc")), "acc": e.get("acc"), "score": e.get("score", 0),
+                         "rank": entry_rank(e), "stars": st.get(e.get("diff")) or 0})
         c = mine.get(sid)
         cnt, last = (int(c[0]), int(c[1])) if isinstance(c, list) and len(c) == 2 else (0, 0)
         if not ents and not cnt:
@@ -515,7 +652,15 @@ def player_info(name):
             "best": {k: best.get(k) for k in ("score", "rank", "diff", "keys", "fc", "acc", "ai", "hl")} if best else None,
         })
     rows.sort(key=lambda r: (-r["plays"], -r["last"]))
-    return {"name": name, "songs": rows[:6], "songCount": len(rows), "totalPlays": sum(r["plays"] for r in rows)}
+    ranks = {}
+    for r in recs:
+        ranks[r["rank"]] = ranks.get(r["rank"], 0) + 1
+    recs.sort(key=lambda r: (-RANK_LIST.index(r["rank"]), -(r["stars"] or 0), -(DIFF_LIST.index(r["diff"]) if r["diff"] in DIFF_LIST else 0),
+                             -(r["score"] or 0)))
+    return {"name": name, "songs": rows[:6], "songCount": len(rows), "totalPlays": sum(r["plays"] for r in rows),
+            "prof": {k: prof.get(k) for k in ("lv", "ach", "achTotal", "top", "title") if k in prof},
+            "stats": {"records": len(recs), "ranks": ranks, "fc": sum(1 for r in recs if r["fc"])},
+            "bests": recs[:5]}
 
 
 # ============================================================ 채보 생성 작업
@@ -2627,6 +2772,8 @@ async def api(method, path, headers, body):
         return await loop.run_in_executor(None, profile_logout, headers)
     if parts == ["scores"] and method == "POST":
         return submit_score(json_body(body))
+    if parts == ["daily"] and method == "GET":
+        return await loop.run_in_executor(None, daily_info)
     if parts == ["online"] and method == "GET":
         return online_list()
     if len(parts) == 2 and parts[0] == "player" and method == "GET":
@@ -2879,6 +3026,7 @@ class Client:
         self.state = "idle"     # idle | loading | loaded | playing | done
         self.ready = False      # 방에서 '준비' (방장은 필요 없음) — 곡이 바뀌거나 한 판이 끝나면 풀림
         self.named = False      # 이름을 알려 준 사람만 '접속 중' 목록에 (첫 화면에서 로그인 전은 빼고)
+        self.level = 0          # 화면이 알려 준 레벨 (이름 옆 Lv)
         self.act = None         # 혼자 하는 중인 것 {"what": solo|edit|calib|lobby, "song": 곡 제목}
         self.result = None
         self.live = {"score": 0, "combo": 0, "acc": 100.0}
@@ -3003,12 +3151,12 @@ class Room:
             "type": "room", "code": self.code, "leader": self.leader, "phase": self.phase,
             "songId": self.song_id, "songTitle": self.song_title, "diff": self.diff, "keys": self.keys, "hl": self.hl, "ai": self.ai,
             "players": [{"id": c.id, "name": c.name, "state": c.state, "avatar": c.avatar, "title": c.title,
-                         "diff": c.diff, "keys": c.keys, "ready": c.ready} for c in self.players.values()],
-            "watchers": [{"id": c.id, "name": c.name, "avatar": c.avatar, "title": c.title} for c in self.watchers.values()],
+                         "diff": c.diff, "keys": c.keys, "ready": c.ready, "level": c.level} for c in self.players.values()],
+            "watchers": [{"id": c.id, "name": c.name, "avatar": c.avatar, "title": c.title, "level": c.level} for c in self.watchers.values()],
         }
 
     def roster(self):
-        return [{"id": c.id, "name": c.name, "avatar": c.avatar, "title": c.title, "diff": c.diff, "keys": c.keys}
+        return [{"id": c.id, "name": c.name, "avatar": c.avatar, "title": c.title, "diff": c.diff, "keys": c.keys, "level": c.level}
                 for c in self.players.values()]
 
     def broadcast(self, obj, exclude=None):
@@ -3117,7 +3265,7 @@ def finish_game(room):
         r = c.result or {"score": c.live.get("score", 0),
                          "acc": 0 if c.state == "error" else c.live.get("acc", 0),
                          "maxCombo": 0, "incomplete": True}
-        results.append(dict(r, id=c.id, name=c.name, avatar=c.avatar, title=c.title, diff=c.diff, keys=c.keys))
+        results.append(dict(r, id=c.id, name=c.name, avatar=c.avatar, title=c.title, diff=c.diff, keys=c.keys, level=c.level))
         c.state = "idle"
         c.result = None
         c.ready = False                # 다음 판은 다시 준비 (결과는 플레이한 난이도로 표시)
@@ -3181,7 +3329,7 @@ def online_list():
             st = {"kind": c.act["what"], "song": c.act.get("song", "")}
         else:
             st = {"kind": "lobby"}
-        out.append({"id": c.id, "name": c.name, "avatar": c.avatar, "title": c.title, "status": st})
+        out.append({"id": c.id, "name": c.name, "avatar": c.avatar, "title": c.title, "level": c.level, "status": st})
     out.sort(key=lambda x: x["name"].lower())
     return {"n": len(out), "people": out}
 
@@ -3213,6 +3361,18 @@ def handle_msg(c, m):
                         for k, v in list(av.items())[:12] if isinstance(v, (int, str))}
         if "title" in m:
             c.title = str(m.get("title") or "").strip()[:16]
+        lv = m.get("level")
+        if isinstance(lv, int) and not isinstance(lv, bool) and 0 < lv < 1000:
+            c.level = lv
+        an = m.get("ach")
+        if c.name and isinstance(an, int) and not isinstance(an, bool) and 0 <= an < 1000:   # 프로필 카드용 요약 저장
+            top = m.get("achTop") if isinstance(m.get("achTop"), list) else []
+            at = m.get("achTotal")
+            try:
+                pstats_save(c.name, {"lv": c.level, "ach": an, "achTotal": at if isinstance(at, int) and 0 < at < 1000 else 0,
+                                     "top": [str(x) for x in top[:3] if isinstance(x, str) and ACH_ID_RE.match(x)], "title": c.title})
+            except Exception as e:      # 저장 실패해도 접속은 그대로
+                log("프로필 요약 저장 실패:", e)
         set_my_diff(c, m)
         if room:
             room.push()

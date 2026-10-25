@@ -55,6 +55,9 @@ const ACH = [
   { id: 'hl10', cat: '곡 탐험', name: '하이라이트 사냥꾼', desc: '하이라이트 모드로 10판', goal: 10, stat: 'hl' },
   { id: 'ai10', cat: '곡 탐험', name: 'AI와 함께', desc: 'AI 채보로 10판', goal: 10, stat: 'ai' },
   { id: 'marathon', cat: '곡 탐험', name: '마라톤', desc: '5분이 넘는 곡을 끝까지' },
+  { id: 'daily1', cat: '곡 탐험', name: '오늘의 도전', desc: '오늘의 곡을 끝까지' },
+  { id: 'daily7', cat: '곡 탐험', name: '매일매일 도전', desc: '오늘의 곡을 서로 다른 7일 동안', goal: 7, stat: 'dailyN' },
+  { id: 'dailytop', cat: '곡 탐험', name: '오늘의 1등', desc: '오늘의 곡 순위 1위 (2명 이상)' },
   // 멀티
   { id: 'multi1', cat: '멀티', name: '같이 하자', desc: '멀티 첫 판' },
   { id: 'multi10', cat: '멀티', name: '단짝', desc: '멀티 10판', goal: 10, stat: 'multi' },
@@ -100,6 +103,15 @@ function achIsLegend(t) { return !!t && LEGEND_TITLES.has(t); }
 const ACH_BY = Object.fromEntries(ACH.map((a) => [a.id, a]));
 
 function achGot() { const v = store.get('ach', {}); return v && typeof v === 'object' ? v : {}; }
+/* 프로필 카드용 요약: 업적 수와 대표 업적 3개 (전설 → 어려운 묶음 → 나중에 나온 것 순) */
+const ACH_HARD_CATS = new Set(['등급', '콤보', '난이도', '도전']);
+function achRankKey(a) { return (a.tier === 'legend' ? 2000 : ACH_HARD_CATS.has(a.cat) ? 1000 : 0) + ACH.indexOf(a); }
+function achSummary() {
+  const got = achGot();
+  const have = ACH.filter((a) => got[a.id]);
+  const top = have.slice().sort((a, b) => achRankKey(b) - achRankKey(a)).slice(0, 3).map((a) => a.id);
+  return { ach: have.length, achTotal: ACH.length, achTop: top };
+}
 function achTitle() { const id = store.get('title', ''); return (ACH_BY[id] && achGot()[id]) ? ACH_BY[id].name : ''; }
 function achStats() {
   const st = Object.assign({ plays: 0, fc: 0, ap: 0, hl: 0, multi: 0, ai: 0, perf: 0, ghost: 0, mwin: 0, songs: {}, day: '', dayN: 0, streak: 0 }, store.get('achStats', {}) || {});
@@ -156,7 +168,7 @@ function achProgress(st = achStats(), rec = achFromRecords()) {
   const songN = new Set([...Object.keys(st.songs), ...rec.played]).size;
   const sameMax = Math.max(0, ...Object.values(st.songs).map((v) => +v || 0));
   const today = st.day === dayKey() ? st.dayN : 0;
-  return { ...st, songN, sameMax, dayN: today, sRec: rec.sRec, ssRec: rec.ssRec, maxRec: rec.maxRec, extSSS: rec.extSSS, conquerN: rec.conquerN };
+  return { ...st, songN, sameMax, dayN: today, dailyN: Object.keys(st.dailyDays || {}).length, sRec: rec.sRec, ssRec: rec.ssRec, maxRec: rec.maxRec, extSSS: rec.extSSS, conquerN: rec.conquerN };
 }
 function achGoalIds(pr) { return ACH.filter((a) => a.goal && (pr[a.stat] || 0) >= goalOf(a)).map((a) => a.id); }
 /* 기록만 보고 줄 수 있는 업적 (업적 창을 열 때·판이 끝날 때) */
@@ -249,6 +261,17 @@ function achieveOnResult(g, r) {
   achUnlock(ids);
   setTimeout(achRetro, 3500);      // 기록이 저장된 뒤 (S 수집가·사계절 등)
 }
+/* 오늘의 곡을 끝까지 했을 때 (순위를 받은 뒤) */
+function achieveOnDaily(pos, day) {
+  const st = achStats();
+  st.dailyDays = Object.assign({}, st.dailyDays || {}, { [day]: 1 });
+  const keep = Object.keys(st.dailyDays).sort().slice(-60);           // 오래된 날은 정리
+  st.dailyDays = Object.fromEntries(keep.map((k) => [k, 1]));
+  store.set('achStats', st);
+  const ids = ['daily1', ...achGoalIds(achProgress(st))];
+  if (pos === 1 && daily && (daily.board || []).length >= 2) ids.push('dailytop');
+  achUnlock(ids);
+}
 /* 멀티 결과가 왔을 때: 2명 이상에서 내가 1위 · 4명 이상 · 박빙 */
 function achieveOnMulti(m) {
   const rs = (m && m.results) || [];
@@ -336,7 +359,7 @@ function achSetTitle(id) {
   if (typeof profileSync === 'function') profileSync();
   renderAchDlg();
   renderMyTitle();
-  net.send({ type: 'hello', name: settings.nick || '', avatar: settings.avatar, title: achTitle(), diff: settings.diff, keys: settings.mode });
+  net.send(helloMsg());
   if (id) toast(`칭호 '${ACH_BY[id].name}'을(를) 달았어요.`);
 }
 function renderMyTitle() {
@@ -355,3 +378,68 @@ $('#achGrid').addEventListener('click', (e) => {
   achSetTitle(store.get('title', '') === b.dataset.id ? '' : b.dataset.id);
 });
 renderMyTitle();
+
+/* ============================================================ 레벨: 끝까지 한 판마다 경험치 (노트 수 × 정확도 × 난이도), 이름 옆 Lv
+   Lv → Lv+1 에 필요한 경험치 = 100 + 40×Lv. 처음엔 지금까지 한 판 수로 시작 (판당 60) */
+const XP_NEED = (lv) => 100 + 40 * lv;
+function xpTotal() {
+  let v = +store.get('xp', NaN);
+  if (!Number.isFinite(v) || v < 0) { v = Math.max(0, (achStats().plays || 0) * 60); store.set('xp', v); }
+  return v;
+}
+function levelOf(xp) {
+  let lv = 1, left = Math.max(0, xp);
+  while (lv < 999 && left >= XP_NEED(lv)) { left -= XP_NEED(lv); lv++; }
+  return { lv, into: left, need: XP_NEED(lv) };
+}
+function myLevel() { return levelOf(xpTotal()).lv; }
+function lvTag(lv) { return lv > 0 ? `<span class="lv-tag">Lv${lv}</span>` : ''; }
+function xpFor(g, r) {
+  if (r.incomplete) return 0;
+  const c = r.counts || {};
+  const units = (c.perfect || 0) + (c.great || 0) + (c.good || 0) + (c.miss || 0);
+  let x = 20 + units * (r.acc / 100) * (1 + (g.stars || 0) / 5) * 0.1;
+  const ap = c.miss === 0 && c.good === 0 && c.great === 0;
+  if (ap) x *= 1.3; else if (r.fc) x *= 1.15;
+  if (g.multi) x *= 1.1;
+  return Math.round(x);
+}
+function sendHelloNow() {
+  net.send(helloMsg());
+}
+/* 결과 화면: +경험치 막대 (이전 → 지금), 레벨이 오르면 'LEVEL UP' */
+function gainXp(g, r) {
+  const box = $('#rXp');
+  const gain = xpFor(g, r);
+  if (!box) return;
+  box.classList.toggle('hidden', !gain);
+  if (!gain) return;
+  const before = xpTotal(), after = before + gain;
+  store.set('xp', after);
+  if (typeof profileSync === 'function') profileSync();
+  const a = levelOf(before), b = levelOf(after);
+  $('.rx-gain', box).textContent = `+${gain.toLocaleString()} XP`;
+  $('.rx-lv', box).textContent = `Lv ${b.lv}`;
+  $('.rx-next', box).textContent = `다음 레벨까지 ${(b.need - b.into).toLocaleString()}`;
+  const bar = $('.rx-bar i', box);
+  bar.style.transition = 'none';
+  bar.style.width = `${b.lv > a.lv ? 0 : Math.round((a.into / a.need) * 100)}%`;
+  requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.transition = ''; bar.style.width = `${Math.round((b.into / b.need) * 100)}%`; }));
+  box.classList.toggle('up', b.lv > a.lv);
+  $('.rx-up', box).textContent = b.lv > a.lv ? `LEVEL UP! Lv ${a.lv} → ${b.lv}` : '';
+  if (b.lv > a.lv) {
+    setTimeout(() => { achChime(); toast(`레벨 업! Lv ${b.lv}`, 2600); }, 700);
+    sendHelloNow();
+  }
+  renderMyLevel();
+}
+function renderMyLevel() {
+  const el = $('#myLv');
+  if (!el) return;
+  const L = levelOf(xpTotal());
+  el.textContent = `Lv ${L.lv}`;
+  el.style.setProperty('--p', `${Math.round((L.into / L.need) * 100)}%`);
+  el.title = `레벨 ${L.lv} · 다음 레벨까지 ${(L.need - L.into).toLocaleString()} XP (끝까지 한 판마다 노트 수·정확도·난이도만큼)`;
+}
+renderMyLevel();
+

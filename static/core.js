@@ -64,16 +64,22 @@ const DEFAULT_SKIN = {
   punch: 'mid', shake: true,   // 타격감 강도, 화면 흔들림
   chorusFx: true,              // 후렴(하이라이트)에 들어갈 때 연출
   applause: true,              // 풀콤보·올퍼펙트 박수
-  accentSound: true,           // 드럼 강타 노트: 묵직한 소리(킥+심벌)를 겹침
-  holdSound: true,             // 롱노트를 정확히 뗐을 때 '딱'
-  breakSound: true,            // 긴 콤보가 끊길 때 '툭'
+  accentSound: false,          // 드럼 강타 노트: 묵직한 소리(킥+심벌)를 겹침 (기본 꺼짐)
+  holdSound: false,            // 롱노트를 정확히 뗐을 때 '딱' (기본 꺼짐)
+  breakSound: false,           // 긴 콤보가 끊길 때 '툭' (기본 꺼짐)
+  sndV: 2,                     // 효과음 기본값 판 (2: 위 세 소리 기본 꺼짐)
   errorBar: true,              // 판정 오차 막대 (빠름 ← → 느림)
   perfectGlint: true,          // PERFECT일 때만 작은 별빛 반짝임을 하나 더
   lineStyle: 'auto',           // 판정선 모양: auto(원형 노트면 원형 받침) | bar | ring | thin
   bgFx: 'soft',                // 배경 연출: off | soft | strong
 };
+const savedSndV = settings.skin && typeof settings.skin === 'object' ? settings.skin.sndV : 2;   // 저장된 꾸미기가 없으면 새 기본값 그대로
 settings.skin = Object.assign({ ...DEFAULT_SKIN, hitSound: settings.hit ? 'click' : 'off' }, settings.skin || {});
 settings.skin.colors = Object.assign({ ...DEFAULT_SKIN.colors }, settings.skin.colors || {});
+if (savedSndV !== 2) {   // 예전엔 세 소리가 기본 켜짐으로 저장돼 있어서, 한 번만 꺼짐으로 바꿈 (다시 켜면 그대로 유지)
+  Object.assign(settings.skin, { accentSound: false, holdSound: false, breakSound: false, sndV: 2 });
+  store.set('settings', settings);
+}
 const skin = () => settings.skin;
 function themeColors() {
   const sk = settings.skin;
@@ -604,7 +610,7 @@ const net = {
     ws.onopen = () => {
       this.open = true;
       this.samples = [];
-      this.send({ type: 'hello', name: settings.nick || '', avatar: settings.avatar, title: typeof achTitle === 'function' ? achTitle() : '', diff: settings.diff, keys: settings.mode });
+      this.send(helloMsg());
       const lr = this.lastRoom && Date.now() - this.lastRoom.at < LAST_ROOM_MS ? this.lastRoom : null;
       if (lr) { this.rejoining = true; this.send({ type: 'join', code: lr.code, rejoin: true, lead: lr.lead, songId: lr.songId }); }
       let n = 0;
@@ -663,7 +669,7 @@ function showScreen(name) {
   currentScreen = name;
   if (typeof onScreenChange === 'function') { try { onScreenChange(name); } catch { /* 무시 */ } }
   $$('.screen').forEach((s) => s.classList.toggle('active', s.id === 'screen-' + name));
-  const slot = { game: '#slotGame', editor: '#slotEditor', calib: '#slotCalib' }[name];
+  const slot = { game: '#slotGame', editor: '#slotEditor' }[name];
   const slotEl = slot ? $(slot) : null;
   requestAnimationFrame(() => placePlayer(slotEl));
   if (name === 'lobby' && typeof drawBeatLine === 'function') requestAnimationFrame(drawBeatLine);   // 숨겨져 있던 동안은 크기를 몰라서
@@ -692,6 +698,13 @@ function setBest(id, diff, nl, r, hl = false, ai = false) {
   return false;
 }
 /* 등급 (정확도): MAX 100%(전부 PERFECT) · SSS 99% · SS 98% · S 95% · A 90% · B 80% · C 70% · D */
+/* 서버에 보내는 내 정보 (이름·캐릭터·칭호·Lv·업적 요약) — 여러 곳에서 같은 모양으로 */
+function helloMsg() {
+  const m = { type: 'hello', name: settings.nick || '', avatar: settings.avatar, title: typeof achTitle === 'function' ? achTitle() : '',
+    diff: settings.diff, keys: settings.mode, level: typeof myLevel === 'function' ? myLevel() : 0 };
+  if (typeof achSummary === 'function') { try { Object.assign(m, achSummary()); } catch { /* 무시 */ } }
+  return m;
+}
 const RANKS = ['D', 'C', 'B', 'A', 'S', 'SS', 'SSS', 'MAX'];
 function rankOf(acc) {
   if (acc >= 100) return 'MAX';
