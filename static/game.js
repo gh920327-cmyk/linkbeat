@@ -249,8 +249,167 @@ function gemPath(ctx, cx, cy, r) {
   ctx.lineTo(cx, cy + r * 0.88); ctx.lineTo(cx - r * 1.05, cy - r * 0.12); ctx.closePath();
 }
 
+/* ---------------- 세련된 원형 노트 (진주 · 글라스 오브 · 보석 컷 · 메탈 버튼 · 도트 링 · 헤일로 링 · 네온 튜브 링 · 세그먼트 링): 한 번 그려 둔 그림을 다시 씀 */
+const ROUND_NOTES = new Set(['pearl', 'orb', 'brilliant', 'bezel', 'dotring', 'halo', 'tube', 'segring']);
+function hexRgb(hex) { const n = parseInt(hex.slice(1, 7), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+function mixHex(hex, to, t) {          // hex 색을 to(#fff·#000 등) 쪽으로 t만큼
+  const a = hexRgb(hex), b = hexRgb(to);
+  return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(',')})`;
+}
+function rgba(hex, a) { const [r, g, b] = hexRgb(hex); return `rgba(${r},${g},${b},${a})`; }
+function paintRoundNote(c, st, col, r, m, dead) {
+  const cx = m + r, cy = m + r, TAU = Math.PI * 2;
+  const C = dead ? '#5a6078' : col;
+  const disc = (rr) => { c.beginPath(); c.arc(cx, cy, rr, 0, TAU); };
+  const glow = (a, k) => { if (!dead) { c.shadowColor = rgba(col, a); c.shadowBlur = r * k; } };
+  if (st === 'pearl') {                  // 진주: 매끈한 구슬 + 부드러운 반사광
+    glow(0.55, 0.6);
+    const g = c.createRadialGradient(cx - r * 0.35, cy - r * 0.4, r * 0.05, cx, cy, r);
+    g.addColorStop(0, dead ? '#9aa0b4' : '#ffffff'); g.addColorStop(0.28, mixHex(C, '#ffffff', 0.5)); g.addColorStop(0.72, C); g.addColorStop(1, mixHex(C, '#000000', 0.5));
+    c.fillStyle = g; disc(r); c.fill();
+    c.shadowBlur = 0;
+    c.save(); disc(r); c.clip();                         // 아래쪽 은은한 되비침
+    const b = c.createRadialGradient(cx + r * 0.15, cy + r * 0.7, 0, cx + r * 0.15, cy + r * 0.7, r * 0.55);
+    b.addColorStop(0, `rgba(255,255,255,${dead ? 0.08 : 0.38})`); b.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = b; c.fillRect(cx - r, cy - r, r * 2, r * 2);
+    c.restore();
+    const hx = cx - r * 0.32, hy = cy - r * 0.4;          // 반짝 하이라이트
+    const s = c.createRadialGradient(hx, hy, 0, hx, hy, r * 0.36);
+    s.addColorStop(0, `rgba(255,255,255,${dead ? 0.35 : 0.95})`); s.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = s; c.beginPath(); c.ellipse(hx, hy, r * 0.36, r * 0.24, -0.6, 0, TAU); c.fill();
+    c.strokeStyle = 'rgba(255,255,255,0.4)'; c.lineWidth = 1; disc(r - 0.5); c.stroke();
+  } else if (st === 'orb') {             // 글라스 오브: 투명한 유리구슬 속에서 색이 빛남
+    glow(0.7, 0.7);
+    c.fillStyle = rgba(C, dead ? 0.12 : 0.22); disc(r); c.fill();
+    c.shadowBlur = 0;
+    const k = c.createRadialGradient(cx, cy + r * 0.08, 0, cx, cy + r * 0.08, r * 0.8);
+    k.addColorStop(0, dead ? rgba(C, 0.45) : '#ffffff'); k.addColorStop(0.28, rgba(C, dead ? 0.4 : 1)); k.addColorStop(1, rgba(C, 0));
+    c.fillStyle = k; disc(r); c.fill();
+    c.save(); disc(r - 1); c.clip();                     // 위쪽 유리 반사
+    const t = c.createLinearGradient(0, cy - r, 0, cy - r * 0.1);
+    t.addColorStop(0, `rgba(255,255,255,${dead ? 0.2 : 0.62})`); t.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = t; c.beginPath(); c.ellipse(cx, cy - r * 0.48, r * 0.7, r * 0.42, 0, 0, TAU); c.fill();
+    c.restore();
+    c.lineWidth = 1.5; c.strokeStyle = dead ? '#6a7088' : mixHex(col, '#ffffff', 0.45); disc(r - 0.75); c.stroke();
+    c.strokeStyle = 'rgba(255,255,255,0.35)'; c.lineWidth = 1;     // 아래 테두리 빛
+    c.beginPath(); c.arc(cx, cy, r * 0.8, Math.PI * 0.22, Math.PI * 0.78); c.stroke();
+  } else if (st === 'brilliant') {       // 보석 컷: 위에서 본 원형 보석 (면마다 밝기가 달라 반짝임)
+    glow(0.6, 0.6);
+    c.fillStyle = C; disc(r); c.fill();
+    c.shadowBlur = 0;
+    c.save(); disc(r); c.clip();
+    const N = 16;
+    for (let i = 0; i < N; i++) {
+      const a0 = i / N * TAU - Math.PI / 2, a1 = (i + 1) / N * TAU - Math.PI / 2, am = (a0 + a1) / 2;
+      const t = (i % 2 ? 0.14 : 0) + (Math.cos(am + 2.2) + 1) / 2 * 0.6;     // 왼쪽 위에서 빛
+      c.fillStyle = t > 0.36 ? mixHex(C, '#ffffff', Math.min(0.85, (t - 0.36) * 1.5)) : mixHex(C, '#000000', (0.36 - t) * 1.1);
+      c.beginPath(); c.moveTo(cx, cy); c.arc(cx, cy, r + 1, a0, a1); c.closePath(); c.fill();
+    }
+    const T = r * 0.5, oct = [];                          // 가운데 판판한 면 (팔각)
+    for (let i = 0; i < 8; i++) { const a = i / 8 * TAU + Math.PI / 8; oct.push([cx + Math.cos(a) * T, cy + Math.sin(a) * T, a]); }
+    c.strokeStyle = 'rgba(255,255,255,0.22)'; c.lineWidth = 1;
+    c.beginPath(); for (const [px, py, a] of oct) { c.moveTo(px, py); c.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); } c.stroke();
+    const tg = c.createLinearGradient(cx - T, cy - T, cx + T, cy + T);
+    tg.addColorStop(0, mixHex(C, '#ffffff', dead ? 0.25 : 0.62)); tg.addColorStop(1, mixHex(C, '#ffffff', 0.08));
+    c.fillStyle = tg; c.beginPath(); oct.forEach(([px, py], i) => (i ? c.lineTo(px, py) : c.moveTo(px, py))); c.closePath(); c.fill();
+    c.strokeStyle = 'rgba(255,255,255,0.55)'; c.stroke();
+    c.restore();
+    c.lineWidth = 1.5; c.strokeStyle = dead ? '#7a8098' : 'rgba(255,255,255,0.8)'; disc(r - 0.75); c.stroke();
+    if (!dead) { c.fillStyle = '#ffffff'; c.beginPath(); starPath(c, cx - r * 0.3, cy - r * 0.32, r * 0.34, r * 0.08, 4); c.fill(); }
+  } else if (st === 'bezel') {           // 메탈 버튼: 은색 금속 테두리 + 볼록한 색 버튼
+    glow(0.45, 0.5);
+    const sv = dead ? ['#7d8396', '#4c5164', '#6f7588', '#454a5c'] : ['#f6f8ff', '#8a93a8', '#e3e8f5', '#6b7489'];
+    let ring;
+    if (c.createConicGradient) {
+      ring = c.createConicGradient(-Math.PI / 4, cx, cy);
+      for (let i = 0; i <= 8; i++) ring.addColorStop(i / 8, sv[i % 4]);
+    } else {
+      ring = c.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+      ring.addColorStop(0, sv[0]); ring.addColorStop(0.5, sv[1]); ring.addColorStop(1, sv[2]);
+    }
+    c.fillStyle = ring; disc(r); c.fill();
+    c.shadowBlur = 0;
+    c.fillStyle = '#161a25'; disc(r * 0.76); c.fill();     // 홈
+    const d = c.createRadialGradient(cx - r * 0.2, cy - r * 0.25, r * 0.05, cx, cy, r * 0.68);
+    d.addColorStop(0, mixHex(C, '#ffffff', dead ? 0.2 : 0.62)); d.addColorStop(0.5, C); d.addColorStop(1, mixHex(C, '#000000', 0.42));
+    c.fillStyle = d; disc(r * 0.67); c.fill();
+    const h = c.createLinearGradient(0, cy - r * 0.6, 0, cy - r * 0.05);    // 버튼 윗면 반사
+    h.addColorStop(0, `rgba(255,255,255,${dead ? 0.2 : 0.6})`); h.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = h; c.beginPath(); c.ellipse(cx, cy - r * 0.3, r * 0.44, r * 0.26, 0, 0, TAU); c.fill();
+    c.strokeStyle = 'rgba(0,0,0,0.35)'; c.lineWidth = 1; disc(r - 0.5); c.stroke();
+  } else if (st === 'dotring') {         // 도트 링: 얇은 링 + 꽉 찬 점 (깔끔한 플랫)
+    const lw = Math.max(1.6, r * 0.11);
+    glow(0.8, 0.55);
+    c.lineWidth = lw; c.strokeStyle = rgba(C, dead ? 0.55 : 0.95); disc(r - lw / 2); c.stroke();
+    c.shadowBlur = 0;
+    const g = c.createLinearGradient(0, cy - r * 0.58, 0, cy + r * 0.58);
+    g.addColorStop(0, mixHex(C, '#ffffff', dead ? 0.1 : 0.35)); g.addColorStop(1, C);
+    glow(0.6, 0.35);
+    c.fillStyle = g; disc(r * 0.58); c.fill();
+    c.shadowBlur = 0;
+  } else if (st === 'halo') {            // 헤일로 링: 빛나는 링 + 바깥 가는 테 + 가운데 하얀 점
+    c.lineWidth = 1.2; c.strokeStyle = rgba(C, dead ? 0.3 : 0.55); disc(r - 0.6); c.stroke();
+    const lw = Math.max(3.5, r * 0.28), rr = r * 0.74;
+    glow(0.9, 0.6);
+    c.lineWidth = lw; c.strokeStyle = C; disc(rr); c.stroke();
+    c.shadowBlur = 0;
+    c.lineWidth = Math.max(1, lw * 0.3); c.strokeStyle = dead ? 'rgba(255,255,255,0.15)' : mixHex(col, '#ffffff', 0.7); disc(rr); c.stroke();
+    if (!dead) { c.shadowColor = '#ffffff'; c.shadowBlur = r * 0.3; }
+    c.fillStyle = dead ? '#6a7088' : '#ffffff'; disc(Math.max(1.6, r * 0.17)); c.fill();
+    c.shadowBlur = 0;
+  } else if (st === 'tube') {            // 네온 튜브 링: 둥근 유리관처럼 입체감 있는 링 (속은 비어 있음)
+    const rr = r * 0.74, lw = Math.max(4, r * 0.36);
+    glow(0.85, 0.65);
+    c.lineWidth = lw; c.strokeStyle = mixHex(C, '#000000', 0.15); disc(rr); c.stroke();
+    c.shadowBlur = 0;
+    c.lineWidth = lw * 0.55; c.strokeStyle = mixHex(C, '#ffffff', dead ? 0.1 : 0.35); disc(rr); c.stroke();
+    c.lineWidth = Math.max(1, lw * 0.18); c.strokeStyle = dead ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.9)'; c.lineCap = 'round';
+    c.beginPath(); c.arc(cx, cy, rr - lw * 0.12, Math.PI * 1.08, Math.PI * 1.5); c.stroke();
+    c.lineWidth = Math.max(1, lw * 0.12); c.strokeStyle = dead ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.45)';
+    c.beginPath(); c.arc(cx, cy, rr + lw * 0.1, Math.PI * 0.15, Math.PI * 0.4); c.stroke();
+    c.lineCap = 'butt';
+  } else if (st === 'segring') {         // 세그먼트 링: 네 조각으로 나뉜 링 (계기판 느낌) + 가는 안쪽 링 + 가운데 점
+    const lw = Math.max(2.5, r * 0.2), rr = r - lw / 2 - 0.5, gap = 0.2;
+    glow(0.85, 0.55);
+    c.lineWidth = lw; c.strokeStyle = C; c.lineCap = 'round';
+    for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 - Math.PI / 4; c.beginPath(); c.arc(cx, cy, rr, a + gap, a + Math.PI / 2 - gap); c.stroke(); }
+    c.lineCap = 'butt'; c.shadowBlur = 0;
+    c.lineWidth = 1; c.strokeStyle = rgba(C, dead ? 0.3 : 0.6); disc(r * 0.5); c.stroke();
+    glow(0.8, 0.3);
+    c.fillStyle = dead ? '#6a7088' : mixHex(col, '#ffffff', 0.75); disc(Math.max(1.6, r * 0.2)); c.fill();
+    c.shadowBlur = 0;
+  }
+}
+function drawRoundNote(L, lane, yHead, yTail, state, st) {
+  const { ctx, laneW, x0, colors } = L;
+  const nw = laneW - 4, cx = x0 + lane * laneW + 2 + nw / 2;
+  const r = Math.round(Math.min(nw * 0.42, settings.skin.noteH * 0.9 + 4) * 2) / 2;
+  const col = colors[lane], dead = state === 'dead';
+  const spr = (rr) => { const m = Math.ceil(rr * 0.8) + 4; return spriteOf(`rn|${st}|${col}|${rr}|${dead}`, rr * 2 + m * 2, rr * 2 + m * 2, (c) => paintRoundNote(c, st, col, rr, m, dead)); };
+  if (yTail !== null && yTail < yHead) {   // 긴 노트: 좁은 몸통 + 끝에 작은 원
+    const bw = Math.max(6, Math.round(r * 1.05));
+    const body = spriteOf(`rnb|${st}|${col}|${bw}|${dead}|${state === 'hold'}`, bw, 8, (c, w) => {
+      const g = c.createLinearGradient(0, 0, w, 0);
+      const a = dead ? 0.32 : state === 'hold' ? 0.95 : 0.72, K = dead ? '#5a6078' : col;
+      g.addColorStop(0, rgba(K, a * 0.2)); g.addColorStop(0.5, rgba(K, st === 'orb' ? a * 0.65 : a)); g.addColorStop(1, rgba(K, a * 0.2));
+      c.fillStyle = g; c.fillRect(0, 0, w, 8);
+      c.fillStyle = dead ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.6)'; c.fillRect(w / 2 - 0.75, 0, 1.5, 8);
+    });
+    const rt = Math.max(4, Math.round(r * 1.2) / 2);          // 끝 원 반지름 — 몸통은 두 원 바깥 테두리 사이만 (속 빈 링 안으로 안 비치게)
+    const b0 = yTail + rt * 0.85, b1 = yHead - r * 0.85;
+    if (b1 > b0) ctx.drawImage(body.c, cx - bw / 2, b0, bw, b1 - b0);
+    drawSprite(ctx, spr(rt), cx, yTail);
+  }
+  const sp = spr(r);
+  drawSprite(ctx, sp, cx, yHead);
+  if (state === 'hold') {                // 누르는 중: 살짝 더 밝게
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.35; drawSprite(ctx, sp, cx, yHead); ctx.restore();
+  }
+}
+
 function drawNote(L, lane, yHead, yTail, state, accent = false) {
   if (accent && state !== 'dead') drawAccentGlow(L, lane, yHead);
+  if (ROUND_NOTES.has(settings.skin.note)) { drawRoundNote(L, lane, yHead, yTail, state, settings.skin.note); return; }
   const { ctx, laneW, x0, colors } = L;
   const sk = settings.skin;
   const pad = 2;
@@ -393,7 +552,7 @@ function lineStyleOf() {
   const sk = settings.skin;
   const st = sk.lineStyle || 'auto';
   if (st !== 'auto') return st;
-  return ['circle', 'hollow', 'diamond', 'star', 'heart', 'gem', 'pumpkin'].includes(sk.note) ? 'ring' : 'bar';
+  return ['circle', 'hollow', 'diamond', 'star', 'heart', 'gem', 'pumpkin'].includes(sk.note) || ROUND_NOTES.has(sk.note) ? 'ring' : 'bar';
 }
 function receptorR(L) {
   const nw = L.laneW - 4;
