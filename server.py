@@ -1107,6 +1107,15 @@ def on_play(acct, pr, nick, sid, diff, keys, data):
             out["coinParts"].append([f"레벨 업 (Lv {b})", lc])
             out["levelUp"] = {"from": a, "to": b}
             _grant_level_items(p, out["items"])
+        # 시즌 패스 · 올해 결산 기록
+        try:
+            sc = _season_play(p, xp, out)
+            if sc:
+                coins += sc
+                out["coinParts"].append(["시즌 패스", sc])
+            _wrap_play(p, info)
+        except Exception as e:
+            log("시즌·결산 기록 실패:", e)
         p["coins"] += coins
         p["earned"] = p.get("earned", 0) + coins
         p["lastPlay"] = time.time()
@@ -1295,6 +1304,10 @@ def _ev_play(p, info, data, out):
         parts.append(["이벤트 미션 모두 완료", EV_ALL])
     e["candy"] = int(e.get("candy", 0)) + gain
     e["earned"] = int(e.get("earned", 0)) + gain
+    if _word_grant(p, "f_spooky"):
+        out.setdefault("words", []).append("f_spooky")
+    if e.get("all") and _word_grant(p, "b_pumpkin"):
+        out.setdefault("words", []).append("b_pumpkin")
     out["event"] = {"cur": EVENT["cur"], "gain": gain, "parts": parts, "total": e["candy"], "missions": newly, "allDone": all_now, "pk": pk}
 
 
@@ -1318,6 +1331,193 @@ def event_buy(acct, pr, data):
         _prog_save()
         log("이벤트 교환:", acct, iid, price)
         return {"ok": True, "candy": e["candy"], "owned": p["owned"]}
+
+
+# ---- 무료 시즌 패스: 시즌 동안 번 경험치로 단계가 오름 (단계마다 ♪ · 칭호 단어 · 5·10·15·20단계엔 시즌 한정 꾸미기)
+SEASONS = [
+    {"id": "s1", "name": "시즌 1 · 가을", "theme": "autumn", "start": _kst_ts(2026, 10, 26), "end": _kst_ts(2026, 12, 1),
+     "rewards": {3: ("word", "f_autumn"), 5: ("item", "nc_autumn"), 8: ("word", "b_maple"), 10: ("item", "fx_leaf"),
+                 13: ("word", "f_leafy"), 15: ("item", "card_autumn"), 18: ("word", "b_fairy"), 20: ("item", "icon_maple")}},
+    {"id": "s2", "name": "시즌 2 · 겨울", "theme": "winter", "start": _kst_ts(2026, 12, 1), "end": _kst_ts(2027, 1, 1),
+     "rewards": {3: ("word", "f_winter"), 5: ("item", "nc_ice"), 8: ("word", "b_snowman"), 10: ("item", "frame_ice"),
+                 13: ("word", "f_frozen"), 15: ("item", "card_snow"), 18: ("word", "b_santa"), 20: ("item", "icon_snowman")}},
+]
+SEASON_TIERS, SEASON_STEP, SEASON_COIN, SEASON_OVER_COIN = 20, 500, 50, 80
+WORD_RE = re.compile(r"^[fb]_[a-z0-9]{2,16}$")
+
+
+def season_now(t=None):
+    t = time.time() if t is None else t
+    return next((x for x in SEASONS if x["start"] <= t < x["end"]), None)
+
+
+def _season_reward(sn, tier):
+    r = sn["rewards"].get(tier)
+    if r:
+        return r
+    return ("coin", SEASON_COIN if tier <= SEASON_TIERS else SEASON_OVER_COIN)
+
+
+def _word_grant(p, wid):
+    if not WORD_RE.match(wid):
+        return False
+    w = p.setdefault("words", [])
+    if wid in w:
+        return False
+    w.append(wid)
+    return True
+
+
+def _season_play(p, xp, out):
+    """끝까지 한 판: 시즌 경험치 · 오른 단계 보상 — 받은 ♪를 돌려줌 (FILE_LOCK 안에서)"""
+    sn = season_now()
+    if not sn or xp <= 0:
+        return 0
+    e = p.setdefault("season", {}).setdefault(sn["id"], {"xp": 0, "tier": 0})
+    before = int(e.get("tier", 0))
+    e["xp"] = int(e.get("xp", 0)) + int(xp)
+    tier = e["xp"] // SEASON_STEP
+    got, coins = [], 0
+    for t in range(before + 1, tier + 1):
+        kind, val = _season_reward(sn, t)
+        if kind == "coin":
+            coins += val
+            got.append({"tier": t, "coin": val})
+        elif kind == "item":
+            _grant(p, val, f"{sn['name']} {t}단계")
+            got.append({"tier": t, "item": val})
+        elif kind == "word":
+            _word_grant(p, val)
+            got.append({"tier": t, "word": val})
+    e["tier"] = tier
+    out["season"] = {"name": sn["name"], "xp": e["xp"], "tier": tier, "step": SEASON_STEP, "gain": int(xp), "got": got, "coins": coins}
+    return coins
+
+
+def season_public(p):
+    sn = season_now()
+    if not sn:
+        return None
+    e = (p.get("season") or {}).get(sn["id"]) or {"xp": 0, "tier": 0}
+    tiers = []
+    for t in range(1, SEASON_TIERS + 1):
+        kind, val = _season_reward(sn, t)
+        tiers.append({"tier": t, "kind": kind, "val": val})
+    return {"id": sn["id"], "name": sn["name"], "theme": sn["theme"], "endsIn": int(sn["end"] - time.time()), "xp": int(e.get("xp", 0)),
+            "tier": int(e.get("tier", 0)), "step": SEASON_STEP, "tiers": tiers, "max": SEASON_TIERS, "overCoin": SEASON_OVER_COIN}
+
+
+# ---- 올해 결산: 끝까지 한 판마다 그해 기록을 모음 (판수·시간·노트·콤보·곡·난이도·시간대·날짜·랭크·같이 한 친구)
+def _year():
+    return time.strftime("%Y", time.gmtime(time.time() + KST))
+
+
+def _wrap_of(p, y=None):
+    return p.setdefault("yr", {}).setdefault(y or _year(), {"plays": 0, "secs": 0, "notes": 0, "perfect": 0, "maxCombo": 0, "fc": 0, "ap": 0,
+                                                             "multi": 0, "songs": {}, "titles": {}, "diffs": {}, "hours": [0] * 24, "days": [],
+                                                             "ranks": {}, "partners": {}, "first": time.time()})
+
+
+def _wrap_play(p, info):
+    w = _wrap_of(p)
+    song = load_song(info["sid"]) or {}
+    dur = float(song.get("duration") or 0)
+    w["plays"] += 1
+    w["secs"] = int(w.get("secs", 0) + (min(dur, 900) if not info["hl"] else min(dur, 60) or 45))
+    w["notes"] += info["units"]
+    w["perfect"] += info["perfect"]
+    w["maxCombo"] = max(w.get("maxCombo", 0), info["maxCombo"])
+    w["fc"] += int(info["fc"])
+    w["ap"] += int(info["ap"])
+    w["multi"] += int(info["multi"])
+    sid = info["sid"]
+    w["songs"][sid] = int(w["songs"].get(sid, 0)) + 1
+    w["titles"][sid] = str(info.get("title") or sid)[:80]
+    w["diffs"][info["diff"]] = int(w["diffs"].get(info["diff"], 0)) + 1
+    hr = int(time.gmtime(time.time() + KST).tm_hour)
+    w["hours"][hr] = int(w["hours"][hr]) + 1
+    day = _kst_day()
+    if day not in w["days"]:
+        w["days"].append(day)
+        w["days"] = w["days"][-400:]
+    w["ranks"][info["rank"]] = int(w["ranks"].get(info["rank"], 0)) + 1
+    if len(w["songs"]) > 500:
+        w["songs"] = dict(sorted(w["songs"].items(), key=lambda kv: -kv[1])[:400])
+
+
+def wrap_partners(room, results):
+    """멀티 한 판이 끝나면: 같이 끝까지 한 사람끼리 '같이 한 친구' 횟수 +1"""
+    done = [c for c in room.players.values() if getattr(c, "acct", None)]
+    if len(done) < 2:
+        return
+    with FILE_LOCK:
+        P = _prog_all()
+        for c in done:
+            p = P.get(c.acct)
+            if not p:
+                continue
+            w = _wrap_of(p)
+            for o in done:
+                if o is not c:
+                    w["partners"][o.name] = int(w["partners"].get(o.name, 0)) + 1
+            if len(w["partners"]) > 60:
+                w["partners"] = dict(sorted(w["partners"].items(), key=lambda kv: -kv[1])[:40])
+        _prog_save()
+
+
+def wrap_info(acct, pr):
+    """올해 결산: 모아 둔 그해 기록 + 예전 기록(곡별 판수·최고 기록·출석·♪)으로 채움"""
+    y = _year()
+    with FILE_LOCK:
+        p = prog_of(acct, pr)
+        w = dict(_wrap_of(p, y))
+        plays = read_json(PLAYS_FILE, {})
+        P = _prog_all()
+        nick = p["nick"]
+        mine = (plays or {}).get(nick) if isinstance(plays, dict) and isinstance((plays or {}).get(nick), dict) else {}
+        # 친구 순위 (올해 판수): 모아 둔 기록과 곡별 판수 중 큰 쪽
+        def plays_of(a, q):
+            ww = ((q.get("yr") or {}).get(y) or {}).get("plays", 0)
+            u = (plays or {}).get(q.get("nick", "")) if isinstance(plays, dict) else None
+            h = sum(int(v[0]) for v in u.values() if isinstance(v, list) and v) if isinstance(u, dict) else 0
+            return max(int(ww), h)
+        board = sorted(((a, plays_of(a, q)) for a, q in P.items()), key=lambda kv: -kv[1])
+        board = [b for b in board if b[1] > 0]
+        my_plays = plays_of(acct, p)
+        my_rank = next((i + 1 for i, (a, _) in enumerate(board) if a == acct), len(board) + 1)
+        xp_board = sorted(((a, int(q.get("xp", 0))) for a, q in P.items() if int(q.get("xp", 0)) > 0), key=lambda kv: -kv[1])
+        xp_rank = next((i + 1 for i, (a, _) in enumerate(xp_board) if a == acct), len(xp_board) + 1)
+        st = p.get("streak", {})
+        out_p = {"nick": nick, "xp": p.get("xp", 0), "lv": level_of(p.get("xp", 0)), "earned": p.get("earned", 0), "streakBest": st.get("best", 0),
+                 "chal": p.get("chal", {"w": 0, "l": 0}), "champ": p.get("champ", 0), "owned": len(p.get("owned", [])), "created": p.get("created", 0)}
+    # 곡별 판수: 모아 둔 것과 예전 횟수 중 큰 쪽
+    titles = {s["id"]: s.get("title", s["id"]) for s in list_songs()}
+    songs = dict(w.get("songs") or {})
+    for sid, v in (mine or {}).items():
+        if isinstance(v, list) and v:
+            songs[sid] = max(int(songs.get(sid, 0)), int(v[0]))
+    top = sorted(songs.items(), key=lambda kv: -kv[1])[:5]
+    # 최고 기록들 (순위표)
+    recs, best_combo, fc_n = [], int(w.get("maxCombo", 0)), 0
+    for s in list_songs():
+        for e in s.get("board", []):
+            if e.get("name") != nick:
+                continue
+            rk = entry_rank(e)
+            recs.append(rk)
+            best_combo = max(best_combo, int(e.get("maxCombo", 0) or 0))
+            fc_n += int(bool(e.get("fc")))
+    ranks = {}
+    for rk in recs:
+        ranks[rk] = ranks.get(rk, 0) + 1
+    partners = sorted((w.get("partners") or {}).items(), key=lambda kv: -kv[1])[:3]
+    return {"year": y, "plays": max(int(w.get("plays", 0)), sum(songs.values())), "tracked": int(w.get("plays", 0)), "secs": int(w.get("secs", 0)),
+            "notes": int(w.get("notes", 0)), "perfect": int(w.get("perfect", 0)), "maxCombo": best_combo, "fc": max(int(w.get("fc", 0)), fc_n),
+            "ap": int(w.get("ap", 0)), "multi": int(w.get("multi", 0)), "songCount": len(songs),
+            "top": [{"id": sid, "title": titles.get(sid) or (w.get("titles") or {}).get(sid, sid), "n": n} for sid, n in top],
+            "diffs": w.get("diffs") or {}, "hours": w.get("hours") or [0] * 24, "days": len(w.get("days") or []), "ranks": ranks,
+            "partners": [{"name": k, "n": v} for k, v in partners], "rank": {"plays": my_rank, "of": max(len(board), 1), "xp": xp_rank, "xpOf": max(len(xp_board), 1)},
+            "me": out_p, "myPlays": my_plays}
 
 
 # ---- 상점
@@ -1547,7 +1747,13 @@ def me_summary(acct, pr, data):
                "streak": {"n": st["n"] if alive else 0, "best": st.get("best", 0), "shields": st.get("shields", 0), "today": st.get("last") == day},
                "ret": p.get("ret", 0), "missions": mis, "misAll": p.get("misAll", 0), "notices": p["notices"][-30:],
                "unread": sum(1 for n in p["notices"] if not n.get("read")), "chal": p["chal"], "champ": p.get("champ", 0),
-               "chalOut": out_ch, "deco": p.get("deco", {}), "event": ev_public(p)}
+               "chalOut": out_ch, "deco": p.get("deco", {}), "event": ev_public(p), "season": season_public(p)}
+        evp = (p.get("ev") or {}).get(EVENT["id"]) or {}
+        if evp.get("earned"):
+            _word_grant(p, "f_spooky")
+        if evp.get("all"):
+            _word_grant(p, "b_pumpkin")
+        res["words"] = list(p.get("words", []))
     res["league"] = league_public(acct)
     res["shop"] = dict(shop_today(), prices={i: price_of(i) for i in ITEMS if ITEMS[i].get("price")})
     res["medal"] = medal_of(acct)
@@ -3715,6 +3921,9 @@ async def api(method, path, headers, body):
     if parts == ["shop", "buy"] and method == "POST":
         acct, pr = acct_need(headers)
         return shop_buy(acct, pr, json_body(body))
+    if parts == ["wrap"] and method == "GET":
+        acct, pr = acct_need(headers)
+        return await loop.run_in_executor(None, wrap_info, acct, pr)
     if parts == ["event", "buy"] and method == "POST":
         acct, pr = acct_need(headers)
         return event_buy(acct, pr, json_body(body))
@@ -4276,6 +4485,10 @@ def finish_game(room):
             duel_res = duel_finish(room, results)
         except Exception as e:
             log("대결 결과 처리 실패:", e)
+    try:
+        wrap_partners(room, results)
+    except Exception as e:
+        log("같이 한 친구 기록 실패:", e)
     room.broadcast({"type": "results", "results": results, "songTitle": room.song_title, "diff": room.diff, "keys": room.keys,
                     "hl": room.cur_hl, **({"duel": duel_res} if duel_res else {})})
     if room.watchers:
@@ -4552,7 +4765,7 @@ def handle_msg(c, m):
             c.avatar = {str(k)[:12]: (v if isinstance(v, int) and 0 <= v < 100 else str(v)[:12])
                         for k, v in list(av.items())[:12] if isinstance(v, (int, str))}
         if "title" in m:
-            c.title = str(m.get("title") or "").strip()[:16]
+            c.title = str(m.get("title") or "").strip()[:24]
         lv = m.get("level")
         if isinstance(lv, int) and not isinstance(lv, bool) and 0 < lv < 1000:
             c.level = lv
@@ -4605,6 +4818,40 @@ def handle_msg(c, m):
         c.room = r
         log(f"방 {r.code} 생성 ({c.name})")
         r.push()
+        return
+    if t == "call":
+        # 📣 같이 하자: 접속 중인 친구(모두 또는 고른 사람)를 내 방으로 부름 — 방이 없으면 새로 만듦, 1분에 한 번
+        now = time.time()
+        if not c.named:
+            return
+        left = 60 - (now - getattr(c, "callAt", 0))
+        if left > 0:
+            c.send({"type": "callRes", "error": f"{int(left) + 1}초 뒤에 다시 부를 수 있어요."})
+            return
+        if c.room and getattr(c.room, "private", False):
+            c.send({"type": "callRes", "error": "1:1 대결 중에는 친구를 부를 수 없어요."})
+            return
+        to = m.get("to")
+        ids = {int(x) for x in to if isinstance(x, int) and not isinstance(x, bool)} if isinstance(to, list) else None
+        targets = [x for x in list(CLIENTS.values()) if x is not c and x.named and not x.closed and (ids is None or x.id in ids)
+                   and not (c.room and x.room is c.room)]
+        if not targets:
+            c.send({"type": "callRes", "n": 0})
+            return
+        c.callAt = now
+        if not c.room:
+            r = Room(new_code(), c)
+            ROOMS[r.code] = r
+            r.players[c.id] = c
+            c.room = r
+            log(f"방 {r.code} 생성 ({c.name}, 부르기)")
+            r.push()
+        r = c.room
+        for x in targets:
+            x.send({"type": "call", "from": c.name, "fid": c.id, "avatar": c.avatar, "code": r.code, "song": r.song_title if r.song_id else "",
+                    "playing": r.phase != "lobby", "secs": 30})
+        log(f"부르기: {c.name} → {len(targets)}명 (방 {r.code})")
+        c.send({"type": "callRes", "n": len(targets), "code": r.code})
         return
     if t == "join":
         code = str(m.get("code", "")).strip().upper()

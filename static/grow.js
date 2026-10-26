@@ -99,6 +99,11 @@ function renderGrowAll() {
   renderGrowTop();
   renderGrowBar();
   renderEvent();
+  if (typeof renderSeasonBar === 'function') renderSeasonBar();
+  if (typeof renderSeasonDlg === 'function' && $('#seasonDlg').open) renderSeasonDlg();
+  if (typeof renderMyTitle === 'function') renderMyTitle();       // 단어가 열리거나 닫히면 칭호도 다시
+  if (typeof renderTitleMaker === 'function' && $('#achDlg').open) renderTitleMaker();
+  for (const id of ['#btnCall', '#btnWrap']) { const b = $(id); if (b) b.classList.toggle('hidden', !myGrow); }
   if ($('#shopDlg').open) renderShop();
   if (ntOpen()) renderNotices();
   if (typeof markLocks === 'function' && $('#skinDlg').open) markLocks();
@@ -283,6 +288,8 @@ function growOnResult(g, r, res) {
   if (rw.levelUp) L.push(`<div class="rw-line rw-lv">⬆ 레벨 업! Lv ${rw.levelUp.from} → ${rw.levelUp.to} · +${100 * (rw.levelUp.to - rw.levelUp.from)}♪</div>`);
   if (rw.items.length) L.push(`<div class="rw-line rw-items">🎁 새 꾸미기: ${rw.items.map((id) => `<b>${esc((itemOf(id) || {}).name || id)}</b>`).join(', ')} <button type="button" class="small-btn" id="rwShop">상점에서 보기</button></div>`);
   if (rw.league && rw.league.rank) L.push(`<div class="rw-line rw-lg">🏅 이번 주 리그 <b>${rw.league.rank}위</b> · ${fmtN(rw.league.pts)} XP</div>`);
+  if (typeof seasonResultLine === 'function') { const sl = seasonResultLine(rw); if (sl) L.push(sl); }
+  if (rw.words && rw.words.length && typeof WORD_BY !== 'undefined') L.push(`<div class="rw-line rw-words">🏷 새 칭호 단어: ${rw.words.map((w) => `<b>'${esc((WORD_BY[w] || {}).t || w)}'</b>`).join(', ')} <small>업적 창에서 칭호를 만들어 보세요</small></div>`);
   if (rw.event) {
     const ev = rw.event;
     L.push(`<div class="rw-line rw-ev">🎃 할로윈 <b>${ev.cur} +${fmtN(ev.gain)}</b> <small>${ev.parts.map(([k, v]) => `${esc(k)} ${fmtN(v)}`).join(' · ')}</small> <span class="rw-total">보유 ${ev.cur}${fmtN(ev.total)}</span>`
@@ -445,7 +452,8 @@ class ShopPreview extends SkinPreview {
 const SW_GLYPH = { note_neon: '▭', note_star: '★', note_heart: '♥', note_gem: '◆', note_pumpkin: '🎃', fx_petal: '🌸', fx_bolt: '⚡', fx_star: '✨', fx_fire: '🔥', fx_snow: '❄️', fx_bat: '🦇',
   combo_gold: '123', combo_neon: '123', combo_rainbow: '123', fc_fireworks: '🎆', fc_stars: '🌟', fc_hero: '🙌', fc_bats: '🦇', gear_hw: '🎃' };
 const evNow = (it) => !!(it && it.event && myGrow && myGrow.event && myGrow.event.id === it.event);   // 지금 교환소에서 바꿀 수 있는 물건
-const evGone = (it) => !!(it && it.event && !evNow(it));
+const ssNow = (it) => !!(it && it.season && myGrow && myGrow.season && myGrow.season.id === it.season);   // 지금 시즌 패스로 얻을 수 있는 물건
+const evGone = (it) => !!(it && ((it.event && !evNow(it)) || (it.season && !ssNow(it))));
 function swInner(it) {
   if (it.cat === 'icon') return it.emoji || '';
   if (it.cat === 'nc') return '가';
@@ -458,10 +466,11 @@ function shopItemHtml(id) {
   const price = (myGrow.shop.prices || {})[id], base = it.price;
   const st = on ? '<b class="si-on">장착 중</b>' : own ? '<span class="si-own">보유</span>'
     : it.event ? (evNow(it) ? `<b class="si-candy">🍬${fmtN(it.candy)}</b>` : '<span class="si-lock">이벤트 끝남</span>')
+    : it.season ? `<span class="si-lock">🎫 ${esc(it.how || '시즌 패스')}</span>`
     : it.earn ? `<span class="si-lock">🔒 ${esc(it.how || '')}</span>`
       : price < base ? `<s>♪${fmtN(base)}</s> <b class="si-sale">♪${fmtN(price)}</b>` : `<b>♪${fmtN(price)}</b>`;
   return `<button type="button" class="shop-item${own ? ' own' : ''}${on ? ' on' : ''}${shopSel === id ? ' sel' : ''}${it.earn && !own ? ' earn' : ''}" data-id="${esc(id)}">`
-    + `<span class="si-sw sw-${esc(id)}">${swInner(it)}</span><span class="si-name">${esc(it.name)}${it.limited ? ' <em>한정</em>' : ''}${it.event ? ' <em class="ev">🎃 이벤트</em>' : ''}</span><span class="si-st">${st}</span></button>`;
+    + `<span class="si-sw sw-${esc(id)}">${swInner(it)}</span><span class="si-name">${esc(it.name)}${it.limited ? ' <em>한정</em>' : ''}${it.event ? ' <em class="ev">🎃 이벤트</em>' : ''}${it.season ? ' <em class="ss">🎫 시즌</em>' : ''}</span><span class="si-st">${st}</span></button>`;
 }
 function renderShop() {
   if (!myGrow || !SHOP) return;
@@ -505,14 +514,15 @@ function renderShopSel() {
   const own = itemOwned(it.id), on = own && itemEquipped(it.id);
   const price = (myGrow.shop.prices || {})[it.id];
   const catN = (SHOP.cats.find((c) => c[0] === it.cat) || [0, ''])[1];
-  info.innerHTML = `<b>${esc(it.name)}</b><small>${esc(catN)}${it.limited ? ' · 이번 주 한정' : ''}${it.event ? ' · 🎃 할로윈 이벤트 교환소 (이번에만)' : ''}${it.earn ? ` · 얻는 법: ${esc(it.how || '')}` : ''}</small>`;
+  info.innerHTML = `<b>${esc(it.name)}</b><small>${esc(catN)}${it.limited ? ' · 이번 주 한정' : ''}${it.event ? ' · 🎃 할로윈 이벤트 교환소 (이번에만)' : ''}${it.season ? ` · 🎫 ${esc(it.how || '시즌 패스')}` : ''}${it.earn ? ` · 얻는 법: ${esc(it.how || '')}` : ''}</small>`;
   if (own) act.innerHTML = `<button type="button" class="${on ? '' : 'primary'}" id="shopEquip">${on ? '빼기 (기본으로)' : '장착하기'}</button>`;
   else if (it.event) {
     const ev = myGrow.event, lack = ev ? it.candy - ev.candy : 0;
     act.innerHTML = !evNow(it) ? '<span class="si-lock">이벤트가 끝나서 더는 못 얻어요</span>'
       : lack > 0 ? `<button type="button" disabled>🍬${fmtN(it.candy)} · ${fmtN(lack)}개 더 필요</button>`
         : `<button type="button" class="primary ev-btn" id="shopBuy">${buyArm === it.id ? `정말 바꿀까요? 🍬${fmtN(it.candy)} — 한 번 더 누르기` : `🍬${fmtN(it.candy)}로 바꾸기`}</button>`;
-  } else if (it.earn) act.innerHTML = `<span class="si-lock">🔒 ${esc(it.how || '')} 하면 얻어요 (상점에서 못 사요)</span>`;
+  } else if (it.season) act.innerHTML = `<span class="si-lock">🎫 ${esc(it.how || '시즌 패스')} 보상이에요 — 시즌 동안 곡을 쳐서 단계를 올리면 받아요</span>`;
+  else if (it.earn) act.innerHTML = `<span class="si-lock">🔒 ${esc(it.how || '')} 하면 얻어요 (상점에서 못 사요)</span>`;
   else {
     const lack = price - myGrow.coins;
     act.innerHTML = lack > 0 ? `<button type="button" disabled>♪${fmtN(price)} · ${fmtN(lack)}♪ 더 필요</button>`

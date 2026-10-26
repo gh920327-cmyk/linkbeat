@@ -60,7 +60,7 @@ const LINE_COLORS = { red: '#ff3b55', cyan: '#4de1ff', gold: '#ffc83d', white: '
 /* 상점에서 사야 쓸 수 있는 꾸미기 값 → 아이템 (없는 값은 처음부터 무료) */
 const SKIN_ITEMS = {
   note: { neon: 'note_neon', star: 'note_star', heart: 'note_heart', gem: 'note_gem', pumpkin: 'note_pumpkin' },
-  effect: { petal: 'fx_petal', bolt: 'fx_bolt', stardust: 'fx_star', fire: 'fx_fire', snow: 'fx_snow', bat: 'fx_bat' },
+  effect: { petal: 'fx_petal', bolt: 'fx_bolt', stardust: 'fx_star', fire: 'fx_fire', snow: 'fx_snow', bat: 'fx_bat', leaf: 'fx_leaf' },
   line: { purple: 'line_purple', green: 'line_green', rainbow: 'line_rainbow', ghost: 'line_ghost' },
   gear: { clear: 'gear_clear', wood: 'gear_wood', neon: 'gear_neon', chrome: 'gear_chrome', gold: 'gear_gold', halloween: 'gear_hw' },
   comboStyle: { gold: 'combo_gold', neon: 'combo_neon', rainbow: 'combo_rainbow' },
@@ -766,7 +766,7 @@ function helloMsg() {
   return m;
 }
 /* 남에게 보이는 이름 꾸미기: 지난주 리그 메달 · 이름 아이콘 · 이름 색 (서버가 가진 것만 보내 줌) */
-const ICON_EMOJI = { icon_note: '🎵', icon_headphone: '🎧', icon_bolt: '⚡', icon_gem: '💎', icon_star: '⭐', icon_fire: '🔥', icon_pumpkin: '🎃', icon_cat: '🐱', icon_ghost: '👻' };
+const ICON_EMOJI = { icon_note: '🎵', icon_headphone: '🎧', icon_bolt: '⚡', icon_gem: '💎', icon_star: '⭐', icon_fire: '🔥', icon_pumpkin: '🎃', icon_cat: '🐱', icon_ghost: '👻', icon_maple: '🍁', icon_snowman: '⛄' };
 const MEDALS = ['', '🥇', '🥈', '🥉'];
 function nameDeco(p, name = p && p.name) {
   const d = (p && p.deco) || {};

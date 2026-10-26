@@ -102,7 +102,7 @@ const ACH = [
 ];
 const goalOf = (a) => (typeof a.goal === 'function' ? a.goal() : a.goal);
 const LEGEND_TITLES = new Set(ACH.filter((a) => a.tier === 'legend').map((a) => a.name));
-function achIsLegend(t) { return !!t && LEGEND_TITLES.has(t); }
+function achIsLegend(t) { return !!t && (LEGEND_TITLES.has(t) || (typeof titleHasLegendWord === 'function' && titleHasLegendWord(t))); }
 const ACH_BY = Object.fromEntries(ACH.map((a) => [a.id, a]));
 
 function achGot() { const v = store.get('ach', {}); return v && typeof v === 'object' ? v : {}; }
@@ -115,7 +115,11 @@ function achSummary() {
   const top = have.slice().sort((a, b) => achRankKey(b) - achRankKey(a)).slice(0, 3).map((a) => a.id);
   return { ach: have.length, achTotal: ACH.length, achTop: top };
 }
-function achTitle() { const id = store.get('title', ''); return (ACH_BY[id] && achGot()[id]) ? ACH_BY[id].name : ''; }
+function achTitle() {
+  const combo = typeof titleComboText === 'function' ? titleComboText() : '';     // 앞말 + 뒷말로 만든 칭호가 있으면 그것
+  if (combo) return combo;
+  const id = store.get('title', ''); return (ACH_BY[id] && achGot()[id]) ? ACH_BY[id].name : '';
+}
 function achStats() {
   const st = Object.assign({ plays: 0, fc: 0, ap: 0, hl: 0, multi: 0, ai: 0, perf: 0, ghost: 0, mwin: 0, songs: {}, day: '', dayN: 0, streak: 0 }, store.get('achStats', {}) || {});
   if (!st.songs || typeof st.songs !== 'object') st.songs = {};
@@ -373,7 +377,7 @@ function renderAchDlg() {
       const v = goal ? Math.min(goal, pr[a.stat] || 0) : 0;
       const bar = goal && !at ? `<span class="ai-prog"><i style="width:${Math.round((v / goal) * 100)}%"></i></span><span class="ai-num">${v.toLocaleString()} / ${goal.toLocaleString()}</span>` : '';
       const lg = a.tier === 'legend';
-      return `<button type="button" class="ach-item${lg ? ' legend' : ''}${at ? ' got' : ''}${cur === a.id && at ? ' cur' : ''}${fresh.has(a.id) ? ' new' : ''}" data-id="${a.id}" ${at ? '' : 'disabled'}>
+      return `<button type="button" class="ach-item${lg ? ' legend' : ''}${at ? ' got' : ''}${cur === a.id && at && !store.get('titleCombo', null) ? ' cur' : ''}${fresh.has(a.id) ? ' new' : ''}" data-id="${a.id}" ${at ? '' : 'disabled'}>
       ${fresh.has(a.id) ? '<span class="ai-new">NEW</span>' : ''}<span class="ai-ico">${at ? (lg ? '👑' : '🏆') : '🔒'}</span>
       <span class="ai-name">${esc(a.name)}</span>
       <span class="ai-desc">${esc(a.desc)}</span>${bar}
@@ -382,9 +386,11 @@ function renderAchDlg() {
   }).join('');
   const off = $('#achTitleOff');
   if (off) off.onclick = () => achSetTitle('');
+  if (typeof renderTitleMaker === 'function') renderTitleMaker();
 }
 function achSetTitle(id) {
   store.set('title', id);
+  store.set('titleCombo', null);      // 업적 칭호를 고르거나 떼면 만든 칭호도 뗌
   if (typeof profileSync === 'function') profileSync();
   renderAchDlg();
   renderMyTitle();
