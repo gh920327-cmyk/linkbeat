@@ -3355,24 +3355,6 @@ def import_item(data):
     raise HttpError(400, "알 수 없는 항목이에요.")
 
 
-# 곡 신청 도배 막기: 같은 곳(IP)에서 10분에 5번까지
-REQ_RATE = {}
-
-
-def request_rate_ok(ip):
-    now = time.time()
-    lst = [t for t in REQ_RATE.get(ip, []) if now - t < 600]
-    if len(lst) >= 5:
-        REQ_RATE[ip] = lst
-        return False
-    lst.append(now)
-    REQ_RATE[ip] = lst
-    if len(REQ_RATE) > 2000:
-        for k in [k for k, v in REQ_RATE.items() if not v or now - v[-1] > 600]:
-            REQ_RATE.pop(k, None)
-    return True
-
-
 def validate_notes(notes, nl=4):
     if not isinstance(notes, list) or len(notes) > 20000:
         raise ValueError("노트 형식이 잘못됐어요.")
@@ -3846,10 +3828,8 @@ async def api(method, path, headers, body):
             reqs = load_requests()
             if any(r["vid"] == vid for r in reqs):
                 raise HttpError(400, "이미 신청된 곡이에요.")
-            if len(reqs) >= 50:
+            if len(reqs) >= 1000:      # 신청 개수 제한은 없앰 — 파일이 끝없이 커지지 않게만 아주 넉넉히
                 raise HttpError(400, "신청함이 꽉 찼어요. 호스트가 정리할 때까지 기다려 주세요.")
-            if not is_host(headers) and not request_rate_ok(headers.get("x-lb-ip", "")):
-                raise HttpError(429, "곡 신청은 10분에 5곡까지예요. 잠시 후 다시 신청해 주세요.")
             title, channel = await loop.run_in_executor(None, fetch_title, vid)
             req = {"id": secrets.token_hex(5), "vid": vid, "title": title or vid, "channel": channel,
                    "by": str(data.get("name", "")).strip()[:16] or "이름없음", "at": time.time()}

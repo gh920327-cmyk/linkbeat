@@ -386,19 +386,19 @@ function drawRoundNote(L, lane, yHead, yTail, state, st) {
   const r = Math.round(Math.min(nw * 0.42, settings.skin.noteH * 0.9 + 4) * 2) / 2;
   const col = colors[lane], dead = state === 'dead';
   const spr = (rr) => { const m = Math.ceil(rr * 0.8) + 4; return spriteOf(`rn|${st}|${col}|${rr}|${dead}`, rr * 2 + m * 2, rr * 2 + m * 2, (c) => paintRoundNote(c, st, col, rr, m, dead)); };
-  if (yTail !== null && yTail < yHead) {   // 긴 노트: 좁은 몸통 + 끝에 작은 원
-    const bw = Math.max(6, Math.round(r * 1.05));
+  if (yTail !== null && yTail < yHead) {   // 긴 노트: 머리 원과 거의 같은 폭의 굵은 몸통 + 끝에도 같은 폭의 원 (알약 모양)
+    const bw = Math.max(8, Math.round(r * 1.84));
     const body = spriteOf(`rnb|${st}|${col}|${bw}|${dead}|${state === 'hold'}`, bw, 8, (c, w) => {
+      const a = dead ? 0.35 : state === 'hold' ? 0.95 : 0.78, K = dead ? '#5a6078' : col;
       const g = c.createLinearGradient(0, 0, w, 0);
-      const a = dead ? 0.32 : state === 'hold' ? 0.95 : 0.72, K = dead ? '#5a6078' : col;
-      g.addColorStop(0, rgba(K, a * 0.2)); g.addColorStop(0.5, rgba(K, st === 'orb' ? a * 0.65 : a)); g.addColorStop(1, rgba(K, a * 0.2));
+      g.addColorStop(0, rgba(K, a * 0.45)); g.addColorStop(0.5, rgba(K, st === 'orb' ? a * 0.75 : a)); g.addColorStop(1, rgba(K, a * 0.45));
       c.fillStyle = g; c.fillRect(0, 0, w, 8);
-      c.fillStyle = dead ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.6)'; c.fillRect(w / 2 - 0.75, 0, 1.5, 8);
+      c.fillStyle = dead ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.5)';      // 양쪽 테두리
+      c.fillRect(0, 0, 1.2, 8); c.fillRect(w - 1.2, 0, 1.2, 8);
+      c.fillStyle = dead ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.55)'; c.fillRect(w / 2 - 1, 0, 2, 8);   // 가운데 빛줄
     });
-    const rt = Math.max(4, Math.round(r * 1.2) / 2);          // 끝 원 반지름 — 몸통은 두 원 바깥 테두리 사이만 (속 빈 링 안으로 안 비치게)
-    const b0 = yTail + rt * 0.85, b1 = yHead - r * 0.85;
-    if (b1 > b0) ctx.drawImage(body.c, cx - bw / 2, b0, bw, b1 - b0);
-    drawSprite(ctx, spr(rt), cx, yTail);
+    ctx.drawImage(body.c, cx - bw / 2, yTail, bw, yHead - yTail);
+    drawSprite(ctx, spr(Math.max(4, Math.round(r * 1.84) / 2)), cx, yTail);
   }
   const sp = spr(r);
   drawSprite(ctx, sp, cx, yHead);
