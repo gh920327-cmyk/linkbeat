@@ -2007,6 +2007,8 @@ def finish_song(vid, meta, res, keep_edited=False, keep_title=False):
         song["ai"] = old["ai"]
     if old and isinstance(old.get("onsets"), list):
         song["onsets"] = old["onsets"]
+    if old and song_quiet(old):                   # 소리 없는 구간 (호스트 PC가 음원에서 찾음) — 새 채보에도 적용
+        song["quiet"] = old["quiet"]
     if old and keep_edited and old.get("edited"):
         for key, at in old["edited"].items():
             six = key.startswith("6-")
@@ -2016,6 +2018,7 @@ def finish_song(vid, meta, res, keep_edited=False, keep_title=False):
                 song["charts6" if six else "charts"][diff] = src[diff]
                 song["edited"][key] = at
         # 고친 채보는 노트 시각(초)이 그대로라 새 BPM 분석과 함께 써도 플레이에 문제없음
+    apply_quiet(song)
     save_song(song)
     drop_requests_for(vid)
     notify_all({"type": "songs"})
@@ -2113,11 +2116,12 @@ def recent_jobs():
 
 
 # ============================================================ AI 캐릭터 그림 (호스트 PC의 ComfyUI가 그림)
-# 누구나 '내 캐릭터'에서 요청 → 호스트 PC 엔진이 하나씩 가져가서 일러스트(webp)·도트(png)를 그려 올림
+# 누구나 '내 캐릭터'에서 요청 → 친구 요청은 방장이 승인해야(approve → waitpc) → 호스트 PC 엔진이 하나씩 가져가서 그려 올림
+# (방장 본인 요청은 바로 waitpc)
 AVATARS = DATA / "avatars"
 AVQ_FILE = DATA / "avqueue.json"
 AVJOBS = {}
-AV_PENDING = ("waitpc", "claimed", "working")
+AV_PENDING = ("approve", "waitpc", "claimed", "working")
 AV_TOKEN_RE = re.compile(r"^[0-9a-f]{12}$")
 AV_FILE_RE = re.compile(r"^/avatars/([0-9a-f]{12})_(i\.webp|p\.png|s\.png|x\.webp)$")
 
@@ -2140,7 +2144,8 @@ def load_avqueue():
     d = read_json(AVQ_FILE, [])
     for j in d if isinstance(d, list) else []:
         if isinstance(j, dict) and j.get("id") and j.get("pid"):
-            j.update(stage="waitpc", msg="호스트 PC를 기다리는 중...")
+            if j.get("stage") != "approve":      # 승인 기다리던 건 그대로
+                j.update(stage="waitpc", msg="호스트 PC를 기다리는 중...")
             AVJOBS[j["id"]] = j
 
 
@@ -2155,7 +2160,8 @@ def av_job_public(j):
 def av_position(j):
     if j["stage"] != "waitpc":
         return 0
-    return 1 + sum(1 for x in AVJOBS.values() if x["stage"] == "waitpc" and x["created"] < j["created"])
+    at = lambda x: x.get("approvedAt") or x["created"]
+    return 1 + sum(1 for x in AVJOBS.values() if x["stage"] == "waitpc" and at(x) < at(j))
 
 
 def av_request(headers, data):
@@ -2182,9 +2188,12 @@ def av_request(headers, data):
             "webp" if ref[:4] == b"RIFF" and ref[8:12] == b"WEBP" else None
         if not kind or len(ref) > 1_500_000:
             raise HttpError(400, "참고 사진은 jpg·png·webp, 1.5MB 이하만 돼요.")
+    host = is_host(headers)
     for j in AVJOBS.values():
         if j["pid"] == key and j["stage"] in AV_PENDING:
-            if j["stage"] == "waitpc":
+            if j["stage"] in ("waitpc", "approve"):
+                if host and j["stage"] == "approve":     # 방장 본인 기기에서 다시 누르면 승인 없이 바로
+                    j.update(stage="waitpc", msg="호스트 PC를 기다리는 중...")
                 j["avatar"] = av            # 아직 안 그렸으면 바뀐 설정으로
                 j.update(extra)
                 if ref:
@@ -2197,15 +2206,42 @@ def av_request(headers, data):
     if recent:
         raise HttpError(429, "방금 그렸어요. 30초 뒤에 다시 해 주세요.")
     jid = secrets.token_hex(6)
-    j = {"id": jid, "pid": key, "name": pr.get("id", key), "avatar": av, "stage": "waitpc",
-         "msg": "호스트 PC를 기다리는 중...", "created": time.time(), "claimedAt": 0, **extra}
+    j = {"id": jid, "pid": key, "name": pr.get("id", key), "avatar": av, "stage": "waitpc" if host else "approve",
+         "msg": "호스트 PC를 기다리는 중..." if host else "방장 승인을 기다리는 중...", "created": time.time(), "claimedAt": 0, **extra}
     if ref:
         j["ref"] = av_save_ref(jid, ref, kind)
     AVJOBS[jid] = j
     save_avqueue()
-    notify_all({"type": "avjobs"})
-    log("AI 캐릭터 요청:", j["name"])
+    notify_all({"type": "avjobs", **({} if host else {"avReq": {"name": j["name"]}})})
+    log("AI 캐릭터 요청:", j["name"], "" if host else "(승인 대기)")
     return av_job_public(j)
+
+
+def av_requests():
+    """방장용: 승인을 기다리는 AI 캐릭터 요청 (참고 사진은 작게 줄인 것이라 그대로 보여 줌)"""
+    out = []
+    for j in sorted((x for x in AVJOBS.values() if x["stage"] == "approve"), key=lambda x: x["created"]):
+        ref = av_ref_b64(j)
+        ext = (j.get("ref") or ".jpg").rsplit(".", 1)[-1]
+        out.append({"id": j["id"], "name": j["name"], "avatar": j["avatar"], "created": j["created"], "desc": j.get("desc", ""),
+                    "mode": j.get("mode", "all"), "useLook": j.get("useLook", True),
+                    "ref": f"data:image/{'jpeg' if ext == 'jpg' else ext};base64,{ref}" if ref else None})
+    return {"requests": out}
+
+
+def av_decide(jid, ok):
+    j = AVJOBS.get(jid)
+    if not j or j["stage"] != "approve":
+        raise HttpError(404, "이미 처리됐거나 없는 요청이에요.")
+    if ok:
+        j.update(stage="waitpc", msg="호스트 PC를 기다리는 중...", approvedAt=time.time())
+    else:
+        j.update(stage="rejected", msg="방장이 이번 그림 요청을 거절했어요.", finished=time.time())
+        av_drop_ref(j)
+    save_avqueue()
+    notify_all({"type": "avjobs"})
+    log("AI 캐릭터 요청", "승인:" if ok else "거절:", j["name"])
+    return {"ok": True, "stage": j["stage"]}
 
 
 def av_save_ref(jid, data, kind):
@@ -2264,7 +2300,7 @@ def av_claim():
     for j in AVJOBS.values():
         if j["stage"] in ("claimed", "working") and now - j.get("claimedAt", 0) > 10 * 60:
             j.update(stage="waitpc", msg="호스트 PC를 기다리는 중... (다시 시도)")
-    waiting = sorted((j for j in AVJOBS.values() if j["stage"] == "waitpc"), key=lambda j: j["created"])
+    waiting = sorted((j for j in AVJOBS.values() if j["stage"] == "waitpc"), key=lambda j: j.get("approvedAt") or j["created"])
     if not waiting:
         return None
     j = waiting[0]
@@ -2471,7 +2507,7 @@ def finish_pc_job(job, meta, res):
 
 ACC_WIN = 0.05   # 기존 채보의 드럼 강타 시각과 이만큼(초) 가까운 AI 노트를 강타로
 AI_OWN_GAIN = 0.03   # 난이도별 박자 밀기는 곡 전체 값보다 노트 3% 이상 더 맞을 때만
-AI_FIX = 13       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
+AI_FIX = 14       # AI 채보 다듬기 버전 (올리면 예전 AI 채보도 서버 켤 때 다시 다듬음)
 HOLD_GAP = 0.1   # 롱노트 끝과 같은 줄 다음 노트 사이 최소 간격
 MAX_HOLDS = 1    # 동시에 누르고 있는 롱노트 최대 개수 (롱노트는 최소한으로)
 HOLD_MIN = 0.6   # 이보다 짧은 롱노트는 일반 노트로
@@ -2954,9 +2990,10 @@ def ai_fit(song, charts):
     return shifts, round(hit / max(1, tot), 3), round(1 - hit60 / max(1, tot), 3)
 
 
-def ai_safe(song, diff, notes):
+def ai_safe(song, diff, notes, ai_end=None):
     """AI 채보는 거의 그대로 — 사람이 칠 수 없는 것만 고침:
     1) 아주 긴 빈 구간(전주·간주에서 AI가 통째로 비운 곳)만 기존 채보로 채움 (노트끼리 섞지 않고 구간 단위)
+       단, AI 난이도 전부가 끝난 뒤(ai_end)는 노래가 끝난 것 → 채우지 않음 (기존 채보는 끝난 뒤 잡음·박수에도 노트를 둬서)
     2) 1초에 사람 한계보다 많이 몰린 곳(랩 폭주 등)만 덜어냄
     3) 붙어서 칠 수 없는 노트 · 같은 줄 너무 빠른 연타만 뺌"""
     import bisect
@@ -2974,6 +3011,8 @@ def ai_safe(song, diff, notes):
             if b - a < gap_min:
                 continue
             i = bisect.bisect_left(btimes, a + 0.4)
+            if ai_end is not None:
+                b = min(b, ai_end + 0.8)
             while i < len(base) and base[i]["t"] < b - 0.4:
                 n = base[i]
                 if n["t"] + float(n.get("d", 0) or 0) < b - 0.2:
@@ -3015,16 +3054,63 @@ def ai_safe(song, diff, notes):
     return out
 
 
+def parse_quiet(v):
+    """호스트 PC가 찾은 '소리 없는 구간' [[시작, 끝], ...] 검사"""
+    if not isinstance(v, list) or len(v) > 300:
+        raise ValueError("소리 없는 구간 형식이 잘못됐어요.")
+    out = []
+    for x in v:
+        a, b = float(x[0]), float(x[1])
+        if not (math.isfinite(a) and math.isfinite(b)) or b <= a:
+            continue
+        out.append([round(max(-1.0, a), 3), round(min(b, pipeline.MAX_SONG_SEC + 10), 3)])
+    return sorted(out)
+
+
+def song_quiet(song):
+    q = song.get("quiet")
+    return q if isinstance(q, list) else []
+
+
+def strip_quiet(notes, quiet):
+    """소리 없는 구간 안에서 시작하는 노트 빼기"""
+    if not quiet:
+        return notes
+    return [n for n in notes if not any(a < float(n["t"]) < b for a, b in quiet)]
+
+
+def apply_quiet(song):
+    """곡의 모든 채보(기본 4키·6키 — 손으로 고친 건 빼고)에서 소리 없는 구간의 노트를 뺌 → {이름: 뺀 개수}
+    AI 채보는 다듬을 때(ai_accents) 함께 빠짐"""
+    quiet = song_quiet(song)
+    removed = {}
+    if not quiet:
+        return removed
+    edited = song.get("edited") or {}
+    for key, pre, name in (("charts", "", "4키"), ("charts6", "6-", "6키")):
+        for d, v in (song.get(key) or {}).items():
+            if not isinstance(v, list) or (pre + d) in edited:
+                continue
+            kept = strip_quiet(v, quiet)
+            if len(kept) != len(v) and len(kept) >= 10:     # 거의 다 빠지면 무언가 이상한 것 → 그대로 둠
+                song[key][d] = kept
+                removed[f"{name} {chartgen.DIFF_NAMES.get(d, d)}"] = len(v) - len(kept)
+    return removed
+
+
 def ai_accents(song, charts):
     """AI 채보 다듬기 (최소한만): 박자 밀기(음원에 맞춤) → 칠 수 없는 것만 고침 → 롱노트 정리 → 동시치기 제한 → 강타 표시"""
     import bisect
     shifts, match, off = ai_fit(song, charts)
     acc = sorted({round(float(n["t"]), 3) for notes in (song.get("charts") or {}).values() for n in notes if n.get("a")})
+    ends = [float(n["t"]) + shifts.get(d, 0.0) for d, v in charts.items() for n in v]
+    ai_end = max(ends) if ends else None              # AI 난이도 전부 중 가장 늦게 시작하는 노트 = 노래 끝 (마지막 긴 화음의 울림은 빼고)
+    quiet = song_quiet(song)
     out = {}
     for d in [d for d in ("easy", "normal", "hard", "extreme") if d in charts]:
         shift = shifts.get(d, 0.0)
         moved = [dict(n, t=round(float(n["t"]) + shift, 3)) for n in charts[d] if float(n["t"]) + shift >= 0]
-        notes = limit_chords(ai_tidy(ai_safe(song, d, moved)), d)
+        notes = strip_quiet(limit_chords(ai_tidy(ai_safe(song, d, moved, ai_end)), d), quiet)
         res = []
         for n in notes:
             n = {k: v for k, v in n.items() if k != "a"}
@@ -3195,6 +3281,11 @@ def save_ai(vid, data):
         charts = {d: n for d, n in charts.items() if n}
         if not charts:
             raise HttpError(400, "AI 채보가 비어 있어요.")
+        if "quiet" in data:                                      # 소리 없는 구간 (호스트 PC가 음원에서 찾음) → 모든 채보에 적용
+            try:
+                song["quiet"] = parse_quiet(data["quiet"])
+            except (TypeError, ValueError, IndexError):
+                pass
         on = data.get("onsets")
         if isinstance(on, list) and 30 <= len(on) <= 40000:     # 소리 분리로 찾은 소리 위치 (호스트 PC가 보냄)
             try:
@@ -3205,11 +3296,37 @@ def save_ai(vid, data):
         fit = polished.pop("_fit")
         song["ai"] = {"charts": polished, "raw": charts, "fit": fit, "by": str(data.get("by") or "AI")[:60], "at": time.time(), "fix": AI_FIX,
                       "gen": 2}   # 2 = 새 방식 (일반 노트 위주로 생성)
+        quiet_rm = apply_quiet(song)
         save_song(song)
+    if quiet_rm:
+        log("소리 없는 구간 노트 뺌:", song.get("title"), quiet_rm)
     notify_all({"type": "songs"})
     log("AI 채보 저장:", song.get("title"), {d: len(n) for d, n in charts.items()})
     return {"ok": True, "counts": {d: len(n) for d, n in polished.items()},
             "stars": {d: chartgen.star_rating(n, 4) for d, n in polished.items()}, "fit": fit}
+
+
+def set_quiet(vid, quiet):
+    with FILE_LOCK:
+        song = load_song(vid)
+        if song is None:
+            raise HttpError(404, "곡이 없어요.")
+        song["quiet"] = quiet
+        removed = apply_quiet(song)
+        ai = song.get("ai")
+        if isinstance(ai, dict) and isinstance(ai.get("charts"), dict):   # AI 채보는 원본부터 다시 다듬음 (빈 구간 채우기도 새 구간 기준)
+            before = {d: len(v) for d, v in ai["charts"].items()}
+            ai["charts"] = ai_accents(song, ai.get("raw") or ai["charts"])
+            ai["fit"] = ai["charts"].pop("_fit")
+            ai["fix"] = AI_FIX
+            for d, n in before.items():
+                k = len(ai["charts"].get(d) or [])
+                if k < n:
+                    removed[f"AI {chartgen.DIFF_NAMES.get(d, d)}"] = n - k
+        save_song(song)
+    notify_all({"type": "songs"})
+    log("소리 없는 구간:", song.get("title"), len(quiet), "곳", removed)
+    return {"ok": True, "quiet": len(quiet), "removed": removed}
 
 
 def finish_ai_job(job, ai):
@@ -3592,9 +3709,31 @@ def profile_logout(headers):
     return {"ok": True}
 
 
+HOST_TOKS = set()   # 방장 키와 함께 들어온 프로필 토큰 = 방장 계정 (방장이 지금 플레이 중인지 알려고)
+
+
+def host_playing():
+    """방장 계정이 지금 곡을 치는 중인지 (혼자·멀티·싱크 맞추기) — 호스트 PC의 AI 채보 도구가 그래픽카드를 덜 쓰려고 물어봄"""
+    for c in list(CLIENTS.values()):
+        if c.closed or not c.tok or c.tok not in HOST_TOKS:
+            continue
+        r = c.room
+        if r and r.phase != "lobby" and c.id not in r.watchers:
+            return True
+        if not r and c.act and c.act.get("what") in ("solo", "calib"):
+            return True
+    return False
+
+
 async def api(method, path, headers, body):
     parts = [unquote(p) for p in path.split("/") if p][1:]  # 'api' 제거
     loop = asyncio.get_running_loop()
+    tok = headers.get("x-profile-token")
+    if tok and tok not in HOST_TOKS and len(HOST_TOKS) < 50 and is_host(headers):
+        HOST_TOKS.add(tok)
+    if parts == ["host", "playing"] and method == "GET":
+        require_host(headers)
+        return {"playing": host_playing()}
 
     if parts == ["whoami"]:
         host = is_host(headers)
@@ -3609,6 +3748,13 @@ async def api(method, path, headers, body):
         busy = any(r.players and r.phase != "lobby" for r in ROOMS.values())
         return {"ok": True, "busy": busy, "clients": len(CLIENTS), "rooms": len(ROOMS), "cloud": CLOUD, "ver": CODE_VER}
 
+    if parts == ["avatar", "ai", "requests"] and method == "GET":
+        require_host(headers)
+        return av_requests()
+    if len(parts) == 4 and parts[:3] == ["avatar", "ai", "requests"] and method == "POST":
+        require_host(headers)
+        data = json_body(body) if body else {}
+        return av_decide(parts[3], bool(data.get("ok")))
     if parts == ["avatar", "ai", "choose"] and method == "POST":
         if not CLOUD:
             raise HttpError(400, "클라우드 서버에서만 쓰는 기능이에요.")
@@ -4003,6 +4149,15 @@ async def api(method, path, headers, body):
                 if need_reguess:   # 저장한 다음에, 배운 걸로 다른 곡들도 다시 판단
                     loop.run_in_executor(None, reguess_all)
                 return song_summary(song)
+        if len(parts) == 3 and parts[2] == "quiet" and method == "POST":
+            # 호스트 PC가 음원에서 찾은 '소리 없는 구간' → 그 구간의 노트를 모든 채보에서 뺌 (이미 있는 곡 정리용)
+            require_host(headers)
+            data = json_body(body)
+            try:
+                quiet = parse_quiet(data.get("quiet"))
+            except (TypeError, ValueError, IndexError) as e:
+                raise HttpError(400, str(e) or "소리 없는 구간 형식이 잘못됐어요.")
+            return await loop.run_in_executor(EXECUTOR, set_quiet, sid, quiet)
         if len(parts) == 3 and parts[2] == "ai" and method in ("PUT", "DELETE"):
             # AI 채보: 기본 채보와 따로 저장 (지우면 원래대로). 호스트 PC의 AI 채보 도구가 보냄
             require_host(headers)

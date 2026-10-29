@@ -1977,3 +1977,14 @@ html[data-tone="light"] .ev-deco span { opacity: .18; }
 .sw-frame_ice { border-image: linear-gradient(135deg, #bfeaff, #ffffff, #5ab4ff) 1; box-shadow: 0 0 8px #9fe0ff; }
 .sp-frame.frame_ice { border-image: linear-gradient(135deg, #bfeaff, #ffffff, #7fd0ff, #e8f8ff, #5ab4ff) 1; box-shadow: 0 0 16px #9fe0ff; }
 .si-name em.ss { background: linear-gradient(90deg, #ff8a1e, #e2451b); }
+
+/* AI 캐릭터 신청 (방장 신청함) */
+.avreq-box { margin-top: 10px; }
+.avreq-box h4 { margin: 0 0 6px; font-size: 13px; }
+.avreq-box h4 small { font-weight: 400; font-size: 11px; }
+.avreq-list li { grid-template-columns: 44px 1fr auto; align-items: start; }
+.avreq-face { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; }
+.avreq-list .req-title { white-space: normal; }
+.avreq-list .req-by { white-space: normal; word-break: break-all; }
+.avreq-list .avreq-ref { display: block; width: 56px; height: 56px; object-fit: cover; margin-top: 4px; border-radius: 4px; cursor: zoom-in; }
+.avreq-list .avreq-ref.big { width: 100%; height: auto; max-height: 260px; object-fit: contain; cursor: zoom-out; }
