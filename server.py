@@ -2116,11 +2116,12 @@ def recent_jobs():
 
 
 # ============================================================ AI 캐릭터 그림 (호스트 PC의 ComfyUI가 그림)
-# 누구나 '내 캐릭터'에서 요청 → 호스트 PC 엔진이 하나씩 가져가서 일러스트(webp)·도트(png)를 그려 올림
+# 누구나 '내 캐릭터'에서 요청 → 친구 요청은 방장이 승인해야(approve → waitpc) → 호스트 PC 엔진이 하나씩 가져가서 그려 올림
+# (방장 본인 요청은 바로 waitpc)
 AVATARS = DATA / "avatars"
 AVQ_FILE = DATA / "avqueue.json"
 AVJOBS = {}
-AV_PENDING = ("waitpc", "claimed", "working")
+AV_PENDING = ("approve", "waitpc", "claimed", "working")
 AV_TOKEN_RE = re.compile(r"^[0-9a-f]{12}$")
 AV_FILE_RE = re.compile(r"^/avatars/([0-9a-f]{12})_(i\.webp|p\.png|s\.png|x\.webp)$")
 
@@ -2143,7 +2144,8 @@ def load_avqueue():
     d = read_json(AVQ_FILE, [])
     for j in d if isinstance(d, list) else []:
         if isinstance(j, dict) and j.get("id") and j.get("pid"):
-            j.update(stage="waitpc", msg="호스트 PC를 기다리는 중...")
+            if j.get("stage") != "approve":      # 승인 기다리던 건 그대로
+                j.update(stage="waitpc", msg="호스트 PC를 기다리는 중...")
             AVJOBS[j["id"]] = j
 
 
@@ -2158,7 +2160,8 @@ def av_job_public(j):
 def av_position(j):
     if j["stage"] != "waitpc":
         return 0
-    return 1 + sum(1 for x in AVJOBS.values() if x["stage"] == "waitpc" and x["created"] < j["created"])
+    at = lambda x: x.get("approvedAt") or x["created"]
+    return 1 + sum(1 for x in AVJOBS.values() if x["stage"] == "waitpc" and at(x) < at(j))
 
 
 def av_request(headers, data):
@@ -2185,9 +2188,12 @@ def av_request(headers, data):
             "webp" if ref[:4] == b"RIFF" and ref[8:12] == b"WEBP" else None
         if not kind or len(ref) > 1_500_000:
             raise HttpError(400, "참고 사진은 jpg·png·webp, 1.5MB 이하만 돼요.")
+    host = is_host(headers)
     for j in AVJOBS.values():
         if j["pid"] == key and j["stage"] in AV_PENDING:
-            if j["stage"] == "waitpc":
+            if j["stage"] in ("waitpc", "approve"):
+                if host and j["stage"] == "approve":     # 방장 본인 기기에서 다시 누르면 승인 없이 바로
+                    j.update(stage="waitpc", msg="호스트 PC를 기다리는 중...")
                 j["avatar"] = av            # 아직 안 그렸으면 바뀐 설정으로
                 j.update(extra)
                 if ref:
@@ -2200,15 +2206,42 @@ def av_request(headers, data):
     if recent:
         raise HttpError(429, "방금 그렸어요. 30초 뒤에 다시 해 주세요.")
     jid = secrets.token_hex(6)
-    j = {"id": jid, "pid": key, "name": pr.get("id", key), "avatar": av, "stage": "waitpc",
-         "msg": "호스트 PC를 기다리는 중...", "created": time.time(), "claimedAt": 0, **extra}
+    j = {"id": jid, "pid": key, "name": pr.get("id", key), "avatar": av, "stage": "waitpc" if host else "approve",
+         "msg": "호스트 PC를 기다리는 중..." if host else "방장 승인을 기다리는 중...", "created": time.time(), "claimedAt": 0, **extra}
     if ref:
         j["ref"] = av_save_ref(jid, ref, kind)
     AVJOBS[jid] = j
     save_avqueue()
-    notify_all({"type": "avjobs"})
-    log("AI 캐릭터 요청:", j["name"])
+    notify_all({"type": "avjobs", **({} if host else {"avReq": {"name": j["name"]}})})
+    log("AI 캐릭터 요청:", j["name"], "" if host else "(승인 대기)")
     return av_job_public(j)
+
+
+def av_requests():
+    """방장용: 승인을 기다리는 AI 캐릭터 요청 (참고 사진은 작게 줄인 것이라 그대로 보여 줌)"""
+    out = []
+    for j in sorted((x for x in AVJOBS.values() if x["stage"] == "approve"), key=lambda x: x["created"]):
+        ref = av_ref_b64(j)
+        ext = (j.get("ref") or ".jpg").rsplit(".", 1)[-1]
+        out.append({"id": j["id"], "name": j["name"], "avatar": j["avatar"], "created": j["created"], "desc": j.get("desc", ""),
+                    "mode": j.get("mode", "all"), "useLook": j.get("useLook", True),
+                    "ref": f"data:image/{'jpeg' if ext == 'jpg' else ext};base64,{ref}" if ref else None})
+    return {"requests": out}
+
+
+def av_decide(jid, ok):
+    j = AVJOBS.get(jid)
+    if not j or j["stage"] != "approve":
+        raise HttpError(404, "이미 처리됐거나 없는 요청이에요.")
+    if ok:
+        j.update(stage="waitpc", msg="호스트 PC를 기다리는 중...", approvedAt=time.time())
+    else:
+        j.update(stage="rejected", msg="방장이 이번 그림 요청을 거절했어요.", finished=time.time())
+        av_drop_ref(j)
+    save_avqueue()
+    notify_all({"type": "avjobs"})
+    log("AI 캐릭터 요청", "승인:" if ok else "거절:", j["name"])
+    return {"ok": True, "stage": j["stage"]}
 
 
 def av_save_ref(jid, data, kind):
@@ -2267,7 +2300,7 @@ def av_claim():
     for j in AVJOBS.values():
         if j["stage"] in ("claimed", "working") and now - j.get("claimedAt", 0) > 10 * 60:
             j.update(stage="waitpc", msg="호스트 PC를 기다리는 중... (다시 시도)")
-    waiting = sorted((j for j in AVJOBS.values() if j["stage"] == "waitpc"), key=lambda j: j["created"])
+    waiting = sorted((j for j in AVJOBS.values() if j["stage"] == "waitpc"), key=lambda j: j.get("approvedAt") or j["created"])
     if not waiting:
         return None
     j = waiting[0]
@@ -3693,6 +3726,13 @@ async def api(method, path, headers, body):
         busy = any(r.players and r.phase != "lobby" for r in ROOMS.values())
         return {"ok": True, "busy": busy, "clients": len(CLIENTS), "rooms": len(ROOMS), "cloud": CLOUD, "ver": CODE_VER}
 
+    if parts == ["avatar", "ai", "requests"] and method == "GET":
+        require_host(headers)
+        return av_requests()
+    if len(parts) == 4 and parts[:3] == ["avatar", "ai", "requests"] and method == "POST":
+        require_host(headers)
+        data = json_body(body) if body else {}
+        return av_decide(parts[3], bool(data.get("ok")))
     if parts == ["avatar", "ai", "choose"] and method == "POST":
         if not CLOUD:
             raise HttpError(400, "클라우드 서버에서만 쓰는 기능이에요.")

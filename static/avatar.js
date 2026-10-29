@@ -446,7 +446,7 @@ $('#avRandom').addEventListener('click', () => {
 renderTopAvatar();
 
 /* ---------------- AI 캐릭터 (호스트 PC의 ComfyUI가 지금 캐릭터 설정으로 일러스트·도트를 그림) */
-let aiAv = { job: null, worker: null, timer: 0, busy: false, ref: '', pending: null, shown: '' };
+let aiAv = { job: null, worker: null, timer: 0, busy: false, ref: '', pending: null, shown: '', stage: '' };
 const aiOpt = () => (settings.avatarAi = Object.assign({ desc: '', strength: 'mid', useLook: true }, settings.avatarAi || {}));
 async function aiAvFetch() {
   if (!profile.tok) return;
@@ -464,7 +464,11 @@ async function aiAvFetch() {
       if (wasBusy && !j.pending) toast('AI 캐릭터가 완성됐어요!');
     }
     aiAv.pending = j.pending || null;      // 다시 그린 그림: 예전 것과 나란히 보고 고름
-    aiAv.busy = !!(j.job && ['waitpc', 'claimed', 'working'].includes(j.job.stage));
+    const wasStage = aiAv.stage;
+    aiAv.stage = j.job ? j.job.stage : '';
+    aiAv.busy = !!(j.job && ['approve', 'waitpc', 'claimed', 'working'].includes(j.job.stage));
+    if (wasStage === 'approve' && aiAv.stage === 'waitpc') toast('방장이 AI 캐릭터 그리기를 승인했어요! 곧 그려요.');
+    if (wasStage === 'approve' && aiAv.stage === 'rejected') toast('방장이 이번 AI 캐릭터 그리기 신청을 거절했어요.');
     if (aiAv.pending && aiAv.shown !== aiAv.pending && (wasBusy || $('#avatarDlg').open)) {
       aiAv.shown = aiAv.pending;
       openAvPick();
@@ -494,16 +498,20 @@ function renderAiAvatar() {
   $('#avAiRefImg').classList.toggle('hidden', !aiAv.ref);
   $('#avAiRefDel').classList.toggle('hidden', !aiAv.ref);
   if (aiAv.ref && $('#avAiRefImg').getAttribute('src') !== aiAv.ref) $('#avAiRefImg').src = aiAv.ref;
-  go.disabled = !profile.tok || aiAv.busy;
-  go.textContent = a.ai ? '✦ 다시 그리기' : '✦ AI로 그리기';
+  go.disabled = !profile.tok || (aiAv.busy && !(j && j.stage === 'approve'));   // 승인 기다리는 중엔 다시 눌러 내용 바꾸기 가능
+  const host = typeof isHost !== 'undefined' && isHost;
+  go.textContent = (a.ai ? '✦ 다시 그리기' : '✦ AI로 그리기') + (host ? '' : ' 신청');
   $('#avAiPx').classList.toggle('hidden', !a.ai);
   $('#avAiPend').classList.toggle('hidden', !(aiAv.pending && a.ai));
-  $('#avAiPx').disabled = !profile.tok || aiAv.busy;
+  $('#avAiPx').disabled = !profile.tok || (aiAv.busy && !(j && j.stage === 'approve'));
   if (!profile.tok) msg.textContent = '프로필에 로그인해야 그릴 수 있어요.';
-  else if (aiAv.busy) {
+  else if (aiAv.busy && j.stage === 'approve') {
+    msg.innerHTML = '<span class="spin"></span>방장 승인을 기다리는 중이에요. 승인되면 호스트 PC가 그려요. <span class="muted">· 그동안 설정을 바꾸고 다시 누르면 신청 내용이 바뀌어요</span>';
+  } else if (aiAv.busy) {
     const where = j.stage === 'waitpc' ? (w && w.online && w.avatar ? `차례를 기다리는 중... (${j.pos || 1}번째)` : '호스트 PC가 꺼져 있어요. 켜지면 그려요.') : (j.msg || '그리는 중...');
     msg.innerHTML = `<span class="spin"></span>${esc(where)} <span class="muted">· 보통 1~3분</span>`;
   } else if (j && j.stage === 'error') msg.textContent = '그리기 실패: ' + (j.msg || '');
+  else if (j && j.stage === 'rejected') msg.textContent = '방장이 이번 신청을 거절했어요. 설정을 바꿔서 다시 신청할 수 있어요.';
   else msg.textContent = a.ai ? '지금 캐릭터 설정(머리·옷·액세서리…)으로 다시 그릴 수 있어요. 결과 화면엔 일러스트, 플레이·목록엔 표정이 바뀌는 꼬마 캐릭터가 나와요.'
     : '지금 캐릭터 설정(머리·옷·액세서리…)으로 호스트 PC의 AI가 일러스트와 표정이 바뀌는 꼬마 캐릭터를 그려 줘요.';
 }
@@ -512,13 +520,16 @@ async function aiAvRequest(mode) {
   $('#avAiGo').disabled = true; $('#avAiPx').disabled = true;
   try {
     const o = aiOpt();
+    const h = profile.headers();
+    if (typeof hostKey !== 'undefined' && hostKey) h['X-Host-Key'] = hostKey;     // 방장 본인 요청은 승인 없이 바로
     const r = await fetch('/api/avatar/ai', {
-      method: 'POST', headers: profile.headers(),
+      method: 'POST', headers: h,
       body: JSON.stringify({ avatar: settings.avatar, desc: o.desc, strength: o.strength, useLook: o.useLook !== false, ref: aiAv.ref || undefined, mode }),
     });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || r.status);
     aiAv.job = j; aiAv.busy = true;
+    if (j.stage === 'approve') toast('신청했어요! 방장이 승인하면 호스트 PC가 그려요.', 3000);
   } catch (e) { toast(e.message); }
   aiAvFetch();
 }

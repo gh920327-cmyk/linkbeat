@@ -716,12 +716,12 @@ async function loadRequests() {
   renderRequests();
 }
 function renderRequests() {
-  const n = requests.length;
+  const n = requests.length + (isHost ? avRequests.length : 0);
   $('#reqCount').textContent = n;
   $('#reqCount').classList.toggle('hidden', !n);
   $('#reqCount2').textContent = n;
   $('#reqCount2').classList.toggle('hidden', !n);
-  if (!n) { $('#reqList').innerHTML = `<li class="empty-req">${isHost ? '신청된 곡이 없어요.' : '신청된 곡이 없어요. 위에서 곡을 신청해 보세요!'}</li>`; return; }
+  if (!requests.length) { $('#reqList').innerHTML = `<li class="empty-req">${isHost ? '신청된 곡이 없어요.' : '신청된 곡이 없어요. 위에서 곡을 신청해 보세요!'}</li>`; return; }
   $('#reqList').innerHTML = requests.map((r) => `<li data-id="${esc(r.id)}" data-vid="${esc(r.vid)}">
       <img src="https://i.ytimg.com/vi/${esc(r.vid)}/default.jpg" alt="" loading="lazy">
       <div class="req-info"><div class="req-title" title="${esc(r.title)}">${esc(r.title)}</div><div class="req-by">${esc(r.by)} 님 신청</div></div>
@@ -769,6 +769,47 @@ $('#reqUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitR
 net.on('requests', (m) => {
   loadRequests();
   if (isHost && m.new) toast(`🎵 ${m.new.by} 님이 '${m.new.title}' 곡을 신청했어요`, 4000);
+});
+
+/* AI 캐릭터 신청 (방장만 보임): 친구가 'AI로 그리기'를 누르면 여기로 → 승인해야 호스트 PC가 그림 */
+let avRequests = [];
+async function loadAvRequests() {
+  if (!isHost || !isCloud) { avRequests = []; renderAvRequests(); return; }
+  try { avRequests = (await api('/avatar/ai/requests')).requests || []; } catch { return; }
+  renderAvRequests();
+}
+function renderAvRequests() {
+  const box = $('#avReqBox');
+  box.classList.toggle('hidden', !avRequests.length);
+  $('#avReqList').innerHTML = avRequests.map((r) => `<li data-id="${esc(r.id)}">
+      <span class="avreq-face">${typeof miniHtml === 'function' ? miniHtml(r.avatar, 40) : ''}</span>
+      <div class="req-info"><div class="req-title">${esc(r.name)} 님${r.mode === 'pixel' ? ' <small class="muted">· 동작만 다시</small>' : ''}</div>
+        <div class="req-by">${r.desc ? '원하는 모습: ' + esc(r.desc) : '캐릭터 설정대로'}${r.ref ? ' · 참고 사진 있음' : ''}</div>
+        ${r.ref ? `<img class="avreq-ref" src="${esc(r.ref)}" alt="참고 사진">` : ''}</div>
+      <div class="req-btns"><button class="primary" data-act="ok">승인</button><button class="ghost" data-act="no">거절</button></div>
+    </li>`).join('');
+  if (typeof paintMinis === 'function') paintMinis($('#avReqList'));
+  renderRequests();
+}
+$('#avReqList').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-act]');
+  if (!b || !isHost) return;
+  const li = b.closest('li');
+  $$('button', li).forEach((x) => { x.disabled = true; });
+  try {
+    await api(`/avatar/ai/requests/${li.dataset.id}`, { method: 'POST', body: { ok: b.dataset.act === 'ok' } });
+    toast(b.dataset.act === 'ok' ? '승인했어요. 호스트 PC가 차례대로 그려요.' : '거절했어요.');
+  } catch (err) { toast(err.message); }
+  loadAvRequests();
+});
+$('#avReqList').addEventListener('click', (e) => {     // 참고 사진 크게
+  const im = e.target.closest('.avreq-ref');
+  if (im) im.classList.toggle('big');
+});
+net.on('avjobs', (m) => {
+  if (!isHost) return;
+  loadAvRequests();
+  if (m.avReq) toast(`🎨 ${m.avReq.name} 님이 AI 캐릭터 그리기를 신청했어요 (신청함에서 승인)`, 4500);
 });
 net.on('songs', () => { if (currentScreen === 'lobby' && !addBusy) refreshSongs(); });
 
@@ -2197,6 +2238,7 @@ document.addEventListener('change', (e) => {
   yt.init();
   net.connect();
   try { const w = await api('/whoami'); isHost = !!w.host; isCloud = !!w.cloud; } catch { isHost = false; }
+  loadAvRequests();
   $('#pcBox').classList.toggle('hidden', !(isHost && isCloud));
   $('#hostKeyRow').classList.toggle('hidden', !isCloud || isHost);
   $('#dlDesktop').classList.toggle('hidden', !isCloud || !!window.lbDesktop || isTouch);
