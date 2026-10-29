@@ -41,9 +41,7 @@ def ready():
     return MPY.exists() and (REPO / "inference.py").exists()
 
 
-def run_one(audio, out_dir, sr, ref=None, super_timing=True):
-    """새 AI 한 번 돌리기 → 만든 .osu 경로 (실패하면 None). ref 가 있으면 그 박자(타이밍)를 그대로 씀"""
-    out_dir.mkdir(parents=True, exist_ok=True)
+def mapper_args(audio, out_dir, sr, ref=None, super_timing=True):
     q = lambda p: "'" + str(p).replace("\\", "/") + "'"      # Hydra 값 (경로는 / 로)
     args = [f"audio_path={q(audio)}", f"output_path={q(out_dir)}",
             "gamemode=3", "keycount=4", f"difficulty={sr}", "year=2023",
@@ -54,45 +52,149 @@ def run_one(audio, out_dir, sr, ref=None, super_timing=True):
         args += ["output_type=[TIMING,MAP]", f"super_timing={'true' if super_timing else 'false'}"]
     env = dict(os.environ, PYTHONIOENCODING="utf-8", HF_HOME=str(M / "hf"),
                PATH=os.pathsep.join([str(ROOT / "bin"), os.environ.get("PATH", "")]))
+    return [str(MPY), str(REPO / "inference.py")] + args, env
+
+
+def newest_osu(out_dir, before=()):
+    new = [p for p in out_dir.glob("*.osu") if p not in before]
+    return max(new, key=lambda p: p.stat().st_mtime) if new else None
+
+
+def run_one(audio, out_dir, sr, ref=None, super_timing=True):
+    """새 AI 한 번 돌리기 → 만든 .osu 경로 (실패하면 None). ref 가 있으면 그 박자(타이밍)를 그대로 씀"""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cmd, env = mapper_args(audio, out_dir, sr, ref, super_timing)
     before = set(out_dir.glob("*.osu"))
     t0 = time.time()
-    r = subprocess.run([str(MPY), str(REPO / "inference.py")] + args, cwd=str(REPO), env=env)   # 콘솔·출력은 부모 것 그대로 (실행기 안에서는 창 없이)
-    new = [p for p in out_dir.glob("*.osu") if p not in before]
-    if r.returncode != 0 or not new:
+    r = subprocess.run(cmd, cwd=str(REPO), env=env)   # 콘솔·출력은 부모 것 그대로 (실행기 안에서는 창 없이)
+    p = newest_osu(out_dir, before)
+    if r.returncode != 0 or p is None:
         SAY(f"  ⚠ 별점 {sr} 실패 (코드 {r.returncode})")
         return None
     SAY(f"  별점 {sr} 완성 ({time.time() - t0:.0f}초)")
-    return max(new, key=lambda p: p.stat().st_mtime)
+    return p
+
+
+def gpu_free_mb():
+    """그래픽카드 남은 메모리(MB) — 모르면 None"""
+    try:
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        r = subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+                           capture_output=True, text=True, timeout=15, creationflags=flags)
+        return int(r.stdout.strip().splitlines()[0])
+    except Exception:
+        return None
+
+
+def parallel_jobs():
+    """나머지 난이도를 동시에 몇 개 만들지: settings.json 의 "mapperJobs"(1~4)가 있으면 그 값,
+    없으면 그래픽카드 남은 메모리로 정함 (한 개에 약 2GB, 다른 프로그램 몫으로 1.5GB 남김)"""
+    v = L.load_settings().get("mapperJobs")
+    if v is not None:
+        try:
+            return max(1, min(4, int(v)))
+        except (TypeError, ValueError):
+            pass
+    free = gpu_free_mb()
+    if free is None:
+        return 2
+    return max(1, min(4, (free - 1500) // 2000))
+
+
+def run_many(audio, odir, srs, ref, jobs):
+    """박자(ref)가 정해진 뒤 나머지 난이도를 jobs 개씩 동시에 — 그래픽카드가 한 번에 한 글자씩 쓰느라 놀고 있는 시간을 채움.
+    실패한 건(메모리 부족 등) 끝나고 하나씩 다시 → {별점: .osu 경로}"""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    pending, running, got, failed = list(srs), {}, {}, []
+    t0 = time.time()
+    while pending or running:
+        while pending and len(running) < jobs:
+            sr = pending.pop(0)
+            d = odir / f"sr{sr:.1f}"
+            d.mkdir(parents=True, exist_ok=True)
+            cmd, env = mapper_args(audio, d, sr, ref)
+            log = open(d / "run.log", "wb")
+            proc = subprocess.Popen(cmd, cwd=str(REPO), env=env, stdout=log, stderr=subprocess.STDOUT, creationflags=flags)
+            running[sr] = (proc, log, d, time.time())
+        time.sleep(0.5)
+        for sr, (proc, log, d, t1) in list(running.items()):
+            if proc.poll() is None:
+                continue
+            log.close()
+            del running[sr]
+            p = newest_osu(d)
+            if proc.returncode == 0 and p is not None:
+                got[sr] = p
+                SAY(f"AI가 채보 쓰는 중... 새 AI {1 + len(got)}/{len(SRS)} 완성 (별점 {sr} · {time.time() - t1:.0f}초)")
+            else:
+                tail = (d / "run.log").read_bytes()[-600:].decode("utf-8", "replace").strip().splitlines()[-1:] if (d / "run.log").exists() else []
+                SAY(f"  ⚠ 별점 {sr} 동시 만들기 실패 (코드 {proc.returncode}) {tail[0][:120] if tail else ''}")
+                failed.append(sr)
+    for sr in failed:                                  # 동시에 하다 실패한 것만 하나씩 (예전 방식)
+        SAY(f"AI가 채보 쓰는 중... 별점 {sr} 다시 (혼자)")
+        p = run_one(audio, odir / f"sr{sr:.1f}", sr, ref=ref)
+        if p is not None:
+            got[sr] = p
+    SAY(f"  나머지 {len(srs)}개 난이도 {time.time() - t0:.0f}초")
+    return got
 
 
 def generate(wav, odir):
-    """별점 단계마다 새 AI로 채보 → [.osu 경로]. 첫 채보의 박자를 나머지 난이도에도 그대로 씀 (난이도끼리 박자가 같게)"""
+    """별점 단계마다 새 AI로 채보 → [.osu 경로]. 첫 채보의 박자를 나머지 난이도에도 그대로 씀 (난이도끼리 박자가 같게)
+    첫 채보(박자 찾기 포함)는 혼자, 나머지는 그래픽카드 메모리에 맞춰 동시에"""
     if odir.exists():
         shutil.rmtree(odir, ignore_errors=True)
     odir.mkdir(parents=True, exist_ok=True)
-    made, ref = [], None
-    for k, sr in enumerate(SRS):
-        SAY(f"AI가 채보 쓰는 중... 새 AI {k + 1}/{len(SRS)} (osu 별점 {sr}{' · 박자 찾는 중' if ref is None else ''})")
-        p = run_one(wav, odir / f"sr{sr:.1f}", sr, ref=ref)
-        if p is None and ref is None:
+    made, ref = {}, None
+    rest = list(SRS)
+    while rest and ref is None:                        # 박자를 찾을 때까지 (보통 첫 번째에서 끝남)
+        sr = rest.pop(0)
+        SAY(f"AI가 채보 쓰는 중... 새 AI {len(made) + 1}/{len(SRS)} (osu 별점 {sr} · 박자 찾는 중)")
+        p = run_one(wav, odir / f"sr{sr:.1f}", sr, ref=None)
+        if p is None:
             SAY("  박자 찾기를 빠른 방식으로 바꿔서 다시 해 볼게요")
             p = run_one(wav, odir / f"sr{sr:.1f}", sr, ref=None, super_timing=False)
-        if p is None:
-            continue
-        if ref is None:
+        if p is not None:
             ref = p
-        dst = odir / f"sr{sr:.1f}_m.osu"
-        shutil.copy2(p, dst)
-        made.append(dst)
-    return made
+            made[sr] = p
+    if rest and ref is not None:
+        jobs = parallel_jobs()
+        if jobs > 1:
+            SAY(f"AI가 채보 쓰는 중... 나머지 {len(rest)}개 난이도를 {min(jobs, len(rest))}개씩 동시에 만들어요")
+            made.update(run_many(wav, odir, rest, ref, jobs))
+        else:
+            for k, sr in enumerate(rest):
+                SAY(f"AI가 채보 쓰는 중... 새 AI {len(made) + 1}/{len(SRS)} (osu 별점 {sr})")
+                p = run_one(wav, odir / f"sr{sr:.1f}", sr, ref=ref)
+                if p is not None:
+                    made[sr] = p
+    out = []
+    for sr in SRS:
+        if sr in made:
+            dst = odir / f"sr{sr:.1f}_m.osu"
+            shutil.copy2(made[sr], dst)
+            out.append(dst)
+    return out
 
 
-def choose(made, targets, duration):
-    """만든 후보 → 난이도마다 기존 채보 ★에 가까운 것 (위 난이도가 더 쉬워지지 않게) → (body, chosen, cands)"""
+def ai_end_of(made, duration=None):
+    """새 AI 후보 전부 중 가장 늦게 시작하는 노트 (초) — 그 뒤는 노래가 끝난 걸로 봄 (마지막 긴 화음의 울림은 노래 끝)"""
+    end = None
+    for p in made:
+        for n in L.osu_to_notes(p):
+            if duration and n["t"] > duration + 1:
+                continue
+            end = n["t"] if end is None else max(end, n["t"])
+    return end
+
+
+def choose(made, targets, duration, quiet=()):
+    """만든 후보 → 난이도마다 기존 채보 ★에 가까운 것 (위 난이도가 더 쉬워지지 않게) → (body, chosen, cands)
+    quiet: 소리 없는 구간 — 그 안의 노트는 빼고 고름 (서버도 같은 구간을 모든 채보에 적용)"""
     import chartgen
     cands = []
     for p in made:
-        notes = [n for n in L.osu_to_notes(p) if n["t"] <= duration + 1]
+        notes = [n for n in L.osu_to_notes(p) if n["t"] <= duration + 1 and not L.in_spans(n["t"], quiet)]
         if len(notes) >= 20:
             cands.append((chartgen.star_rating(notes, 4), notes, p.stem))
     if not cands:
@@ -102,12 +204,27 @@ def choose(made, targets, duration):
     ds = [d for d in L.DIFF_ORDER if d in chosen]           # 후보가 모자라서 위 난이도가 더 쉬워지면 별 순서대로 다시 배치
     chosen = dict(zip(ds, sorted((chosen[d] for d in ds), key=lambda c: c[0])))
     body = {"charts": {d: c[1] for d, c in chosen.items()}, "by": BY, "style": "rc"}
+    if quiet:
+        body["quiet"] = [list(x) for x in quiet]
     return body, chosen, cands
 
 
-def save(odir, vid, title, targets, body, chosen, cands):
+def find_quiet(wav, made, duration):
+    """소리 없는 구간 (실패해도 채보는 그대로 만듦)"""
+    try:
+        q = L.quiet_spans(wav, duration, ai_end_of(made, duration))
+        if q:
+            SAY(f"  소리 없는 구간 {len(q)}곳 ({sum(min(b, duration) - max(a, 0) for a, b in q):.1f}초) — 노트를 넣지 않아요")
+        return q
+    except Exception as e:
+        SAY(f"  (소리 없는 구간은 못 찾았어요: {e})")
+        return []
+
+
+def save(odir, vid, title, targets, body, chosen, cands, secs=None):
     (odir / "upload.json").write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
     summary = {"vid": vid, "title": title, "at": time.time(), "model": BY, "targets": targets,
+               "secs": round(secs) if secs else None, "quiet": body.get("quiet") or [],
                "chosen": {d: {"file": c[2], "stars": c[0], "notes": len(c[1])} for d, c in chosen.items()},
                "candidates": [{"file": c[2], "stars": c[0], "notes": len(c[1])} for c in sorted(cands, key=lambda c: c[0])]}
     (odir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -116,12 +233,14 @@ def save(odir, vid, title, targets, body, chosen, cands):
 def make_body(vid, wav, targets, duration, title=""):
     """실행기(채보 엔진)용: 받은 오디오(wav) + 기존 채보 ★ → 서버에 보낼 body (올리는 건 실행기가 함)"""
     odir = OUTM / vid
+    t0 = time.time()
     made = generate(wav, odir)
     if not made:
         raise RuntimeError("새 AI가 채보를 하나도 못 만들었어요.")
-    body, chosen, cands = choose(made, targets, duration)
-    save(odir, vid, title, targets, body, chosen, cands)
-    SAY(f"  {len(cands)}개 만들었어요")
+    quiet = find_quiet(wav, made, duration)
+    body, chosen, cands = choose(made, targets, duration, quiet)
+    save(odir, vid, title, targets, body, chosen, cands, time.time() - t0)
+    SAY(f"  {len(cands)}개 만들었어요 ({time.time() - t0:.0f}초)")
     return body
 
 
@@ -141,11 +260,13 @@ def make_song(srv, vid):
     try:
         wav, _ = L.download_audio(vid, wdir)
         odir = OUTM / vid
+        t0 = time.time()
         made = generate(wav, odir)
         if not made:
             raise RuntimeError("새 AI가 채보를 하나도 못 만들었어요.")
-        body, chosen, cands = choose(made, targets, duration)
-        save(odir, vid, title, targets, body, chosen, cands)
+        quiet = find_quiet(wav, made, duration)
+        body, chosen, cands = choose(made, targets, duration, quiet)
+        save(odir, vid, title, targets, body, chosen, cands, time.time() - t0)
         SAY("서버에 'AI 채보'로 올리는 중 (기본 채보는 그대로)")
         L.upload(srv, vid, body)
     finally:
@@ -201,7 +322,7 @@ def cmd_all(skip):
         RUN_FILE.write_text(json.dumps(run, ensure_ascii=False, indent=1), encoding="utf-8")
     save_run()
     todo = [v for v in run["ids"] if v not in run["done"] and v not in run["failed"]]
-    SAY(f"새 AI로 바꿀 곡: {len(todo)}곡 (곡마다 7~8분) — 중간에 창을 닫아도 다시 실행하면 이어서 해요")
+    SAY(f"새 AI로 바꿀 곡: {len(todo)}곡 (곡마다 4~6분) — 중간에 창을 닫아도 다시 실행하면 이어서 해요")
     t0 = time.time()
     for k, vid in enumerate(todo):
         SAY(f"\n========== {k + 1}/{len(todo)}: {vid} ==========")

@@ -619,6 +619,110 @@ def write_summary(odir, vid, title, seed, model, targets, chosen, cands, mode=""
     (odir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+# ------------------------------------------------------------------ 소리 없는 구간 (노트가 있으면 안 되는 곳)
+QUIET_DB = 35.0        # 곡에서 큰 소리(상위 5%)보다 이만큼 작으면 '거의 무음'
+QUIET_MIN = 0.8        # 이만큼(초) 넘게 이어질 때만
+QUIET_EDGE = 0.15      # 구간 양끝은 이만큼 안쪽으로 (소리가 막 시작되는 노트는 남김)
+TAIL_GAP = 1.5         # 새 AI 후보 전부가 끝난 뒤 이만큼 지나면 '노래 끝'
+
+
+def read_wav(path):
+    """16비트 wav → (모노 float 배열, 샘플레이트)"""
+    import wave
+    import numpy as np
+    with wave.open(str(path), "rb") as w:
+        sr, n, ch, sw = w.getframerate(), w.getnframes(), w.getnchannels(), w.getsampwidth()
+        raw = w.readframes(n)
+    if sw != 2:
+        raise ValueError("16비트 wav가 아니에요.")
+    y = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+    if ch > 1:
+        y = y[: len(y) // ch * ch].reshape(-1, ch).mean(axis=1)
+    return y, sr
+
+
+def quiet_spans(wav, duration=None, ai_end=None):
+    """음원에서 노트가 있으면 안 되는 구간 → [[시작, 끝], ...] (초)
+    1) 거의 무음: 큰 소리보다 35dB 넘게 작은 곳이 0.8초 넘게 이어지는 곳 (노래 끝난 뒤·중간 정적 등)
+    2) 노래 끝: 새 AI 후보 채보 전부가 끝난 뒤(1.5초 여유)부터 — 그 뒤가 시끄러운 음악이 아닐 때만 (박수·대사·잔향 등)"""
+    import numpy as np
+    y, sr = read_wav(wav)
+    hop = max(1, int(sr * 0.02))                        # 20ms
+    nf = len(y) // hop
+    if nf < 100:
+        return []
+    fr = y[: nf * hop].reshape(nf, hop)
+    db = 10 * np.log10((fr * fr).mean(axis=1) + 1e-12)
+    k = 15                                              # 앞뒤 0.15초 중 가장 큰 소리 (짧은 타격 소리 주변은 남김)
+    padded = np.pad(db, (k // 2, k // 2), mode="edge")
+    mx = np.lib.stride_tricks.sliding_window_view(padded, k).max(axis=1)[:nf]
+    ref = float(np.percentile(db, 95))
+    thr = max(ref - QUIET_DB, -62.0)
+    dur = float(duration) if duration else nf * hop / sr
+    spans = []
+
+    def runs(mask, min_len):
+        out, i = [], 0
+        while i < nf:
+            if mask[i]:
+                j = i
+                while j < nf and mask[j]:
+                    j += 1
+                if (j - i) * hop / sr >= min_len:
+                    out.append((i * hop / sr, j * hop / sr))
+                i = j
+            else:
+                i += 1
+        return out
+    dead = runs(mx < thr, QUIET_MIN)
+    if sum(b - a for a, b in dead) > 0.4 * dur:        # 곡 대부분이 조용하다고 나오면 기준이 이상한 것 → 진짜 무음만
+        dead = runs(mx < max(ref - 50.0, -70.0), QUIET_MIN)
+    for a, b in dead:
+        a2 = a + (QUIET_EDGE if a > 0.05 else -1.0)     # 맨 처음·맨 끝 무음은 끝까지
+        b2 = b - QUIET_EDGE if b < nf * hop / sr - 0.05 else dur + 5.0
+        if b2 - a2 > 0.3:
+            spans.append([a2, b2])
+    if ai_end is not None and ai_end + TAIL_GAP < dur - 0.5:
+        i0 = int((ai_end + TAIL_GAP) * sr / hop)
+        rest = mx[i0:]
+        # 뒤가 조용하거나, 시끄러워도 박수·함성 같은 잡음이면 '노래 끝' (큰 음악이면 AI가 놓친 것일 수 있어서 그대로 둠)
+        if len(rest) and (float(np.mean(rest >= ref - 12.0)) < 0.3 or noise_like(y[i0 * hop:], sr)):
+            spans.append([ai_end + TAIL_GAP, dur + 5.0])
+    spans.sort()
+    merged = []
+    for a, b in spans:
+        if merged and a <= merged[-1][1] + 0.05:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    return [[round(max(-1.0, a), 3), round(b, 3)] for a, b in merged][:200]
+
+
+def noise_like(y, sr):
+    """박수·함성·바람 소리처럼 음높이 없는 잡음인지 (스펙트럼이 평평함) — 음악은 대부분 0.2보다 훨씬 낮음"""
+    import numpy as np
+    n, hop = 2048, 1024
+    if len(y) < n * 4:
+        return False
+    frames = np.lib.stride_tricks.sliding_window_view(y, n)[::hop][:2000]
+    mag = np.abs(np.fft.rfft(frames * np.hanning(n), axis=1)) + 1e-9
+    f = np.fft.rfftfreq(n, 1.0 / sr)
+    m = mag[:, (f >= 150) & (f <= 7000)]
+    loud = m.mean(axis=1) > 1e-4
+    if loud.sum() < 4:
+        return False
+    flat = np.exp(np.log(m[loud]).mean(axis=1)) / m[loud].mean(axis=1)
+    hop2 = max(1, int(sr * 0.02))                      # 박수·함성은 소리 크기가 고르게 이어지고, 드럼은 '쿵·탁' 하고 크게 오르내림
+    k = len(y) // hop2
+    db = 10 * np.log10((y[: k * hop2].reshape(k, hop2) ** 2).mean(axis=1) + 1e-12)
+    db = db[db > db.max() - 40]
+    return float(np.median(flat)) > 0.25 and len(db) > 20 and float(np.std(db)) < 3.5
+
+
+def in_spans(t, spans):
+    return any(a < t < b for a, b in spans)
+
+
 def demucs_ok():
     try:
         import demucs.pretrained  # noqa: F401
@@ -1021,11 +1125,64 @@ def cmd_gen(vid, audio, targets_file, out_file, title="", artist="", duration=90
             body = None
         if body is None:
             body, _ = make_charts(vid, wav, targets, title, artist, duration, mode="consist")   # 8번(전체 새로 만들기)과 같은 방식
+            try:                               # 소리 없는 구간 (새 AI는 make_body 안에서 이미 찾음)
+                body["quiet"] = quiet_spans(wav, duration)
+            except Exception:
+                pass
         Path(out_file).write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
         say("AI: 완료")
     finally:
         shutil.rmtree(wdir, ignore_errors=True)
         shutil.rmtree(WORK / ("sep_" + vid), ignore_errors=True)
+
+
+def cmd_quiet(ids=None):
+    """이미 있는 곡 정리: 곡마다 음원을 다시 받아 '소리 없는 구간'을 찾아 서버에 알림
+    → 서버가 그 구간의 노트를 모든 채보(기본 4키·6키·AI)에서 뺌 (손으로 고친 채보는 그대로)
+    새 곡은 AI 채보를 만들 때 자동으로 해요. 중간에 꺼도 다시 실행하면 이어서 (이미 한 곡은 건너뜀)"""
+    srv = get_server(need_key=True)
+    lst = srv.call("GET", "songs").get("songs", [])
+    if ids:
+        lst = [s for s in lst if s.get("id") in ids]
+    done_file = ROOT / "out_mapper" / "_quiet_done.json"
+    done = {}
+    if done_file.exists() and not ids:
+        try:
+            done = json.loads(done_file.read_text(encoding="utf-8"))
+        except Exception:
+            done = {}
+    todo = [s for s in lst if s.get("id") not in done]
+    say(f"정리할 곡: {len(todo)}곡 (곡마다 음원을 다시 받아요, 곡당 10~20초)")
+    import mapper_test
+    total = 0
+    for k, s in enumerate(todo):
+        vid = s["id"]
+        dur = float(s.get("duration") or 0) or None
+        say(f"\n[{k + 1}/{len(todo)}] {s.get('title', vid)[:50]}")
+        wdir = WORK / ("q_" + vid)
+        try:
+            wav, _ = download_audio(vid, wdir)
+            made = sorted((ROOT / "out_mapper" / vid).glob("sr*_m.osu"))
+            ai_end = mapper_test.ai_end_of(made, dur) if made else None
+            q = quiet_spans(wav, dur, ai_end)
+            try:
+                r = srv.call("POST", f"songs/{vid}/quiet", {"quiet": q}, timeout=60)
+            except LookupError:
+                raise SystemExit("\n서버에 아직 이 기능이 안 올라가 있어요. 서버를 업데이트한 뒤 다시 실행해 주세요.")
+            rm = r.get("removed") or {}
+            total += sum(rm.values())
+            say(f"  소리 없는 구간 {len(q)}곳 · 뺀 노트: " + (", ".join(f"{name} {n}개" for name, n in rm.items() if n) or "없음"))
+            done[vid] = {"quiet": q, "removed": rm, "at": time.time()}
+            if not ids:
+                done_file.parent.mkdir(parents=True, exist_ok=True)
+                done_file.write_text(json.dumps(done, ensure_ascii=False, indent=1), encoding="utf-8")
+        except SystemExit:
+            raise
+        except Exception as e:
+            say(f"  건너뜀: {str(e)[:150]}")
+        finally:
+            shutil.rmtree(wdir, ignore_errors=True)
+    say(f"\n끝! 소리 없는 곳의 노트 {total}개를 뺐어요. 게임을 새로고침하면 반영돼요.")
 
 
 def upload(srv, vid, body):
@@ -1335,6 +1492,7 @@ def main():
     ap.add_argument("--export", action="store_true", help="확인용 zip 만들기")
     ap.add_argument("--resend-all", action="store_true", help="out 폴더의 AI 원본을 전부 서버에 다시 보내기")
     ap.add_argument("--upload", default="", help="만들어 둔 AI 채보를 서버에 다시 보내기 (곡 ID)")
+    ap.add_argument("--quiet", nargs="*", default=None, help="소리 없는 구간의 노트 빼기 (곡 링크/ID, 없으면 전체)")
     # 링크비트 실행기(채보 엔진)용
     ap.add_argument("--gen", default="", help="곡 ID (엔진용: --audio --targets --out 와 함께)")
     ap.add_argument("--audio", default="")
@@ -1368,6 +1526,10 @@ def main():
             return
         if a.remake_all:
             cmd_remake_all(a.skip)
+            return
+        if a.quiet is not None:
+            ids = [parse_vid(x) or x for x in " ".join(a.quiet).split() if x.strip()]
+            cmd_quiet(ids or None)
             return
         if a.resend_all:
             cmd_resend_all()
