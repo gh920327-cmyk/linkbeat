@@ -86,29 +86,121 @@ def gpu_free_mb():
         return None
 
 
+BUSY_3D = 15.0      # 다른 프로그램들의 그래픽카드 3D 사용률 합(%)이 이 이상이면 '게임 중'
+BUSY_UTIL = 25.0    # (윈도우 카운터를 못 읽을 때) 시작 전 그래픽카드 전체 사용률이 이 이상이면 '게임 중'
+
+
+def gpu_3d_load(secs=1.0):
+    """윈도우 성능 카운터: 모든 프로그램의 그래픽카드 3D 사용률 합(%) — 게임·링크비트 화면·3D 프로그램.
+    AI 채보는 계산(Compute)만 써서 여기 안 잡힘 → 우리가 돌리는 중에도 다른 게임을 알아볼 수 있음. 못 읽으면 None"""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes as wt
+        pdh = ctypes.WinDLL("pdh.dll")
+        for f in ("PdhOpenQueryW", "PdhAddEnglishCounterW", "PdhCollectQueryData", "PdhGetFormattedCounterArrayW", "PdhCloseQuery"):
+            getattr(pdh, f).restype = wt.DWORD
+
+        class FMT(ctypes.Structure):
+            _fields_ = [("CStatus", wt.DWORD), ("doubleValue", ctypes.c_double)]
+
+        class ITEM(ctypes.Structure):
+            _fields_ = [("szName", wt.LPWSTR), ("FmtValue", FMT)]
+        q, c = wt.HANDLE(), wt.HANDLE()
+        if pdh.PdhOpenQueryW(None, None, ctypes.byref(q)) != 0:
+            return None
+        try:
+            # 영어 이름으로 추가 (한국어 윈도우에서도 됨)
+            if pdh.PdhAddEnglishCounterW(q, "\\GPU Engine(*engtype_3D)\\Utilization Percentage", None, ctypes.byref(c)) != 0:
+                return None
+            pdh.PdhCollectQueryData(q)
+            time.sleep(secs)
+            pdh.PdhCollectQueryData(q)
+            size, count = wt.DWORD(0), wt.DWORD(0)
+            r = pdh.PdhGetFormattedCounterArrayW(c, 0x200, ctypes.byref(size), ctypes.byref(count), None)   # 0x200 = 실수
+            if r == 0:
+                return 0.0
+            if r != 0x800007D2:          # PDH_MORE_DATA (버퍼 크기를 알려 줌)
+                return None
+            buf = ctypes.create_string_buffer(size.value)
+            if pdh.PdhGetFormattedCounterArrayW(c, 0x200, ctypes.byref(size), ctypes.byref(count), buf) != 0:
+                return None
+            items = ctypes.cast(buf, ctypes.POINTER(ITEM))
+            return sum(max(0.0, items[i].FmtValue.doubleValue) for i in range(count.value) if items[i].FmtValue.CStatus in (0, 1))
+        finally:
+            pdh.PdhCloseQuery(q)
+    except Exception:
+        return None
+
+
+def gpu_util():
+    """그래픽카드 전체 사용률(%) — 모르면 None (AI 채보를 돌리기 전에만 의미 있음)"""
+    try:
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        r = subprocess.run(["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
+                           capture_output=True, text=True, timeout=15, creationflags=flags)
+        return float(r.stdout.strip().splitlines()[0])
+    except Exception:
+        return None
+
+
+def host_playing():
+    """방장이 지금 링크비트에서 곡을 치는 중인지 (서버에 물어봄)"""
+    try:
+        srv = L.get_server(need_key=False)
+        return bool(srv.key) and bool(srv.call("GET", "host/playing", timeout=5).get("playing"))
+    except Exception:
+        return False
+
+
+def busy_reason(before_start=False):
+    """'게임 중'이면 그 이유, 아니면 None — 링크비트 플레이 중이거나 다른 게임·3D 프로그램이 그래픽카드를 쓰는 중"""
+    if host_playing():
+        return "링크비트 플레이 중"
+    load = gpu_3d_load()
+    if load is not None:
+        return f"게임 중 (그래픽 3D {load:.0f}%)" if load >= BUSY_3D else None
+    if before_start:                                   # 윈도우 카운터를 못 읽으면 시작 전 전체 사용률로만
+        u = gpu_util()
+        if u is not None and u >= BUSY_UTIL:
+            return f"그래픽카드 사용 중 ({u:.0f}%)"
+    return None
+
+
 def parallel_jobs():
-    """나머지 난이도를 동시에 몇 개 만들지: settings.json 의 "mapperJobs"(1~4)가 있으면 그 값,
-    없으면 그래픽카드 남은 메모리로 정함 (한 개에 약 2GB, 다른 프로그램 몫으로 1.5GB 남김)"""
+    """나머지 난이도를 동시에 몇 개까지 만들지 → (개수, 고정인지)
+    settings.json 의 "mapperJobs"(1~4)가 있으면 그 값으로 고정, 없으면 그래픽카드 남은 메모리로 (한 개에 약 2GB, 다른 프로그램 몫 1.5GB)
+    — 게임 중(링크비트·다른 게임)이면 이 개수와 상관없이 하나씩 (run_many 가 수시로 확인)"""
     v = L.load_settings().get("mapperJobs")
     if v is not None:
         try:
-            return max(1, min(4, int(v)))
+            return max(1, min(4, int(v))), True
         except (TypeError, ValueError):
             pass
     free = gpu_free_mb()
-    if free is None:
-        return 2
-    return max(1, min(4, (free - 1500) // 2000))
+    return (2 if free is None else max(1, min(4, (free - 1500) // 2000))), False
 
 
-def run_many(audio, odir, srs, ref, jobs):
+def run_many(audio, odir, srs, ref, jobs, auto=True):
     """박자(ref)가 정해진 뒤 나머지 난이도를 jobs 개씩 동시에 — 그래픽카드가 한 번에 한 글자씩 쓰느라 놀고 있는 시간을 채움.
+    auto: 새로 시작하기 전마다 게임 중인지 다시 봄 → 게임 중이면 하나씩 (이미 돌던 건 마저 끝냄), 끝나면 다시 동시에
     실패한 건(메모리 부족 등) 끝나고 하나씩 다시 → {별점: .osu 경로}"""
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     pending, running, got, failed = list(srs), {}, {}, []
     t0 = time.time()
+    busy = busy_reason(before_start=True) if auto else None
+    checked, said = time.time(), busy
+    if busy:
+        SAY(f"  {busy}이라 하나씩 만들어요 (게임이 끝나면 다음 것부터 동시에)")
     while pending or running:
-        while pending and len(running) < jobs:
+        if auto and pending and running and time.time() - checked > 5:     # 하나 이상 돌고 있을 때 더 늘려도 되는지
+            busy, checked = busy_reason(), time.time()
+            if busy != said:
+                SAY(f"  {busy}이라 지금 것만 마저 하고 하나씩 만들어요" if busy else "  게임이 끝나서 다시 동시에 만들어요")
+                said = busy
+        limit = 1 if busy else jobs
+        while pending and len(running) < limit:
             sr = pending.pop(0)
             d = odir / f"sr{sr:.1f}"
             d.mkdir(parents=True, exist_ok=True)
@@ -158,10 +250,10 @@ def generate(wav, odir):
             ref = p
             made[sr] = p
     if rest and ref is not None:
-        jobs = parallel_jobs()
+        jobs, fixed = parallel_jobs()
         if jobs > 1:
-            SAY(f"AI가 채보 쓰는 중... 나머지 {len(rest)}개 난이도를 {min(jobs, len(rest))}개씩 동시에 만들어요")
-            made.update(run_many(wav, odir, rest, ref, jobs))
+            SAY(f"AI가 채보 쓰는 중... 나머지 {len(rest)}개 난이도 (한가하면 {min(jobs, len(rest))}개씩 동시에)")
+            made.update(run_many(wav, odir, rest, ref, jobs, auto=not fixed))
         else:
             for k, sr in enumerate(rest):
                 SAY(f"AI가 채보 쓰는 중... 새 AI {len(made) + 1}/{len(SRS)} (osu 별점 {sr})")

@@ -3709,9 +3709,31 @@ def profile_logout(headers):
     return {"ok": True}
 
 
+HOST_TOKS = set()   # 방장 키와 함께 들어온 프로필 토큰 = 방장 계정 (방장이 지금 플레이 중인지 알려고)
+
+
+def host_playing():
+    """방장 계정이 지금 곡을 치는 중인지 (혼자·멀티·싱크 맞추기) — 호스트 PC의 AI 채보 도구가 그래픽카드를 덜 쓰려고 물어봄"""
+    for c in list(CLIENTS.values()):
+        if c.closed or not c.tok or c.tok not in HOST_TOKS:
+            continue
+        r = c.room
+        if r and r.phase != "lobby" and c.id not in r.watchers:
+            return True
+        if not r and c.act and c.act.get("what") in ("solo", "calib"):
+            return True
+    return False
+
+
 async def api(method, path, headers, body):
     parts = [unquote(p) for p in path.split("/") if p][1:]  # 'api' 제거
     loop = asyncio.get_running_loop()
+    tok = headers.get("x-profile-token")
+    if tok and tok not in HOST_TOKS and len(HOST_TOKS) < 50 and is_host(headers):
+        HOST_TOKS.add(tok)
+    if parts == ["host", "playing"] and method == "GET":
+        require_host(headers)
+        return {"playing": host_playing()}
 
     if parts == ["whoami"]:
         host = is_host(headers)
