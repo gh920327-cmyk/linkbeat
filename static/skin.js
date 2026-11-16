@@ -223,6 +223,8 @@ function renderSkin() {
   $('#optGlint').checked = sk.perfectGlint !== false;
   $$('#lineStyleOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.lineStyle || 'auto')));
   $$('#bgFxOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.bgFx || 'soft')));
+  $$('#beatFxOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.beatFx || 'soft')));
+  $$('#beatBumpOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.beatBump || 'soft')));
   markLocks();
 }
 function skinChanged() { saveSettings(); renderSkin(); }
@@ -323,6 +325,12 @@ $('#lineStyleOpt').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-v]');
   if (b) { settings.skin.lineStyle = b.dataset.v; skinChanged(); }
 });
+for (const [id, key] of [['#beatFxOpt', 'beatFx'], ['#beatBumpOpt', 'beatBump']]) {
+  $(id).addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-v]');
+    if (b) { settings.skin[key] = b.dataset.v; skinChanged(); }
+  });
+}
 $('#bgFxOpt').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-v]');
   if (b) { settings.skin.bgFx = b.dataset.v; skinChanged(); }

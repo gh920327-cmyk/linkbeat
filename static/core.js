@@ -81,6 +81,8 @@ const DEFAULT_SKIN = {
   perfectGlint: true,          // PERFECT일 때만 작은 별빛 반짝임을 하나 더
   lineStyle: 'auto',           // 판정선 모양: auto(원형 노트면 원형 받침) | bar | ring | thin
   bgFx: 'soft',                // 배경 연출: off | soft | strong
+  beatFx: 'soft',              // 비트 조명: 센 박자에 배경 양옆 조명이 번쩍 — off | soft | strong
+  beatBump: (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'off' : 'soft',   // 비트 울림: off | soft | strong (움직임 줄이기를 켠 기기는 기본 끔)
   gear: 'metal',               // 기어 테두리 (상점): metal | clear | wood | neon | chrome | gold
   comboStyle: 'normal',        // 콤보 숫자 (상점): normal | gold | neon | rainbow
   fcFx: 'basic',               // 풀콤보 연출 (상점): basic(빛 고리·반짝이) | fireworks | stars | hero | bats

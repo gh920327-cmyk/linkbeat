@@ -277,6 +277,7 @@
 <!-- ======================= 플레이 ======================= -->
 <section id="screen-game" class="screen">
   <div class="game-bg" id="gameBg" aria-hidden="true"><div class="gb-img"></div><div class="gb-glow"></div></div>
+  <div class="beat-fx" id="beatFx" aria-hidden="true"><i class="bf-l1"></i><i class="bf-l2"></i><i class="bf-r2"></i><i class="bf-r1"></i><i class="bf-c"></i></div>
   <div class="stage">
     <div class="field-col"><canvas id="field"></canvas></div>
     <div class="info-col">
@@ -793,6 +794,10 @@
           <h4>표시</h4>
           <div class="set-row"><span>배경 연출 <small class="muted">곡 썸네일이 박자에 맞춰 숨 쉬듯</small></span>
             <div class="opt-row" id="bgFxOpt"><button data-v="off">끄기</button><button data-v="soft">은은하게</button><button data-v="strong">강하게</button></div></div>
+          <div class="set-row"><span>비트 조명 <small class="muted">센 박자에 배경 양옆 조명이 번쩍 · 깜빡임이 불편하면 끄기</small></span>
+            <div class="opt-row" id="beatFxOpt"><button data-v="off">끄기</button><button data-v="soft">은은하게</button><button data-v="strong">강하게</button></div></div>
+          <div class="set-row"><span>비트 울림 <small class="muted">센 박자에 화면이 살짝 울려요 (노트와 판정선이 같이 움직여 판정엔 영향 없음)</small></span>
+            <div class="opt-row" id="beatBumpOpt"><button data-v="off">끄기</button><button data-v="soft">살짝</button><button data-v="strong">크게</button></div></div>
           <div class="set-row"><span>콤보 숫자</span>
             <div class="opt-row" id="comboOpt"><button data-v="normal">기본</button><button data-v="gold">금빛</button><button data-v="neon">네온</button><button data-v="rainbow">무지개</button></div></div>
           <div class="set-row"><span>판정 글자</span>

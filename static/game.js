@@ -44,7 +44,7 @@ function fitCanvas(cv, nl = 4, opts = {}) {
   let x0 = Math.floor((w - fieldW) / 2);               // 꾸미기: 기어 위치
   if (opts.pos === 'left') x0 = Math.min(x0, 24);
   else if (opts.pos === 'right') x0 = Math.max(x0, w - fieldW - 26);
-  return { ctx, w, h, nl, laneW, fieldW, x0, colors: laneColors(nl) };
+  return { ctx, w, h, nl, laneW, fieldW, x0, colors: laneColors(nl), rx: r.left, ry: r.top };
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -1690,6 +1690,61 @@ function feverStep(f, t, kind) {
   return applied;
 }
 /* 모두 PERFECT로 쳤을 때의 피버 보너스 합 (점수 정규화용) */
+/* 🎆 비트 반응 연출: 곡의 '센 박자'를 미리 골라 둠
+   영상 소리는 직접 못 들어서, 가장 어려운 채보(소리가 크고 많은 곳일수록 노트가 몰림)를 박자에 겹쳐 세기를 매김
+   - 마디 첫 박 · 주변보다 노트가 몰린 박 · 동시치기 · 드럼 강타일수록 셈
+   - 조용한 부분은 약하게, 너무 자주 번쩍이지 않게 0.28초 안에는 하나만 → [[시각, 세기 0~1], ...] */
+function beatHits(song) {
+  const shift = (+song.noteShift || 0) / 1000;
+  const ch = song.charts || {};
+  const src = [ch.extreme, ch.hard, ch.normal, ch.easy].find((c) => Array.isArray(c) && c.length >= 20);
+  if (!src) return [];
+  const N = src.map((n) => ({ t: +n.t + shift, a: n.a ? 1 : 0 })).filter((n) => Number.isFinite(n.t)).sort((x, y) => x.t - y.t);
+  let beats = Array.isArray(song.beats) && song.beats.length > 8 ? song.beats.map((b) => +b + shift).filter(Number.isFinite) : null;
+  if (!beats) {
+    const bl = 60 / (song.bpm || 120), end = N[N.length - 1].t + 1;
+    beats = [];
+    for (let t = (+song.offset || 0) + shift; t < end; t += bl) beats.push(t);
+  }
+  const B = beats.length, w = new Float32Array(B), acc = new Uint8Array(B);
+  for (let i = 0, j = 0; i < B; i++) {
+    const t = beats[i];
+    while (j < N.length && N[j].t < t - 0.07) j++;
+    for (let k = j; k < N.length && N[k].t <= t + 0.07; k++) { w[i] += 1; if (N[k].a) acc[i] = 1; }
+  }
+  const ph = [0, 0, 0, 0];
+  for (let i = 0; i < B; i++) ph[i % 4] += w[i];
+  const p0 = ph.indexOf(Math.max(...ph));                 // 마디 첫 박 자리: 4박 중 노트가 가장 몰리는 곳
+  const loc = new Float32Array(B);                        // 주변 16박 평균 (얼마나 시끄러운 부분인지)
+  for (let i = 0; i < B; i++) {
+    let sum = 0, cnt = 0;
+    for (let k = Math.max(0, i - 8); k <= Math.min(B - 1, i + 8); k++) if (k !== i) { sum += w[k]; cnt++; }
+    loc[i] = cnt ? sum / cnt : 0;
+  }
+  const sorted = [...loc].sort((x, y) => x - y);
+  const ref = Math.max(0.5, sorted[Math.floor(sorted.length * 0.8)] || 1);
+  const cand = [];
+  for (let i = 0; i < B; i++) {
+    if (!w[i] && !acc[i]) continue;
+    let st = clamp((w[i] - loc[i]) / (loc[i] + 1), 0, 1) * 0.7;
+    if (i % 4 === p0) st += 0.45;
+    else if (i % 2 === p0 % 2) st += 0.1;
+    if (w[i] >= 2) st += 0.15;
+    st *= clamp(0.35 + 0.65 * loc[i] / ref, 0.35, 1);    // 조용한 부분은 약하게
+    if (acc[i]) st = 1;
+    if (st >= 0.38) cand.push([beats[i], Math.min(1, st)]);
+  }
+  for (const n of N) if (n.a) cand.push([n.t, 1]);       // 박자에서 벗어난 드럼 강타도
+  cand.sort((x, y) => x[0] - y[0]);
+  const out = [];
+  for (const c of cand) {
+    const last = out[out.length - 1];
+    if (last && c[0] - last[0] < 0.28) { if (c[1] > last[1]) out[out.length - 1] = c; continue; }
+    out.push(c);
+  }
+  return out.map((c) => [+c[0].toFixed(3), +c[1].toFixed(2)]);
+}
+
 function feverMaxSum(notes) {
   const ev = [];
   for (const n of notes) { ev.push(n.t); if (n.d > 0) ev.push(n.t + n.d); }
@@ -1745,6 +1800,7 @@ class Game {
     if (this.hl && !this.chorus.some((c) => Math.abs(c[0] - from) < 0.5)) this.chorus.push([from, practice.end]);
     this.chorus.sort((a, b) => a[0] - b[0]);
     this.chIdx = 0;
+    try { this.bHits = beatHits(song); } catch (e) { this.bHits = []; console.warn('비트 연출 준비 오류', e); }
     this.lanes = Array.from({ length: this.nl }, () => []);
     this.notes.forEach((n, i) => this.lanes[n.l].push(i));
     this.laneHead = new Array(this.nl).fill(0);
@@ -2280,6 +2336,58 @@ class Game {
     el.style.setProperty('--fever', (fever * k).toFixed(3));
   }
 
+  /* 비트 반응 연출: 센 박자마다 배경 양옆 조명이 번쩍 (왼쪽·오른쪽 번갈아, 아주 센 박은 양쪽 + 바닥 빛)
+     조명은 미리 칠해 둔 층의 투명도만 바꿔서 가벼움 · 울림은 기어를 몇 px 눌렀다 놓고 썸네일을 살짝 키움
+     반환값: 이번 프레임에 기어를 내릴 px */
+  drawBeatFx(gt, L, judgeY) {
+    const el = this.bfEl || (this.bfEl = document.getElementById('beatFx'));
+    if (!el) return 0;
+    if (L) {                                   // 조명을 기어 양옆에 붙임 (기어 위치·크기가 바뀔 때만)
+      const key = `${Math.round(L.rx + L.x0)}|${L.fieldW}|${Math.round(L.ry + judgeY)}`;
+      if (key !== this.bfKey) {
+        this.bfKey = key;
+        el.style.setProperty('--gx', Math.round(L.rx + L.x0) + 'px');
+        el.style.setProperty('--gr', Math.round(L.rx + L.x0 + L.fieldW) + 'px');
+        el.style.setProperty('--gy', Math.round(L.ry + judgeY) + 'px');
+      }
+    }
+    const sk = settings.skin;
+    const kl = sk.beatFx === 'strong' ? 1 : sk.beatFx === 'off' ? 0 : 0.55;
+    const kb = sk.beatBump === 'strong' ? 1 : sk.beatBump === 'off' ? 0 : 0.5;
+    const H = this.bHits || [];
+    const live = (this.phase === 'playing' || this.phase === 'preroll') && H.length && (kl || kb);
+    const beams = this.bfBeams || (this.bfBeams = [...el.children]);
+    const last = this.bfLast || (this.bfLast = new Float32Array(beams.length + 1).fill(-1));
+    const put = (i, v) => {                    // 바뀐 만큼만 씀 (스타일 계산을 줄임)
+      if (Math.abs(v - last[i]) < 0.008 && !(v === 0 && last[i] !== 0)) return;
+      last[i] = v;
+      if (i < beams.length) beams[i].style.opacity = v.toFixed(3);
+      else { const bg = this.bgEl || (this.bgEl = document.getElementById('gameBg')); if (bg) bg.style.setProperty('--bump', v.toFixed(3)); }
+    };
+    if (!live) { for (let i = 0; i <= beams.length; i++) put(i, 0); return 0; }
+    let i = this.bfI || 0;
+    while (i < H.length && H[i][0] <= gt) i++;
+    while (i > 0 && H[i - 1][0] > gt) i--;    // 연습 반복으로 되감김
+    this.bfI = i;
+    const hit = H[i - 1];
+    const e = hit ? gt - hit[0] : 9, st = hit ? hit[1] : 0;
+    let chorus = false;
+    for (const c of this.chorus) if (gt >= c[0] && gt < c[1]) { chorus = true; break; }
+    const fv = this.fever;
+    const col = fv && fv.mult > 1 && gt <= fv.until + 0.2 ? 'fever' : chorus ? 'chorus' : 'base';
+    if (col !== this.bfCol) { this.bfCol = col; el.dataset.c = col; }
+    const glow = e < 1.2 ? st * Math.exp(-e * 6) * (chorus ? 1.15 : 1) * kl : 0;
+    const both = st >= 0.85, side = (i - 1) % 2;
+    // 순서: 왼쪽 옆 빛·왼쪽 조명·오른쪽 조명·오른쪽 옆 빛·판정선 아래 빛
+    const kL = both || side === 0 ? 1 : 0.12, kR = both || side === 1 ? 1 : 0.12;
+    put(0, Math.min(1, glow * kL)); put(1, Math.min(1, glow * kL * 0.7));
+    put(2, Math.min(1, glow * kR * 0.7)); put(3, Math.min(1, glow * kR));
+    put(4, both ? Math.min(1, glow * 0.8) : glow * 0.25);
+    const b = st >= 0.55 && e < 0.4 ? st * Math.exp(-e * 14) * kb : 0;
+    put(5, b);
+    return b * 3.2;
+  }
+
   /* 후렴(하이라이트): 들어가는 순간 빛이 터지고 글자, 후렴 동안 기어 양옆이 박자에 맞춰 은은하게 빛남 */
   drawChorus(L, judgeY, gt, now) {
     if (!this.chorus.length || settings.skin.chorusFx === false) return;
@@ -2350,9 +2458,10 @@ class Game {
     const nowF = performance.now();
     const off0 = fxOffset(this.fx, nowF);       // 기어 반동·흔들림
     this.drawBg(gt);
+    const bumpY = this.drawBeatFx(gt, L, judgeY);    // 센 박자: 배경 조명 + 기어가 살짝 울림
     ctx.clearRect(0, 0, w, h);
     ctx.save();
-    ctx.translate(off0.dx, off0.dy);
+    ctx.translate(off0.dx, off0.dy + bumpY);
     drawLanes(L, judgeY, this.pressed, settings.dim);
     drawBeams(L, judgeY, this.pressed, this.fx, nowF);
 
