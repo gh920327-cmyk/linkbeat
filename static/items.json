@@ -1,5 +1,5 @@
 {
-  "_": "상점·꾸미기 아이템 목록 (서버와 화면이 같이 읽음). price가 있으면 상점에서 ♪로 사고, earn이 있으면 조건을 채워야만 얻어요. limited는 주마다 돌아가며 한 개씩만 팔아요. event가 있으면 그 이벤트 기간에만 교환소에서 candy(사탕)로 바꿔요. season이 있으면 그 시즌 패스 단계 보상으로만 얻어요.",
+  "_": "상점·꾸미기 아이템 목록 (서버와 화면이 같이 읽음). price가 있으면 상점에서 ♪로 사고, earn이 있으면 조건을 채워야만 얻어요. limited는 주마다 돌아가며 한 개씩만 팔아요. event가 있으면 그 이벤트 기간에만 교환소에서 candy(그 이벤트 재화: 사탕·선물상자 등)로 바꿔요. season이 있으면 그 시즌 패스 단계 보상으로만 얻어요.",
   "cats": [
     ["note", "노트 모양"], ["fx", "타격 이펙트"], ["line", "판정선 색"], ["gear", "기어 테두리"], ["combo", "콤보 숫자"],
     ["fcfx", "풀콤보 연출"], ["nc", "이름 색"], ["icon", "이름 아이콘"], ["card", "프로필 카드 배경"], ["frame", "결과 카드 테두리"]
@@ -80,6 +80,18 @@
     {"id": "frame_neon", "cat": "frame", "name": "네온", "price": 800},
     {"id": "frame_rainbow", "cat": "frame", "name": "무지개", "price": 2000},
     {"id": "frame_legend", "cat": "frame", "name": "전설", "earn": "lv50", "how": "레벨 50"},
-    {"id": "frame_ice", "cat": "frame", "name": "얼음", "season": "s2", "how": "시즌 2 패스 10단계"}
+    {"id": "frame_ice", "cat": "frame", "name": "얼음", "season": "s2", "how": "시즌 2 패스 10단계"},
+    {"id": "note_snowflake", "cat": "note", "name": "눈꽃", "candy": 120, "event": "xm26", "how": "크리스마스 이벤트 교환소 (기간 한정)"},
+    {"id": "fx_ornament", "cat": "fx", "name": "트리 장식볼", "candy": 150, "event": "xm26", "how": "크리스마스 이벤트 교환소 (기간 한정)"},
+    {"id": "line_lights", "cat": "line", "name": "눈 쌓인 전구 줄", "candy": 80, "event": "xm26", "how": "크리스마스 이벤트 교환소 (기간 한정)"},
+    {"id": "gear_xmas", "cat": "gear", "name": "크리스마스", "candy": 150, "event": "xm26", "how": "크리스마스 이벤트 교환소 (기간 한정)"},
+    {"id": "fc_aurora", "cat": "fcfx", "name": "오로라", "candy": 200, "event": "xm26", "how": "크리스마스 이벤트 교환소 (기간 한정)"},
+    {"id": "nc_xmas", "cat": "nc", "name": "크리스마스", "candy": 100, "event": "xm26", "how": "크리스마스 이벤트 교환소 (기간 한정)"},
+    {"id": "icon_tree", "cat": "icon", "name": "트리", "emoji": "🎄", "candy": 60, "event": "xm26", "how": "크리스마스 이벤트 교환소 (기간 한정)"},
+    {"id": "card_xmas", "cat": "card", "name": "크리스마스 밤", "candy": 120, "event": "xm26", "how": "크리스마스 이벤트 교환소 (기간 한정)"},
+    {"id": "nc_dawn", "cat": "nc", "name": "새벽노을", "season": "s3", "how": "시즌 3 패스 5단계"},
+    {"id": "frame_dawn", "cat": "frame", "name": "해돋이", "season": "s3", "how": "시즌 3 패스 10단계"},
+    {"id": "card_sunrise", "cat": "card", "name": "새해 해돋이", "season": "s3", "how": "시즌 3 패스 15단계"},
+    {"id": "icon_sheep", "cat": "icon", "name": "새해 양", "emoji": "🐑", "season": "s3", "how": "시즌 3 패스 20단계"}
   ]
 }

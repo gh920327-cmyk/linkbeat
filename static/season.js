@@ -29,6 +29,9 @@ const TITLE_WORDS = [
   { id: 'f_leafy', t: '낙엽 밟는', how: '시즌 1 패스 13단계', srv: true },
   { id: 'f_winter', t: '겨울의', how: '시즌 2 패스 3단계', srv: true },
   { id: 'f_frozen', t: '얼어붙은', how: '시즌 2 패스 13단계', srv: true },
+  { id: 'f_twinkle', t: '반짝이는', how: '크리스마스 이벤트 때 한 판', srv: true, ev: 'xm26' },
+  { id: 'f_newyear', t: '새해의', how: '시즌 3 패스 3단계', srv: true },
+  { id: 'f_lucky', t: '복 받은', how: '시즌 3 패스 13단계', srv: true },
   // 뒷말
   { id: 'b_player', t: '플레이어', how: '처음부터' },
   { id: 'b_fan', t: '음악 애호가', how: '처음부터' },
@@ -51,6 +54,9 @@ const TITLE_WORDS = [
   { id: 'b_fairy', t: '가을 요정', how: '시즌 1 패스 18단계', srv: true },
   { id: 'b_snowman', t: '눈사람', how: '시즌 2 패스 8단계', srv: true },
   { id: 'b_santa', t: '산타', how: '시즌 2 패스 18단계', srv: true },
+  { id: 'b_rudolph', t: '루돌프', how: '크리스마스 이벤트 미션 모두', srv: true, ev: 'xm26' },
+  { id: 'b_lamb', t: '아기 양', how: '시즌 3 패스 8단계', srv: true },
+  { id: 'b_luck', t: '복덩이', how: '시즌 3 패스 18단계', srv: true },
 ];
 const WORD_BY = Object.fromEntries(TITLE_WORDS.map((w) => [w.id, w]));
 const LEGEND_WORDS = TITLE_WORDS.filter((w) => w.legend).map((w) => w.t);
@@ -117,7 +123,8 @@ $('#achDlg').addEventListener('close', () => { tcSel = null; });
 $('#myTitle').addEventListener('click', () => $('#btnAch').click());
 
 /* ------------------------------------------------------------ 🎫 시즌 패스 */
-const SS_THEME = { autumn: { ico: '🍁', c: '#ff8a1e' }, winter: { ico: '❄️', c: '#7fd0ff' } };
+const SS_THEME = { autumn: { ico: '🍁', c: '#ff8a1e' }, winter: { ico: '❄️', c: '#7fd0ff' }, newyear: { ico: '🌅', c: '#ff9a6b' },
+  spring: { ico: '🌸', c: '#ff9cc6' }, summer: { ico: '🌊', c: '#4de1ff' } };
 function ssRewardHtml(r) {
   if (r.kind === 'coin') return `<span class="ss-ico">♪</span><b>${fmtN(r.val)}♪</b>`;
   if (r.kind === 'word') { const w = WORD_BY[r.val]; return `<span class="ss-ico">🏷</span><b>${esc(w ? w.t : r.val)}</b><small>칭호 단어</small>`; }
