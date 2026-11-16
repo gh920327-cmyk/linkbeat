@@ -103,7 +103,7 @@ function renderGrowAll() {
   if (typeof renderSeasonDlg === 'function' && $('#seasonDlg').open) renderSeasonDlg();
   if (typeof renderMyTitle === 'function') renderMyTitle();       // 단어가 열리거나 닫히면 칭호도 다시
   if (typeof renderTitleMaker === 'function' && $('#achDlg').open) renderTitleMaker();
-  for (const id of ['#btnCall', '#btnWrap']) { const b = $(id); if (b) b.classList.toggle('hidden', !myGrow); }
+  for (const id of ['#btnCall', '#btnWrap', '#btnSkill']) { const b = $(id); if (b) b.classList.toggle('hidden', !myGrow); }
   if ($('#shopDlg').open) renderShop();
   if (ntOpen()) renderNotices();
   if (typeof markLocks === 'function' && $('#skinDlg').open) markLocks();
@@ -292,7 +292,7 @@ function growOnResult(g, r, res) {
   if (rw.words && rw.words.length && typeof WORD_BY !== 'undefined') L.push(`<div class="rw-line rw-words">🏷 새 칭호 단어: ${rw.words.map((w) => `<b>'${esc((WORD_BY[w] || {}).t || w)}'</b>`).join(', ')} <small>업적 창에서 칭호를 만들어 보세요</small></div>`);
   if (rw.event) {
     const ev = rw.event;
-    L.push(`<div class="rw-line rw-ev">🎃 할로윈 <b>${ev.cur} +${fmtN(ev.gain)}</b> <small>${ev.parts.map(([k, v]) => `${esc(k)} ${fmtN(v)}`).join(' · ')}</small> <span class="rw-total">보유 ${ev.cur}${fmtN(ev.total)}</span>`
+    L.push(`<div class="rw-line rw-ev">${ev.icon || '🎃'} ${esc(ev.short || '이벤트')} <b>${ev.cur} +${fmtN(ev.gain)}</b> <small>${ev.parts.map(([k, v]) => `${esc(k)} ${fmtN(v)}`).join(' · ')}</small> <span class="rw-total">보유 ${ev.cur}${fmtN(ev.total)}</span>`
       + (ev.missions.length ? `<span class="rw-evm">${ev.missions.map((m) => `✅ ${esc(m.text)}`).join(' ')}${ev.allDone ? ' 🎉 이벤트 미션 모두 완료!' : ''}</span>` : '') + '</div>');
   }
   box.innerHTML = L.join('');
@@ -450,7 +450,8 @@ class ShopPreview extends SkinPreview {
   }
 }
 const SW_GLYPH = { note_neon: '▭', note_star: '★', note_heart: '♥', note_gem: '◆', note_pumpkin: '🎃', fx_petal: '🌸', fx_bolt: '⚡', fx_star: '✨', fx_fire: '🔥', fx_snow: '❄️', fx_bat: '🦇',
-  combo_gold: '123', combo_neon: '123', combo_rainbow: '123', fc_fireworks: '🎆', fc_stars: '🌟', fc_hero: '🙌', fc_bats: '🦇', gear_hw: '🎃' };
+  combo_gold: '123', combo_neon: '123', combo_rainbow: '123', fc_fireworks: '🎆', fc_stars: '🌟', fc_hero: '🙌', fc_bats: '🦇', gear_hw: '🎃',
+  note_snowflake: '❄️', fx_ornament: '🔴', fc_aurora: '🌌', gear_xmas: '🎄' };
 const evNow = (it) => !!(it && it.event && myGrow && myGrow.event && myGrow.event.id === it.event);   // 지금 교환소에서 바꿀 수 있는 물건
 const ssNow = (it) => !!(it && it.season && myGrow && myGrow.season && myGrow.season.id === it.season);   // 지금 시즌 패스로 얻을 수 있는 물건
 const evGone = (it) => !!(it && ((it.event && !evNow(it)) || (it.season && !ssNow(it))));
@@ -465,12 +466,12 @@ function shopItemHtml(id) {
   const own = itemOwned(id), on = own && itemEquipped(id);
   const price = (myGrow.shop.prices || {})[id], base = it.price;
   const st = on ? '<b class="si-on">장착 중</b>' : own ? '<span class="si-own">보유</span>'
-    : it.event ? (evNow(it) ? `<b class="si-candy">🍬${fmtN(it.candy)}</b>` : '<span class="si-lock">이벤트 끝남</span>')
+    : it.event ? (evNow(it) ? `<b class="si-candy">${myGrow.event.cur}${fmtN(it.candy)}</b>` : '<span class="si-lock">이벤트 끝남</span>')
     : it.season ? `<span class="si-lock">🎫 ${esc(it.how || '시즌 패스')}</span>`
     : it.earn ? `<span class="si-lock">🔒 ${esc(it.how || '')}</span>`
       : price < base ? `<s>♪${fmtN(base)}</s> <b class="si-sale">♪${fmtN(price)}</b>` : `<b>♪${fmtN(price)}</b>`;
   return `<button type="button" class="shop-item${own ? ' own' : ''}${on ? ' on' : ''}${shopSel === id ? ' sel' : ''}${it.earn && !own ? ' earn' : ''}" data-id="${esc(id)}">`
-    + `<span class="si-sw sw-${esc(id)}">${swInner(it)}</span><span class="si-name">${esc(it.name)}${it.limited ? ' <em>한정</em>' : ''}${it.event ? ' <em class="ev">🎃 이벤트</em>' : ''}${it.season ? ' <em class="ss">🎫 시즌</em>' : ''}</span><span class="si-st">${st}</span></button>`;
+    + `<span class="si-sw sw-${esc(id)}">${swInner(it)}</span><span class="si-name">${esc(it.name)}${it.limited ? ' <em>한정</em>' : ''}${it.event ? ` <em class="ev ev-${esc(it.event)}">${evIconOf(it)} 이벤트</em>` : ''}${it.season ? ' <em class="ss">🎫 시즌</em>' : ''}</span><span class="si-st">${st}</span></button>`;
 }
 function renderShop() {
   if (!myGrow || !SHOP) return;
@@ -514,13 +515,13 @@ function renderShopSel() {
   const own = itemOwned(it.id), on = own && itemEquipped(it.id);
   const price = (myGrow.shop.prices || {})[it.id];
   const catN = (SHOP.cats.find((c) => c[0] === it.cat) || [0, ''])[1];
-  info.innerHTML = `<b>${esc(it.name)}</b><small>${esc(catN)}${it.limited ? ' · 이번 주 한정' : ''}${it.event ? ' · 🎃 할로윈 이벤트 교환소 (이번에만)' : ''}${it.season ? ` · 🎫 ${esc(it.how || '시즌 패스')}` : ''}${it.earn ? ` · 얻는 법: ${esc(it.how || '')}` : ''}</small>`;
+  info.innerHTML = `<b>${esc(it.name)}</b><small>${esc(catN)}${it.limited ? ' · 이번 주 한정' : ''}${it.event ? ` · ${evIconOf(it)} ${esc(it.how || '이벤트 교환소')}` : ''}${it.season ? ` · 🎫 ${esc(it.how || '시즌 패스')}` : ''}${it.earn ? ` · 얻는 법: ${esc(it.how || '')}` : ''}</small>`;
   if (own) act.innerHTML = `<button type="button" class="${on ? '' : 'primary'}" id="shopEquip">${on ? '빼기 (기본으로)' : '장착하기'}</button>`;
   else if (it.event) {
-    const ev = myGrow.event, lack = ev ? it.candy - ev.candy : 0;
-    act.innerHTML = !evNow(it) ? '<span class="si-lock">이벤트가 끝나서 더는 못 얻어요</span>'
-      : lack > 0 ? `<button type="button" disabled>🍬${fmtN(it.candy)} · ${fmtN(lack)}개 더 필요</button>`
-        : `<button type="button" class="primary ev-btn" id="shopBuy">${buyArm === it.id ? `정말 바꿀까요? 🍬${fmtN(it.candy)} — 한 번 더 누르기` : `🍬${fmtN(it.candy)}로 바꾸기`}</button>`;
+    const ev = myGrow.event, lack = ev ? it.candy - ev.candy : 0, cur = ev ? ev.cur : '';
+    act.innerHTML = !evNow(it) ? `<span class="si-lock">${it.event === 'xm26' && !ev ? '크리스마스 이벤트(12/19~12/28) 때 교환소에서 얻어요' : '이벤트가 끝나서 더는 못 얻어요'}</span>`
+      : lack > 0 ? `<button type="button" disabled>${cur}${fmtN(it.candy)} · ${fmtN(lack)}개 더 필요</button>`
+        : `<button type="button" class="primary ev-btn ev-${esc(ev.theme || 'hw')}" id="shopBuy">${buyArm === it.id ? `정말 바꿀까요? ${cur}${fmtN(it.candy)} — 한 번 더 누르기` : `${cur}${fmtN(it.candy)}로 바꾸기`}</button>`;
   } else if (it.season) act.innerHTML = `<span class="si-lock">🎫 ${esc(it.how || '시즌 패스')} 보상이에요 — 시즌 동안 곡을 쳐서 단계를 올리면 받아요</span>`;
   else if (it.earn) act.innerHTML = `<span class="si-lock">🔒 ${esc(it.how || '')} 하면 얻어요 (상점에서 못 사요)</span>`;
   else {
@@ -606,7 +607,7 @@ $('#shopDlg').addEventListener('click', (e) => {
   if (shopPrev) shopPrev.reset();
 });
 
-/* ------------------------------------------------------------ 🎃 이벤트 (기간 한정) */
+/* ------------------------------------------------------------ 🎉 이벤트 (기간 한정 — 할로윈·크리스마스 …: 서버가 이름·재화·특별 노트를 알려 줌) */
 function evLeftText(sec) {
   const end = new Date(Date.now() + (sec - 60) * 1000);   // 끝나는 순간(다음 날 0시)의 1분 전 날짜
   const d = end.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
@@ -616,10 +617,13 @@ function renderEvent() {
   const ev = myGrow && myGrow.event;
   const bar = $('#evBar');
   bar.classList.toggle('hidden', !ev);
-  renderEvDeco(!!ev);
+  renderEvDeco(ev ? ev.theme || 'hw' : '');
   if (!ev) { if ($('#eventDlg').open) $('#eventDlg').close(); return; }
+  const th = ev.theme || 'hw';
+  bar.className = `ev-bar th-${th}`;
+  $('#eventDlg').className = `ev-dlg th-${th}`;
   const done = ev.missions.filter((m) => m.done).length;
-  bar.innerHTML = `<span class="evb-t">🎃 ${esc(ev.name)}</span><span class="evb-c">🍬 <b>${fmtN(ev.candy)}</b></span>`
+  bar.innerHTML = `<span class="evb-t">${ev.icon || '🎉'} ${esc(ev.name)}</span><span class="evb-c">${ev.cur} <b>${fmtN(ev.candy)}</b></span>`
     + `<span class="evb-m">미션 ${done}/${ev.missions.length}</span><span class="evb-l">${fmtDur(ev.endsIn)} 남음</span><span class="evb-go">교환소 ▸</span>`;
   if ($('#eventDlg').open) renderEventDlg();
 }
@@ -627,12 +631,17 @@ function renderEventDlg() {
   const ev = myGrow && myGrow.event;
   if (!ev) return;
   $('#evTitle').textContent = ev.name;
+  $('#evIcon').textContent = ev.icon || '🎉';
+  $('#evCur').textContent = ev.cur;
+  $('#evCurBox').title = ev.curName;
   $('#evCandy').textContent = fmtN(ev.candy);
+  $('#evHow').innerHTML = `곡을 끝까지 칠 때마다 ${ev.cur}를 받아요 (S 랭크·풀콤보면 더) · <b>친구와 멀티면 2배</b> · 가끔 나오는 <b>${esc(ev.sp || '특별 노트')}</b>를 치면 하나에 +1 (한 판 최대 ${ev.pkMax || 30})`;
+  $('#evTip').textContent = `이벤트가 끝나면 남은 ${ev.cur}는 1개당 ${ev.conv || 2}♪로 바꿔 드려요. 받은 꾸미기는 끝난 뒤에도 계속 쓸 수 있어요.`;
   $('#evLeft').textContent = evLeftText(ev.endsIn);
   const done = ev.missions.filter((m) => m.done).length;
-  $('#evMisSum').textContent = `${done}/${ev.missions.length}${ev.all ? ' · 🎉 모두 완료!' : ` · 모두 하면 🍬 +${ev.allBonus} 더`}`;
+  $('#evMisSum').textContent = `${done}/${ev.missions.length}${ev.all ? ' · 🎉 모두 완료!' : ` · 모두 하면 ${ev.cur} +${ev.allBonus} 더`}`;
   $('#evMis').innerHTML = ev.missions.map((m) => `<div class="ev-m${m.done ? ' done' : ''}"><span class="evm-t">${m.done ? '✅ ' : ''}${esc(m.text)}</span>`
-    + `<span class="evm-n">${m.done ? '완료' : `${fmtN(m.prog)}/${fmtN(m.goal)}`}</span><span class="evm-r">🍬+${m.reward}</span>`
+    + `<span class="evm-n">${m.done ? '완료' : `${fmtN(m.prog)}/${fmtN(m.goal)}`}</span><span class="evm-r">${ev.cur}+${m.reward}</span>`
     + `<span class="gb-p"><i style="width:${Math.round((m.prog / m.goal) * 100)}%"></i></span></div>`).join('');
   const items = SHOP ? SHOP.items.filter((i) => i.event === ev.id) : [];
   $('#evShop').innerHTML = items.map((it) => {
@@ -640,7 +649,7 @@ function renderEventDlg() {
     const catN = (SHOP.cats.find((c) => c[0] === it.cat) || [0, ''])[1];
     return `<button type="button" class="ev-item${own ? ' own' : ''}${!own && ev.candy >= it.candy ? ' can' : ''}" data-id="${esc(it.id)}">`
       + `<span class="si-sw sw-${esc(it.id)}">${swInner(it)}</span><span class="evi-n">${esc(it.name)}<small>${esc(catN)}</small></span>`
-      + `<span class="evi-p">${on ? '<b class="si-on">장착 중</b>' : own ? '<span class="si-own">받음</span>' : `🍬${fmtN(it.candy)}`}</span></button>`;
+      + `<span class="evi-p">${on ? '<b class="si-on">장착 중</b>' : own ? '<span class="si-own">받음</span>' : `${ev.cur}${fmtN(it.candy)}`}</span></button>`;
   }).join('');
 }
 async function openEvent() {
@@ -658,12 +667,15 @@ $('#evShop').addEventListener('click', (e) => {
   $('#eventDlg').close();
   openShop(b.dataset.id);
 });
-/* 로비 배경에 박쥐·호박이 천천히 떠다님 (이벤트 동안만) */
-function renderEvDeco(on) {
+/* 로비 배경에 이벤트 장식이 천천히 떠다님 (이벤트 동안만): 할로윈 박쥐·호박 / 크리스마스 눈송이·선물 */
+const EV_DECO = { hw: ['🦇', '🎃', '🦇', '👻', '🦇', '🎃', '🦇', '🍬'], xmas: ['❄️', '🎄', '❄️', '🎁', '❄️', '⭐', '❄️', '⛄', '❄️', '🔔'] };
+function renderEvDeco(theme) {
   const box = $('#evDeco');
-  box.classList.toggle('hidden', !on);
-  if (!on || box.childElementCount) return;
-  const marks = ['🦇', '🎃', '🦇', '👻', '🦇', '🎃', '🦇', '🍬'];
+  box.classList.toggle('hidden', !theme);
+  if (!theme || box.dataset.th === theme) return;
+  box.dataset.th = theme;
+  box.className = `ev-deco th-${theme}`;
+  const marks = EV_DECO[theme] || EV_DECO.hw;
   box.innerHTML = marks.map((m, i) => `<span style="--x:${(i * 13 + 5) % 92}%;--y:${(i * 29 + 8) % 80}%;--d:${16 + (i * 7) % 11}s;--dl:-${(i * 3.7) % 14}s;--s:${0.8 + ((i * 5) % 4) * 0.25}">${m}</span>`).join('');
 }
 

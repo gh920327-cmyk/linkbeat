@@ -146,6 +146,8 @@ class SkinPreview {
 /* ---------------- 창 */
 let skinPrev = null;
 /* 이벤트 물건: 이벤트가 끝났는데 못 얻었으면 숨김 */
+const EV_ICON = { hw26: '🎃', xm26: '🎄' };       // 이벤트별 표시 (교환소 물건 표시용)
+function evIconOf(it) { return (it && EV_ICON[it.event]) || '🎉'; }
 function evItemOf(id) { const it = typeof itemOf === 'function' ? itemOf(id) : null; return it && (it.event || it.season) ? it : null; }
 function evItemGone(id) {
   const it = evItemOf(id);
@@ -171,14 +173,14 @@ function markLocks() {
       const id = skinLock(key, b.dataset.v);
       b.classList.toggle('locked', !!id);
       b.classList.toggle('hidden', !!id && evItemGone(id));
-      b.title = id ? (evItemOf(id) ? (evItemOf(id).season ? `🎫 ${evItemOf(id).how} 보상이에요` : '🎃 할로윈 이벤트 교환소에서 얻어요 (누르면 보기)') : '🔒 상점에서 열 수 있어요 (누르면 상점으로)') : '';
+      b.title = id ? (evItemOf(id) ? (evItemOf(id).season ? `🎫 ${evItemOf(id).how} 보상이에요` : `${evIconOf(evItemOf(id))} ${evItemOf(id).how || '이벤트 교환소'}에서 얻어요 (누르면 보기)`) : '🔒 상점에서 열 수 있어요 (누르면 상점으로)') : '';
     });
   }
   $$('#lineSw button[data-line]').forEach((b) => {
     const id = skinLock('line', b.dataset.line);
     b.classList.toggle('locked', !!id);
     b.classList.toggle('hidden', !!id && evItemGone(id));
-    if (id) b.title = evItemOf(id) ? '🎃 할로윈 이벤트 교환소에서 얻어요' : '🔒 상점에서 열 수 있어요';
+    if (id) b.title = evItemOf(id) ? (evItemOf(id).season ? `🎫 ${evItemOf(id).how} 보상이에요` : `${evIconOf(evItemOf(id))} ${evItemOf(id).how || '이벤트 교환소'}에서 얻어요`) : '🔒 상점에서 열 수 있어요';
   });
 }
 $('#hitSound').innerHTML = hitSoundOptions();
@@ -197,7 +199,7 @@ function renderSkin() {
   $('#laneScale').value = String(sk.laneScale);
   $('#gearPos').value = sk.gearPos;
   $('#lineSw').innerHTML = Object.entries(LINE_COLORS).map(([id, c]) =>
-    `<button class="dot-sw${sk.line === id ? ' on' : ''}${id === 'rainbow' ? ' rb' : ''}" data-line="${id}" style="--c:${c}" title="${id}"></button>`).join('');
+    `<button class="dot-sw${sk.line === id ? ' on' : ''}${id === 'rainbow' ? ' rb' : ''}${id === 'lights' ? ' lt' : ''}" data-line="${id}" style="--c:${c}" title="${id === 'lights' ? '눈 쌓인 전구 줄' : id}"></button>`).join('');
   $$('#gearOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.gear || 'metal')));
   $$('#comboOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.comboStyle || 'normal')));
   $$('#fcFxOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.fcFx || 'basic')));
@@ -221,6 +223,8 @@ function renderSkin() {
   $('#optGlint').checked = sk.perfectGlint !== false;
   $$('#lineStyleOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.lineStyle || 'auto')));
   $$('#bgFxOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.bgFx || 'soft')));
+  $$('#beatFxOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.beatFx || 'soft')));
+  $$('#beatBumpOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.beatBump || 'soft')));
   markLocks();
 }
 function skinChanged() { saveSettings(); renderSkin(); }
@@ -321,6 +325,12 @@ $('#lineStyleOpt').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-v]');
   if (b) { settings.skin.lineStyle = b.dataset.v; skinChanged(); }
 });
+for (const [id, key] of [['#beatFxOpt', 'beatFx'], ['#beatBumpOpt', 'beatBump']]) {
+  $(id).addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-v]');
+    if (b) { settings.skin[key] = b.dataset.v; skinChanged(); }
+  });
+}
 $('#bgFxOpt').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-v]');
   if (b) { settings.skin.bgFx = b.dataset.v; skinChanged(); }

@@ -1002,6 +1002,7 @@ function showResult(g, r) {
   requestAnimationFrame(() => drawTiming(g.offsets));
   startResultAvatar(r);
   if (g.fcKind && !r.incomplete) startConfetti(g.fcKind === 'ap');
+  if (typeof skillResultLine === 'function') { try { skillResultLine(g, isTest || r.incomplete ? null : r); } catch (e) { console.warn('실력 분석 표시 오류', e); } }
   if (!isTest && typeof achieveOnResult === 'function') { try { achieveOnResult(g, r); } catch (e) { console.warn('업적 확인 오류', e); } }
   if (typeof gainXp === 'function') { try { if (isTest) $('#rXp').classList.add('hidden'); else gainXp(g, r); } catch (e) { console.warn('경험치 오류', e); } }
   if (!isTest) {

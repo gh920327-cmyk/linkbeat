@@ -44,7 +44,7 @@ function fitCanvas(cv, nl = 4, opts = {}) {
   let x0 = Math.floor((w - fieldW) / 2);               // 꾸미기: 기어 위치
   if (opts.pos === 'left') x0 = Math.min(x0, 24);
   else if (opts.pos === 'right') x0 = Math.max(x0, w - fieldW - 26);
-  return { ctx, w, h, nl, laneW, fieldW, x0, colors: laneColors(nl) };
+  return { ctx, w, h, nl, laneW, fieldW, x0, colors: laneColors(nl), rx: r.left, ry: r.top };
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -90,7 +90,7 @@ function drawLanes(L, judgeY, pressed, dim) {
 /* 기어 테두리 (꾸미기·상점): 금속(기본) · 투명 · 나무 · 네온 · 크롬 · 황금 */
 const RAIL_STOPS = { metal: ['#2a3148', '#9aa6c4', '#d6dcef', '#2a3148'], wood: ['#3b2412', '#8a5a2e', '#c08a52', '#3b2412'],
   chrome: ['#4b5160', '#e8edf8', '#ffffff', '#4b5160'], gold: ['#5a3d06', '#d9a520', '#fff1a8', '#5a3d06'],
-  halloween: ['#26093a', '#ff7a1a', '#ffc36b', '#26093a'] };
+  halloween: ['#26093a', '#ff7a1a', '#ffc36b', '#26093a'], xmas: ['#06200f', '#1f7a3a', '#3fa85a', '#06200f'] };
 function drawRails(ctx, x0, fieldW, h) {
   const st = settings.skin.gear || 'metal';
   if (st === 'clear') {
@@ -122,6 +122,8 @@ function drawRails(ctx, x0, fieldW, h) {
       ctx.fillStyle = `rgba(176,107,255,${(0.18 + 0.12 * Math.sin(now / 420)).toFixed(3)})`;
       ctx.fillRect(rx, 0, 8, h);
       for (let y = ((now / 40 + (rx > x0 ? 90 : 0)) % 180) - 20; y < h; y += 180) drawPumpkin(ctx, rx + 4, y, 5);
+    } else if (st === 'xmas') {         // 전나무 초록 + 감긴 금빛 줄 + 차례로 깜빡이는 전구 + 작은 눈송이
+      drawXmasRail(ctx, rx, h, now, rx > x0);
     } else if (st === 'gold' || st === 'chrome') {    // 위에서 아래로 흐르는 광택
       const sy = ((now / 5 + (rx > x0 ? 140 : 0)) % (h + 240)) - 120;
       const sg = ctx.createLinearGradient(0, sy - 70, 0, sy + 70);
@@ -506,6 +508,9 @@ function drawNote(L, lane, yHead, yTail, state, accent = false) {
       }
     }
     return;
+  } else if (sk.note === 'snowflake') {
+    drawSnowflake(ctx, x + nw / 2, yHead, Math.min(nw * 0.44, nh * 0.95 + 7), col, state === 'dead');
+    return;
   } else if (sk.note === 'pumpkin') {
     const r = Math.min(nw * 0.4, nh * 0.9 + 6);
     drawPumpkin(ctx, x + nw / 2, yHead, r, { rim: col, dead: state === 'dead' });
@@ -552,7 +557,7 @@ function lineStyleOf() {
   const sk = settings.skin;
   const st = sk.lineStyle || 'auto';
   if (st !== 'auto') return st;
-  return ['circle', 'hollow', 'diamond', 'star', 'heart', 'gem', 'pumpkin'].includes(sk.note) || ROUND_NOTES.has(sk.note) ? 'ring' : 'bar';
+  return ['circle', 'hollow', 'diamond', 'star', 'heart', 'gem', 'pumpkin', 'snowflake'].includes(sk.note) || ROUND_NOTES.has(sk.note) ? 'ring' : 'bar';
 }
 function receptorR(L) {
   const nw = L.laneW - 4;
@@ -615,6 +620,7 @@ function drawJudgeLine(L, judgeY, pressed, fx = null, now = performance.now()) {
       ctx.fillRect(x0, judgeY - 1, fieldW, 1);
     }
   }
+  if (settings.skin.line === 'lights') drawXmasLights(ctx, x0, fieldW, judgeY, now, style === 'ring' ? receptorR(L) : 0, nl);
   // 키(터치 영역) 표시
   const keys = keysFor(nl);
   ctx.font = `700 ${laneW < 60 ? 12 : 15}px "JetBrains Mono", monospace`;
@@ -648,8 +654,8 @@ function drawJudgeLine(L, judgeY, pressed, fx = null, now = performance.now()) {
 }
 
 /* ============================================================ 풀콤보 연출 (플레이·꾸미기 미리보기·상점이 같이 씀)
-   basic: 빛 고리·반짝이 · fireworks: 불꽃놀이 · stars: 별가루 폭죽 · hero: 내 캐릭터 승리 · bats: 박쥐 떼(할로윈) */
-const FC_DUR = { basic: 2000, fireworks: 2700, stars: 2500, hero: 2700, bats: 2700 };
+   basic: 빛 고리·반짝이 · fireworks: 불꽃놀이 · stars: 별가루 폭죽 · hero: 내 캐릭터 승리 · bats: 박쥐 떼(할로윈) · aurora: 오로라(크리스마스) */
+const FC_DUR = { basic: 2000, fireworks: 2700, stars: 2500, hero: 2700, bats: 2700, aurora: 2900 };
 const fcDur = (st) => FC_DUR[st] || FC_DUR.basic;
 function fcRand(i, k = 1) { const x = Math.sin(i * 127.1 + k * 311.7) * 43758.5453; return x - Math.floor(x); }   // 매 프레임 같은 값 (시드 고정)
 function drawFcLabel(ctx, cx, cy, e, now, ap, combo, fieldW, style) {
@@ -668,6 +674,10 @@ function drawFcLabel(ctx, cx, cy, e, now, ap, combo, fieldW, style) {
     const g = ctx.createLinearGradient(-110, 0, 110, 0);
     g.addColorStop(0, '#ffb347'); g.addColorStop(0.5, '#ff7a1a'); g.addColorStop(1, '#c58bff');
     ctx.fillStyle = g; ctx.shadowColor = '#8a2be2';
+  } else if (style === 'aurora') {
+    const g = ctx.createLinearGradient(-110, 0, 110, 0);
+    g.addColorStop(0, '#7dffc8'); g.addColorStop(0.5, '#e8fff6'); g.addColorStop(1, '#c49bff');
+    ctx.fillStyle = g; ctx.shadowColor = '#2fe0a8';
   } else if (ap) {
     const g = ctx.createLinearGradient(-110, 0, 110, 0);
     const sh = (now / 600) % 1;
@@ -807,6 +817,8 @@ function drawFcFx(L, style, ap, at, now, combo, avatar = settings.avatar) {
       ctx.beginPath(); starPath(ctx, cx + Math.cos(a) * r, h * 0.62 + Math.sin(a) * r * 0.6, 4, 1.4, 4); ctx.fill();
     }
     ctx.globalAlpha = 1;
+  } else if (style === 'aurora') {
+    drawAuroraFc(ctx, x0, fieldW, h, e, ms, now);
   } else if (style === 'bats') {
     const mk = Math.min(1, ms / 700);                    // 보름달이 떠오름
     ctx.globalAlpha = 0.85 * (e > 0.85 ? (1 - e) / 0.15 : 1);
@@ -830,6 +842,203 @@ function drawFcFx(L, style, ap, at, now, combo, avatar = settings.avatar) {
   }
   drawFcLabel(ctx, cx, style === 'hero' ? h * 0.22 : cy, e, now, ap, combo, fieldW, style);
   ctx.restore();
+}
+
+/* ============================================================ 🎄 크리스마스 (이벤트 꾸미기) — 모두 한 번 그려 둔 그림을 다시 씀 */
+const BULB_C = ['#ff3b4f', '#ffcf4d', '#2fd47a', '#4da3ff', '#ff7ad9'];
+function bulbSprite(col, r) {
+  return spriteOf(`bulb2|${col}|${r}`, r * 7, r * 7, (c, w, h) => {
+    const g = c.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);      // 은은한 빛 번짐
+    g.addColorStop(0, col + 'bb'); g.addColorStop(0.35, col + '44'); g.addColorStop(1, col + '00');
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+    c.fillStyle = '#3a4a3a'; c.fillRect(w / 2 - r * 0.45, h / 2 - r * 1.35, r * 0.9, r * 0.5);   // 꼭지
+    const bg = c.createRadialGradient(w / 2 - r * 0.25, h / 2 - r * 0.2, r * 0.1, w / 2, h / 2, r * 1.05);
+    bg.addColorStop(0, '#ffffff'); bg.addColorStop(0.35, col); bg.addColorStop(1, col);
+    c.fillStyle = bg; c.beginPath(); c.ellipse(w / 2, h / 2, r * 0.75, r * 1.0, 0, 0, Math.PI * 2); c.fill();
+  });
+}
+function snowSprite(r) {
+  return spriteOf(`sflake|${r}`, r * 4, r * 4, (c, w, h) => {
+    c.translate(w / 2, h / 2);
+    c.strokeStyle = '#ffffff'; c.lineWidth = Math.max(0.8, r * 0.28); c.lineCap = 'round';
+    c.shadowColor = '#bfe8ff'; c.shadowBlur = r;
+    for (let i = 0; i < 6; i++) { c.rotate(Math.PI / 3); c.beginPath(); c.moveTo(0, 0); c.lineTo(0, -r * 1.5); c.moveTo(0, -r * 0.8); c.lineTo(r * 0.45, -r * 1.15); c.moveTo(0, -r * 0.8); c.lineTo(-r * 0.45, -r * 1.15); c.stroke(); }
+  });
+}
+function drawXmasRail(ctx, rx, h, now, right) {
+  const gs = spriteOf(`xrail|${Math.ceil(h / 64) * 64}`, 8, Math.ceil(h / 64) * 64, (c, w, hh) => {   // 감긴 금빛 줄
+    c.strokeStyle = 'rgba(255,214,110,0.85)'; c.lineWidth = 1.4;
+    c.beginPath();
+    for (let y = 0; y <= hh; y += 2) { const x = 4 + Math.sin(y / 11) * 3.2; y ? c.lineTo(x, y) : c.moveTo(x, y); }
+    c.stroke();
+  });
+  ctx.drawImage(gs.c, rx, 0, 8, gs.h);
+  const step = 46, t = Math.floor(now / 380);
+  for (let i = 0, y = right ? 23 : 0; y < h; y += step, i++) {   // 전구: 다섯 색이 차례로 밝아짐
+    const col = BULB_C[i % BULB_C.length];
+    const on = (i + t) % 3 !== 0;
+    ctx.globalAlpha = on ? 1 : 0.35;
+    drawSprite(ctx, bulbSprite(col, 3), rx + 4 + Math.sin(y / 11) * 3.2, y + 6, 1);
+  }
+  ctx.globalAlpha = 0.8;
+  const sf = snowSprite(2);
+  for (let y = ((now / 55 + (right ? 70 : 0)) % 140) - 10; y < h; y += 140) drawSprite(ctx, sf, rx + 4 + Math.sin(y / 30 + now / 900) * 6, y);
+  ctx.globalAlpha = 1;
+}
+/* 판정선 꾸미기 '눈 쌓인 전구 줄': 막대 판정선이면 위에 눈 더미, 원형 받침이면 받침마다 눈 모자 · 전구는 판정선 위에서 차례로 반짝 */
+function drawXmasLights(ctx, x0, fieldW, judgeY, now, ringR, nl) {
+  if (!ringR) {
+    const W = Math.round(fieldW);
+    const pile = spriteOf(`snowpile|${W}`, W + 8, 14, (c, w, h) => {
+      c.fillStyle = '#f4fbff'; c.shadowColor = 'rgba(180,225,255,0.9)'; c.shadowBlur = 6;
+      c.beginPath(); c.moveTo(0, h);
+      for (let x = 0; x <= w; x += 4) c.lineTo(x, h - 3 - 4 * Math.abs(Math.sin(x / 23)) - 2.5 * Math.abs(Math.sin(x / 7.3 + 1)));
+      c.lineTo(w, h); c.closePath(); c.fill();
+    });
+    drawSprite(ctx, pile, x0 + fieldW / 2, judgeY - 9);
+  } else {
+    const rr = Math.round(ringR);
+    const cap = spriteOf(`snowcap|${rr}`, rr * 2 + 10, rr + 8, (c, w, h) => {
+      const cy = h + rr * 0.15;
+      c.fillStyle = '#f4fbff'; c.shadowColor = 'rgba(180,225,255,0.9)'; c.shadowBlur = 5;
+      c.beginPath(); c.arc(w / 2, cy, rr + 2, Math.PI * 1.12, Math.PI * 1.88);
+      for (let a = Math.PI * 1.88; a >= Math.PI * 1.12; a -= 0.12) c.lineTo(w / 2 + Math.cos(a) * (rr - 2), cy + Math.sin(a) * (rr - 2) + 2.2 * Math.abs(Math.sin(a * 9)));
+      c.closePath(); c.fill();
+    });
+    for (let l = 0; l < nl; l++) drawSprite(ctx, cap, x0 + (l + 0.5) * (fieldW / nl), judgeY - rr * 0.15 - (rr + 8) / 2 - 1);
+  }
+  const n = ringR ? nl + 1 : Math.max(6, Math.round(fieldW / 34));       // 원형 받침이면 받침 사이마다 하나씩
+  const t = now / 260;
+  for (let i = 0; i < n; i++) {
+    const x = ringR ? x0 + (i / nl) * fieldW : x0 + ((i + 0.5) / n) * fieldW;
+    const k = 0.5 + 0.5 * Math.sin(t - i * 0.9);
+    ctx.globalAlpha = 0.45 + 0.55 * k;
+    drawSprite(ctx, bulbSprite(BULB_C[i % BULB_C.length], 3), x, judgeY + 2, 1);
+  }
+  ctx.globalAlpha = 1;
+}
+/* 눈꽃 노트: 여섯 갈래 눈 결정 (줄 색으로 빛남) */
+function drawSnowflake(ctx, cx, cy, r, col, dead) {
+  const rr = Math.max(4, Math.round(r));
+  const sp = spriteOf(`snowNote|${rr}|${col}|${dead}`, rr * 3, rr * 3, (c, w, h) => {
+    c.translate(w / 2, h / 2);
+    if (!dead) { const g = c.createRadialGradient(0, 0, 0, 0, 0, rr * 1.3); g.addColorStop(0, col + '88'); g.addColorStop(1, col + '00'); c.fillStyle = g; c.fillRect(-w / 2, -h / 2, w, h); }
+    c.lineCap = 'round';
+    for (const [lw, st] of [[rr * 0.34, dead ? '#3a3f52' : col], [rr * 0.14, dead ? '#6a7088' : '#ffffff']]) {
+      c.strokeStyle = st; c.lineWidth = lw;
+      for (let i = 0; i < 6; i++) {
+        const a = (i * Math.PI) / 3, ca = Math.cos(a), sa = Math.sin(a);
+        const P = (d, o = 0) => [ca * d - sa * o, sa * d + ca * o];
+        c.beginPath();
+        c.moveTo(...P(rr * 0.15)); c.lineTo(...P(rr));
+        c.moveTo(...P(rr * 0.55)); c.lineTo(...P(rr * 0.8, rr * 0.25));
+        c.moveTo(...P(rr * 0.55)); c.lineTo(...P(rr * 0.8, -rr * 0.25));
+        c.stroke();
+      }
+    }
+    c.fillStyle = dead ? '#6a7088' : '#ffffff';
+    c.beginPath(); c.arc(0, 0, rr * 0.2, 0, Math.PI * 2); c.fill();
+  });
+  drawSprite(ctx, sp, cx, cy, r / rr);
+}
+/* 트리 장식볼 (타격 이펙트) */
+function drawOrnament(ctx, x, y, s, col, rot) {
+  const ss = Math.max(3, Math.round(s));
+  const sp = spriteOf(`orn|${ss}|${col}`, ss * 3, ss * 3.4, (c, w, h) => {
+    const cx = w / 2, cy = h / 2 + ss * 0.2;
+    const g = c.createRadialGradient(cx - ss * 0.35, cy - ss * 0.35, ss * 0.1, cx, cy, ss);
+    g.addColorStop(0, '#ffffff'); g.addColorStop(0.3, col); g.addColorStop(1, shade(col));
+    c.fillStyle = g; c.beginPath(); c.arc(cx, cy, ss, 0, Math.PI * 2); c.fill();
+    c.fillStyle = '#d9b44a'; c.fillRect(cx - ss * 0.3, cy - ss * 1.25, ss * 0.6, ss * 0.35);   // 고리 캡
+    c.strokeStyle = 'rgba(255,255,255,0.55)'; c.lineWidth = 1;
+    c.beginPath(); c.ellipse(cx, cy, ss * 0.95, ss * 0.28, 0, 0, Math.PI * 2); c.stroke();
+  });
+  ctx.save(); ctx.translate(x, y); ctx.rotate(Math.sin(rot) * 0.5);
+  ctx.drawImage(sp.c, -sp.w / 2, -sp.h / 2, sp.w, sp.h);
+  ctx.restore();
+}
+/* 선물 노트 (크리스마스 이벤트): 치면 🎁 +1 — 줄 색 리본 상자 + 금빛 매듭 */
+function drawGiftNote(L, lane, yHead, now) {
+  const { ctx, laneW, x0, colors } = L;
+  const cx = x0 + lane * laneW + laneW / 2;
+  const r = Math.min((laneW - 4) * 0.36, settings.skin.noteH * 0.9 + 8);
+  const rr = Math.max(4, Math.round(r));
+  const bob = Math.sin(now / 160 + lane) * 1.2;
+  const pulse = 0.6 + 0.4 * Math.sin(now / 140 + lane);
+  const halo = spriteOf(`ghalo|${rr}`, rr * 4.4, rr * 4.4, (x, w, h) => {
+    const hg = x.createRadialGradient(w / 2, h / 2, rr * 0.4, w / 2, h / 2, rr * 2.1);
+    hg.addColorStop(0, 'rgba(255,236,170,0.6)'); hg.addColorStop(1, 'rgba(255,90,90,0)');
+    x.fillStyle = hg; x.fillRect(0, 0, w, h);
+  });
+  const col = colors[lane];
+  const box = spriteOf(`gift|${rr}|${col}`, rr * 3, rr * 3, (c, w, h) => {
+    const bx = w / 2 - rr, by = h / 2 - rr * 0.7, bw = rr * 2, bh = rr * 1.7;
+    c.shadowColor = '#ff4d5e'; c.shadowBlur = 10;
+    const g = c.createLinearGradient(0, by, 0, by + bh);
+    g.addColorStop(0, '#ff5a6b'); g.addColorStop(1, '#b3122a');
+    c.fillStyle = g; roundRect(c, bx, by, bw, bh, rr * 0.25); c.fill();
+    c.shadowBlur = 0;
+    c.fillStyle = '#c4101f'; c.fillRect(bx - rr * 0.08, by, bw + rr * 0.16, rr * 0.45);      // 뚜껑
+    c.fillStyle = col; c.fillRect(w / 2 - rr * 0.18, by, rr * 0.36, bh);                    // 줄 색 리본 (어느 줄인지)
+    c.fillRect(bx, by + bh * 0.42, bw, rr * 0.3);
+    c.fillStyle = '#ffd36b';                                                                  // 금빛 매듭
+    for (const sx of [-1, 1]) { c.beginPath(); c.ellipse(w / 2 + sx * rr * 0.42, by - rr * 0.22, rr * 0.42, rr * 0.26, sx * 0.5, 0, Math.PI * 2); c.fill(); }
+    c.beginPath(); c.arc(w / 2, by - rr * 0.12, rr * 0.18, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = 'rgba(255,255,255,0.55)'; c.lineWidth = 1.2; roundRect(c, bx, by, bw, bh, rr * 0.25); c.stroke();
+  });
+  const a0 = ctx.globalAlpha;
+  ctx.globalAlpha = a0 * pulse;
+  drawSprite(ctx, halo, cx, yHead + bob, r / rr);
+  ctx.globalAlpha = a0;
+  drawSprite(ctx, box, cx, yHead + bob, r / rr * 1.04);
+  for (let i = 0; i < 3; i++) {          // 둘레를 도는 반짝이
+    const a = now / 260 + i * 2.094;
+    ctx.fillStyle = i ? '#fff3b0' : '#9ff6c8';
+    ctx.beginPath(); starPath(ctx, cx + Math.cos(a) * r * 1.55, yHead + bob + Math.sin(a) * r * 1.1, 3, 1.1, 4); ctx.fill();
+  }
+}
+/* 오로라 풀콤보: 하늘에 초록·보라 빛 커튼이 일렁이고 별이 반짝, 눈이 흩날림 */
+function drawAuroraFc(ctx, x0, fieldW, h, e, ms, now) {
+  const W = Math.round(fieldW), H = Math.round(h * 0.55);
+  const band = spriteOf(`aurora|${W}|${H}`, W, H, (c, w, hh) => {
+    for (const [cx, cy, col, wd, ht] of [[0.28, 0.5, '47,224,168', 0.42, 0.42], [0.6, 0.42, '125,255,200', 0.4, 0.38], [0.84, 0.55, '196,155,255', 0.32, 0.36]]) {
+      c.save();
+      c.translate(w * cx, hh * cy); c.scale(w * wd, hh * ht);       // 타원으로 번지는 빛
+      const g = c.createRadialGradient(0, 0, 0, 0, 0, 1);
+      g.addColorStop(0, `rgba(${col},0.6)`); g.addColorStop(0.6, `rgba(${col},0.22)`); g.addColorStop(1, `rgba(${col},0)`);
+      c.fillStyle = g; c.fillRect(-1, -1, 2, 2);
+      c.restore();
+    }
+    for (let x = 0; x < w; x += 3) {                                   // 커튼처럼 세로 결
+      const k = 0.5 + 0.5 * Math.sin(x * 0.21) * Math.sin(x * 0.047 + 1.3);
+      const g = c.createLinearGradient(0, hh * 0.15, 0, hh * 0.9);
+      g.addColorStop(0, 'rgba(220,255,240,0)'); g.addColorStop(0.5, `rgba(220,255,240,${(0.12 * k).toFixed(3)})`); g.addColorStop(1, 'rgba(220,255,240,0)');
+      c.fillStyle = g; c.fillRect(x, 0, 1.5, hh);
+    }
+  });
+  const fade = Math.min(1, e / 0.15) * (e > 0.8 ? (1 - e) / 0.2 : 1);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const cols = 16, sw = W / cols;                 // 세로 띠로 잘라 물결처럼 위아래로 일렁임
+  for (let i = 0; i < cols; i++) {
+    const off = Math.sin(i * 0.55 + ms / 380) * h * 0.05 + Math.sin(i * 0.23 - ms / 610) * h * 0.03;
+    ctx.globalAlpha = fade * (0.75 + 0.25 * Math.sin(i * 0.8 + ms / 300));
+    ctx.drawImage(band.c, (i * sw / W) * band.c.width, 0, (sw / W) * band.c.width, band.c.height, x0 + i * sw, h * 0.04 + off, sw + 0.5, H);
+  }
+  ctx.restore();
+  for (let i = 0; i < 22; i++) {                   // 반짝이는 별
+    const tw = 0.5 + 0.5 * Math.sin(now / 160 + i * 1.7);
+    ctx.globalAlpha = fade * tw;
+    ctx.fillStyle = i % 3 ? '#ffffff' : '#c8fff0';
+    ctx.beginPath(); starPath(ctx, x0 + fieldW * fcRand(i, 21), h * 0.06 + h * 0.4 * fcRand(i, 22), 2.6, 0.9, 4); ctx.fill();
+  }
+  const sf = snowSprite(3);
+  for (let i = 0; i < 18; i++) {                   // 흩날리는 눈
+    const k = ((ms / 2600) + fcRand(i, 23)) % 1;
+    ctx.globalAlpha = fade * 0.85;
+    drawSprite(ctx, sf, x0 + fieldW * fcRand(i, 24) + Math.sin(ms / 500 + i) * 14, -10 + (h + 20) * k, 0.6 + 0.6 * fcRand(i, 25));
+  }
+  ctx.globalAlpha = 1;
 }
 
 /* 유령 판정선: 선 위로 희미한 연기가 피어올라 사라짐 */
@@ -860,9 +1069,10 @@ function fxNew(nl) {
     holdTick: new Array(nl).fill(0), line: -1e9, bump: -1e9, bumpAmp: 0, shake: -1e9, shakeAmp: 0, mile: null,
   };
 }
-const FX_NEW = { petal: 950, stardust: 800, bolt: 260, fire: 620, snow: 1150, bat: 900, leaf: 1050 };   // 새 이펙트와 조각이 사는 시간(ms)
+const FX_NEW = { petal: 950, stardust: 800, bolt: 260, fire: 620, snow: 1150, bat: 900, leaf: 1050, ornament: 950 };   // 새 이펙트와 조각이 사는 시간(ms)
 const PETAL_C = ['#ffc4dd', '#ff9cc6', '#ffe1ee', '#ff7fb5'];
 const LEAF_C = ['#ff8a1e', '#e2451b', '#ffc93d', '#c8321b'];
+const ORN_C = ['#ff3b4f', '#ffcf4d', '#2fbf6a', '#4da3ff', '#d94dff'];
 function fxNewParts(fx, lane, e, now) {
   const R = Math.random;
   if (e === 'bolt') {
@@ -872,7 +1082,7 @@ function fxNewParts(fx, lane, e, now) {
     for (let i = 0; i < 4; i++) fx.parts.push({ lane, at: now, kind: 'boltSpark', vx: (R() - 0.5) * 300, vy: -100 - R() * 220, gr: 700, s: 2 + R() * 2, life: 300 });
     return;
   }
-  const n = { petal: 7, stardust: 10, fire: 10, snow: 8, bat: 3, leaf: 6 }[e];
+  const n = { petal: 7, stardust: 10, fire: 10, snow: 8, bat: 3, leaf: 6, ornament: 5 }[e];
   for (let i = 0; i < n; i++) {
     const base = { lane, at: now, kind: e, dx: (R() - 0.5) * 0.5, life: FX_NEW[e] * (0.7 + R() * 0.3) };
     if (e === 'petal') fx.parts.push({ ...base, vx: (R() - 0.5) * 170, vy: -140 - R() * 160, gr: 230, s: 4 + R() * 4, r: R() * 6, vr: (R() - 0.5) * 9, sw: 4 + R() * 4, c: PETAL_C[i % PETAL_C.length] });
@@ -880,6 +1090,8 @@ function fxNewParts(fx, lane, e, now) {
     else if (e === 'stardust') fx.parts.push({ ...base, vx: (R() - 0.5) * 240, vy: -80 - R() * 240, gr: 160, s: 3 + R() * 4, ph: R() * 6, c: R() < 0.5 ? '#fff6c8' : '#ffd84d' });
     else if (e === 'fire') fx.parts.push({ ...base, vx: (R() - 0.5) * 60, vy: -150 - R() * 170, gr: -60, s: 6 + R() * 6, dx: (R() - 0.5) * 0.6 });
     else if (e === 'bat') fx.parts.push({ ...base, vx: (i - 1) * (70 + R() * 60), vy: -170 - R() * 120, gr: -40, s: 8 + R() * 3, ph: R() * 6 });
+    else if (e === 'ornament') fx.parts.push(i < 3 ? { ...base, vx: (i - 1) * (60 + R() * 50), vy: -190 - R() * 120, gr: 520, s: 5 + R() * 2, r: R() * 6, vr: (R() - 0.5) * 6, c: ORN_C[(i + Math.floor(R() * 4)) % ORN_C.length] }
+      : { ...base, kind: 'stardust', vx: (R() - 0.5) * 200, vy: -90 - R() * 180, gr: 160, s: 3 + R() * 2, ph: R() * 6, c: R() < 0.5 ? '#fff6c8' : '#ffd84d' });
     else fx.parts.push({ ...base, vx: (R() - 0.5) * 140, vy: -110 - R() * 130, gr: 110, s: 2 + R() * 3, sw: 2 + R() * 3 });
   }
 }
@@ -889,7 +1101,7 @@ function drawFxNew(L, judgeY, fx, now, e) {
     const k = (now - fx.flash[l]) / 140;
     if (k < 1) {
       ctx.globalAlpha = (1 - k) * 0.55;
-      ctx.fillStyle = e === 'fire' || e === 'bat' || e === 'leaf' ? '#ff9d3d' : e === 'petal' ? '#ffb3d1' : e === 'snow' ? '#e8f6ff' : colors[l];
+      ctx.fillStyle = e === 'fire' || e === 'bat' || e === 'leaf' ? '#ff9d3d' : e === 'petal' ? '#ffb3d1' : e === 'snow' ? '#e8f6ff' : e === 'ornament' ? '#ffd36b' : colors[l];
       roundRect(ctx, x0 + l * laneW + 2, judgeY - 12, laneW - 4, 24, 8);
       ctx.fill();
     }
@@ -897,7 +1109,7 @@ function drawFxNew(L, judgeY, fx, now, e) {
   ctx.globalAlpha = 1;
   fx.parts = fx.parts.filter((p) => now - p.at < (p.life || 600));
   ctx.save();
-  if (e !== 'petal' && e !== 'snow' && e !== 'bat' && e !== 'leaf') ctx.globalCompositeOperation = 'lighter';
+  if (e !== 'petal' && e !== 'snow' && e !== 'bat' && e !== 'leaf' && e !== 'ornament') ctx.globalCompositeOperation = 'lighter';
   for (const p of fx.parts) {
     const t = (now - p.at) / 1000, k = (now - p.at) / (p.life || 600);
     const cx = x0 + (p.lane + 0.5 + (p.dx || 0)) * laneW;
@@ -922,6 +1134,8 @@ function drawFxNew(L, judgeY, fx, now, e) {
       ctx.beginPath(); ctx.moveTo(x - p.s * 2, y); ctx.lineTo(x + p.s * 2, y); ctx.moveTo(x, y - p.s * 2); ctx.lineTo(x, y + p.s * 2); ctx.stroke();
     } else if (p.kind === 'bat') {
       drawBat(ctx, x, y, p.s, t * 22 + p.ph);
+    } else if (p.kind === 'ornament') {        // 반짝이는 트리 장식볼 (빙글 돌며 튀어 오름)
+      drawOrnament(ctx, x, y, p.s, p.c, p.r + t * p.vr);
     } else if (p.kind === 'leaf') {            // 단풍잎: 다섯 갈래 잎 + 꼭지
       ctx.save(); ctx.translate(x, y); ctx.rotate(p.r + t * p.vr);
       ctx.fillStyle = p.c; ctx.beginPath(); starPath(ctx, 0, 0, p.s, p.s * 0.48, 5); ctx.fill();
@@ -1476,6 +1690,61 @@ function feverStep(f, t, kind) {
   return applied;
 }
 /* 모두 PERFECT로 쳤을 때의 피버 보너스 합 (점수 정규화용) */
+/* 🎆 비트 반응 연출: 곡의 '센 박자'를 미리 골라 둠
+   영상 소리는 직접 못 들어서, 가장 어려운 채보(소리가 크고 많은 곳일수록 노트가 몰림)를 박자에 겹쳐 세기를 매김
+   - 마디 첫 박 · 주변보다 노트가 몰린 박 · 동시치기 · 드럼 강타일수록 셈
+   - 조용한 부분은 약하게, 너무 자주 번쩍이지 않게 0.28초 안에는 하나만 → [[시각, 세기 0~1], ...] */
+function beatHits(song) {
+  const shift = (+song.noteShift || 0) / 1000;
+  const ch = song.charts || {};
+  const src = [ch.extreme, ch.hard, ch.normal, ch.easy].find((c) => Array.isArray(c) && c.length >= 20);
+  if (!src) return [];
+  const N = src.map((n) => ({ t: +n.t + shift, a: n.a ? 1 : 0 })).filter((n) => Number.isFinite(n.t)).sort((x, y) => x.t - y.t);
+  let beats = Array.isArray(song.beats) && song.beats.length > 8 ? song.beats.map((b) => +b + shift).filter(Number.isFinite) : null;
+  if (!beats) {
+    const bl = 60 / (song.bpm || 120), end = N[N.length - 1].t + 1;
+    beats = [];
+    for (let t = (+song.offset || 0) + shift; t < end; t += bl) beats.push(t);
+  }
+  const B = beats.length, w = new Float32Array(B), acc = new Uint8Array(B);
+  for (let i = 0, j = 0; i < B; i++) {
+    const t = beats[i];
+    while (j < N.length && N[j].t < t - 0.07) j++;
+    for (let k = j; k < N.length && N[k].t <= t + 0.07; k++) { w[i] += 1; if (N[k].a) acc[i] = 1; }
+  }
+  const ph = [0, 0, 0, 0];
+  for (let i = 0; i < B; i++) ph[i % 4] += w[i];
+  const p0 = ph.indexOf(Math.max(...ph));                 // 마디 첫 박 자리: 4박 중 노트가 가장 몰리는 곳
+  const loc = new Float32Array(B);                        // 주변 16박 평균 (얼마나 시끄러운 부분인지)
+  for (let i = 0; i < B; i++) {
+    let sum = 0, cnt = 0;
+    for (let k = Math.max(0, i - 8); k <= Math.min(B - 1, i + 8); k++) if (k !== i) { sum += w[k]; cnt++; }
+    loc[i] = cnt ? sum / cnt : 0;
+  }
+  const sorted = [...loc].sort((x, y) => x - y);
+  const ref = Math.max(0.5, sorted[Math.floor(sorted.length * 0.8)] || 1);
+  const cand = [];
+  for (let i = 0; i < B; i++) {
+    if (!w[i] && !acc[i]) continue;
+    let st = clamp((w[i] - loc[i]) / (loc[i] + 1), 0, 1) * 0.7;
+    if (i % 4 === p0) st += 0.45;
+    else if (i % 2 === p0 % 2) st += 0.1;
+    if (w[i] >= 2) st += 0.15;
+    st *= clamp(0.35 + 0.65 * loc[i] / ref, 0.35, 1);    // 조용한 부분은 약하게
+    if (acc[i]) st = 1;
+    if (st >= 0.38) cand.push([beats[i], Math.min(1, st)]);
+  }
+  for (const n of N) if (n.a) cand.push([n.t, 1]);       // 박자에서 벗어난 드럼 강타도
+  cand.sort((x, y) => x[0] - y[0]);
+  const out = [];
+  for (const c of cand) {
+    const last = out[out.length - 1];
+    if (last && c[0] - last[0] < 0.28) { if (c[1] > last[1]) out[out.length - 1] = c; continue; }
+    out.push(c);
+  }
+  return out.map((c) => [+c[0].toFixed(3), +c[1].toFixed(2)]);
+}
+
 function feverMaxSum(notes) {
   const ev = [];
   for (const n of notes) { ev.push(n.t); if (n.d > 0) ev.push(n.t + n.d); }
@@ -1531,6 +1800,7 @@ class Game {
     if (this.hl && !this.chorus.some((c) => Math.abs(c[0] - from) < 0.5)) this.chorus.push([from, practice.end]);
     this.chorus.sort((a, b) => a[0] - b[0]);
     this.chIdx = 0;
+    try { this.bHits = beatHits(song); } catch (e) { this.bHits = []; console.warn('비트 연출 준비 오류', e); }
     this.lanes = Array.from({ length: this.nl }, () => []);
     this.notes.forEach((n, i) => this.lanes[n.l].push(i));
     this.laneHead = new Array(this.nl).fill(0);
@@ -1768,9 +2038,9 @@ class Game {
     const a = Math.abs(dt);
     const kind = a <= JUDGE.perfect ? 'perfect' : a <= JUDGE.great ? 'great' : a <= JUDGE.good ? 'good' : 'miss';
     n.head = kind;
-    if (kind !== 'miss') { this.offsets.push(dt); (this.errHist || (this.errHist = [])).push({ dt, kind, at: performance.now() }); if (this.errHist.length > 40) this.errHist.shift(); }
+    if (kind !== 'miss') { n.dt = dt; this.offsets.push(dt); (this.errHist || (this.errHist = [])).push({ dt, kind, at: performance.now() }); if (this.errHist.length > 40) this.errHist.shift(); }
     this.judge(kind, lane, dt, false, n.t);
-    if (n.pk && kind !== 'miss') { this.pumpkins = (this.pumpkins || 0) + 1; (this.candyPops ||= []).push({ lane, at: performance.now() }); }   // 소리 없이 🍬 +1만
+    if (n.pk && kind !== 'miss') { this.pumpkins = (this.pumpkins || 0) + 1; (this.candyPops ||= []).push({ lane, at: performance.now() }); }   // 소리 없이 재화 +1만 (🍬·🎁)
     if (n.a && kind !== 'miss') { fxAccent(this.fx, lane, kind); sfx.accent(); }   // 드럼 강타: 크게 터지고 묵직한 소리
     if (n.d > 0) {
       if (kind === 'miss') { n.tail = 'miss'; this.judge('miss', lane, 0, true, n.t + n.d); }
@@ -2066,6 +2336,58 @@ class Game {
     el.style.setProperty('--fever', (fever * k).toFixed(3));
   }
 
+  /* 비트 반응 연출: 센 박자마다 배경 양옆 조명이 번쩍 (왼쪽·오른쪽 번갈아, 아주 센 박은 양쪽 + 바닥 빛)
+     조명은 미리 칠해 둔 층의 투명도만 바꿔서 가벼움 · 울림은 기어를 몇 px 눌렀다 놓고 썸네일을 살짝 키움
+     반환값: 이번 프레임에 기어를 내릴 px */
+  drawBeatFx(gt, L, judgeY) {
+    const el = this.bfEl || (this.bfEl = document.getElementById('beatFx'));
+    if (!el) return 0;
+    if (L) {                                   // 조명을 기어 양옆에 붙임 (기어 위치·크기가 바뀔 때만)
+      const key = `${Math.round(L.rx + L.x0)}|${L.fieldW}|${Math.round(L.ry + judgeY)}`;
+      if (key !== this.bfKey) {
+        this.bfKey = key;
+        el.style.setProperty('--gx', Math.round(L.rx + L.x0) + 'px');
+        el.style.setProperty('--gr', Math.round(L.rx + L.x0 + L.fieldW) + 'px');
+        el.style.setProperty('--gy', Math.round(L.ry + judgeY) + 'px');
+      }
+    }
+    const sk = settings.skin;
+    const kl = sk.beatFx === 'strong' ? 1 : sk.beatFx === 'off' ? 0 : 0.55;
+    const kb = sk.beatBump === 'strong' ? 1 : sk.beatBump === 'off' ? 0 : 0.5;
+    const H = this.bHits || [];
+    const live = (this.phase === 'playing' || this.phase === 'preroll') && H.length && (kl || kb);
+    const beams = this.bfBeams || (this.bfBeams = [...el.children]);
+    const last = this.bfLast || (this.bfLast = new Float32Array(beams.length + 1).fill(-1));
+    const put = (i, v) => {                    // 바뀐 만큼만 씀 (스타일 계산을 줄임)
+      if (Math.abs(v - last[i]) < 0.008 && !(v === 0 && last[i] !== 0)) return;
+      last[i] = v;
+      if (i < beams.length) beams[i].style.opacity = v.toFixed(3);
+      else { const bg = this.bgEl || (this.bgEl = document.getElementById('gameBg')); if (bg) bg.style.setProperty('--bump', v.toFixed(3)); }
+    };
+    if (!live) { for (let i = 0; i <= beams.length; i++) put(i, 0); return 0; }
+    let i = this.bfI || 0;
+    while (i < H.length && H[i][0] <= gt) i++;
+    while (i > 0 && H[i - 1][0] > gt) i--;    // 연습 반복으로 되감김
+    this.bfI = i;
+    const hit = H[i - 1];
+    const e = hit ? gt - hit[0] : 9, st = hit ? hit[1] : 0;
+    let chorus = false;
+    for (const c of this.chorus) if (gt >= c[0] && gt < c[1]) { chorus = true; break; }
+    const fv = this.fever;
+    const col = fv && fv.mult > 1 && gt <= fv.until + 0.2 ? 'fever' : chorus ? 'chorus' : 'base';
+    if (col !== this.bfCol) { this.bfCol = col; el.dataset.c = col; }
+    const glow = e < 1.2 ? st * Math.exp(-e * 6) * (chorus ? 1.15 : 1) * kl : 0;
+    const both = st >= 0.85, side = (i - 1) % 2;
+    // 순서: 왼쪽 옆 빛·왼쪽 조명·오른쪽 조명·오른쪽 옆 빛·판정선 아래 빛
+    const kL = both || side === 0 ? 1 : 0.12, kR = both || side === 1 ? 1 : 0.12;
+    put(0, Math.min(1, glow * kL)); put(1, Math.min(1, glow * kL * 0.7));
+    put(2, Math.min(1, glow * kR * 0.7)); put(3, Math.min(1, glow * kR));
+    put(4, both ? Math.min(1, glow * 0.8) : glow * 0.25);
+    const b = st >= 0.55 && e < 0.4 ? st * Math.exp(-e * 14) * kb : 0;
+    put(5, b);
+    return b * 3.2;
+  }
+
   /* 후렴(하이라이트): 들어가는 순간 빛이 터지고 글자, 후렴 동안 기어 양옆이 박자에 맞춰 은은하게 빛남 */
   drawChorus(L, judgeY, gt, now) {
     if (!this.chorus.length || settings.skin.chorusFx === false) return;
@@ -2136,9 +2458,10 @@ class Game {
     const nowF = performance.now();
     const off0 = fxOffset(this.fx, nowF);       // 기어 반동·흔들림
     this.drawBg(gt);
+    const bumpY = this.drawBeatFx(gt, L, judgeY);    // 센 박자: 배경 조명 + 기어가 살짝 울림
     ctx.clearRect(0, 0, w, h);
     ctx.save();
-    ctx.translate(off0.dx, off0.dy);
+    ctx.translate(off0.dx, off0.dy + bumpY);
     drawLanes(L, judgeY, this.pressed, settings.dim);
     drawBeams(L, judgeY, this.pressed, this.fx, nowF);
 
@@ -2211,7 +2534,7 @@ class Game {
       if (yTail !== null && yTail > h) continue;
       if (yTail === null && yHead > h + 20) continue;
       const state = n.head === 'miss' || n.tail === 'miss' ? 'dead' : holding ? 'hold' : 'live';
-      if (n.pk && state === 'live') drawPumpkinNote(L, n.l, yHead, now);
+      if (n.pk && state === 'live') (this.spTheme === 'xmas' ? drawGiftNote : drawPumpkinNote)(L, n.l, yHead, now);
       else drawNote(L, n.l, yHead, yTail, state, n.a);
     }
 
@@ -2229,10 +2552,11 @@ class Game {
         const k = (now - c.at) / 800;
         const sc = k < 0.15 ? 0.7 + k * 3 : 1.15 - Math.min(0.15, (k - 0.15));
         ctx.globalAlpha = 1 - k * k;
-        const sp = spriteOf('candy+1', 96, 44, (x, w, h) => {
+        const cur = this.spCur || '🍬', xm = this.spTheme === 'xmas';
+        const sp = spriteOf(`pop+1|${cur}`, 96, 44, (x, w, h) => {
           x.font = `900 23px ${UI_FONT}`; x.textAlign = 'center'; x.textBaseline = 'middle';
-          x.lineWidth = 4; x.strokeStyle = 'rgba(60,20,0,0.85)'; x.shadowColor = '#ff7a1a'; x.shadowBlur = 12;
-          x.strokeText('🍬+1', w / 2, h / 2); x.fillStyle = '#ffe9a8'; x.fillText('🍬+1', w / 2, h / 2);
+          x.lineWidth = 4; x.strokeStyle = xm ? 'rgba(10,40,20,0.85)' : 'rgba(60,20,0,0.85)'; x.shadowColor = xm ? '#ff3b4f' : '#ff7a1a'; x.shadowBlur = 12;
+          x.strokeText(`${cur}+1`, w / 2, h / 2); x.fillStyle = xm ? '#fff3d6' : '#ffe9a8'; x.fillText(`${cur}+1`, w / 2, h / 2);
         });
         drawSprite(ctx, sp, x0 + c.lane * laneW + laneW / 2, judgeY - 40 - 52 * k, sc);
       }
@@ -2368,7 +2692,7 @@ class Game {
     this.phase = 'restarting';
     yt.pause();
     this.clock.stop();
-    for (const n of this.notes) { n.head = null; n.tail = null; }
+    for (const n of this.notes) { n.head = null; n.tail = null; n.dt = undefined; }
     this.laneHead.fill(0);
     this.activeHold.fill(null);
     this.drawFrom = 0;
@@ -2404,12 +2728,14 @@ class Game {
     this.feverMax = feverMaxSum(this.notes);
   }
 
-  /* 할로윈 이벤트: 노트 몇 개(약 3.5%)를 호박으로 — 치면 🍬 +1 (점수와 상관없음). 같은 곡이면 늘 같은 노트 */
+  /* 이벤트: 노트 몇 개(약 3.5%)를 특별 노트(할로윈 호박·크리스마스 선물)로 — 치면 재화 +1 (점수와 상관없음). 같은 곡이면 늘 같은 노트 */
   markPumpkins() {
     this.pumpkins = 0;
     this.candyPops = [];
     const ev = typeof myGrow !== 'undefined' && myGrow && myGrow.event;
     if (!ev || this.noLeadCut || this.customNotes || (this.practice && !this.hl)) return;
+    this.spTheme = ev.theme || 'hw';
+    this.spCur = ev.cur || '🍬';
     let k = 0;
     for (const n of this.notes) {
       if (n.d > 0) continue;
@@ -2464,6 +2790,7 @@ class Game {
       score: this.score(), acc: +acc.toFixed(2), maxCombo: this.maxCombo, counts: { ...this.counts },
       rank: rankOf(acc), fc: this.counts.miss === 0 && this.totalUnits > 0, incomplete,
     };
+    if (!incomplete && typeof skillAna === 'function') { try { result.ana = skillAna(this); } catch (e) { console.warn('실력 분석 오류', e); } }   // 실력 분석 요약
     if (!incomplete) {               // 고스트용 점수 흐름 (끝까지 채움)
       const g = this.curve.slice(0, 21);
       while (g.length < 21) g.push(result.score);

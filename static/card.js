@@ -233,6 +233,10 @@ function cardFrame(ctx, id) {
   } else if (id === 'frame_neon') {
     st = '#4de1ff';
     ctx.shadowColor = '#4de1ff'; ctx.shadowBlur = 30;
+  } else if (id === 'frame_dawn') {       // 해돋이 (시즌 3): 새벽 남색 → 분홍 노을 → 금빛 해
+    st = ctx.createLinearGradient(0, H, W, 0);
+    ['#3b2a7a', '#ff6f91', '#ff9a6b', '#ffd36b', '#fff3c4'].forEach((x, i) => st.addColorStop(i / 4, x));
+    ctx.shadowColor = '#ff9a6b'; ctx.shadowBlur = 22;
   } else if (id === 'frame_ice') {        // 얼음 (시즌 2): 하늘빛 + 서리
     st = ctx.createLinearGradient(0, 0, W, H);
     ['#bfeaff', '#ffffff', '#7fd0ff', '#e8f8ff', '#5ab4ff'].forEach((x, i) => st.addColorStop(i / 4, x));

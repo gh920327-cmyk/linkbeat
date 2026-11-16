@@ -61,6 +61,7 @@
         <button id="btnShop" class="tool hidden" type="button" title="상점 (♪로 꾸미기 사기)"><i>🛒</i><span>상점</span></button>
         <button id="btnAch" class="tool ach-btn" type="button" title="업적 · 칭호"><i>🏆</i><span>업적</span></button>
         <button id="btnWrap" class="tool hidden" type="button" title="올해 결산 — 올해 친 곡·최애 곡·최고 기록"><i>📊</i><span>결산</span></button>
+        <button id="btnSkill" class="tool hidden" type="button" title="실력 분석 — 줄별·타이밍·노트 종류별 정확도와 자주 놓친 구간"><i>🎯</i><span>실력</span></button>
         <button id="btnAvatar" class="tool av-btn" type="button" title="내 캐릭터"><canvas id="topAvatar" width="28" height="28"></canvas><span>내 캐릭터</span></button>
         <button id="btnTheme" class="tool" type="button" title="화면 테마 고르기" aria-haspopup="true" aria-expanded="false"><i>🎨</i><span>테마</span></button>
         <button id="btnSkin" class="tool" type="button" title="꾸미기 (레인 색·노트 모양·효과)"><i>✨</i><span>꾸미기</span></button>
@@ -276,6 +277,7 @@
 <!-- ======================= 플레이 ======================= -->
 <section id="screen-game" class="screen">
   <div class="game-bg" id="gameBg" aria-hidden="true"><div class="gb-img"></div><div class="gb-glow"></div></div>
+  <div class="beat-fx" id="beatFx" aria-hidden="true"><i class="bf-l1"></i><i class="bf-l2"></i><i class="bf-r2"></i><i class="bf-r1"></i><i class="bf-c"></i></div>
   <div class="stage">
     <div class="field-col"><canvas id="field"></canvas></div>
     <div class="info-col">
@@ -331,6 +333,7 @@
         <div id="rtSuggest" class="rt-suggest small"></div>
       </div>
       <div id="rBest" class="r-best center"></div>
+      <div id="rSkill" class="r-skill center hidden"></div>
       <div id="rXp" class="r-xp hidden"><span class="rx-gain"></span><span class="rx-lv"></span><span class="rx-bar"><i></i></span><span class="rx-next"></span><span class="rx-up"></span></div>
       <div id="rReward" class="r-reward hidden"></div>
       <div id="rGhost" class="r-ghost center hidden"></div>
@@ -678,16 +681,25 @@
   </div>
 </dialog>
 
+<dialog id="skillDlg" class="sk-dlg">
+  <div class="sk-head"><h3>🎯 실력 분석</h3>
+    <div class="seg sk-seg" id="skKeys"><button type="button" data-k="4">4KEY</button><button type="button" data-k="6">6KEY</button></div>
+    <div class="seg sk-seg" id="skRange"><button type="button" data-n="20">최근 20판</button><button type="button" data-n="50">50판</button><button type="button" data-n="150">전체</button></div>
+    <button type="button" id="skClose" class="ghost tm-x" aria-label="닫기">✕</button></div>
+  <div id="skBody" class="sk-body"></div>
+  <p class="muted small sk-foot">끝까지 친 판만 모아요 (연습·테스트 플레이는 빼고) · 최근 150판까지 보관</p>
+</dialog>
+
 <dialog id="eventDlg" class="ev-dlg">
-  <div class="ev-head"><h3>🎃 <span id="evTitle">할로윈 이벤트</span></h3><span class="ev-candy" title="사탕">🍬 <b id="evCandy">0</b></span>
+  <div class="ev-head"><h3><span id="evIcon">🎃</span> <span id="evTitle">할로윈 이벤트</span></h3><span class="ev-candy" id="evCurBox" title="사탕"><span id="evCur">🍬</span> <b id="evCandy">0</b></span>
     <button type="button" id="evClose" class="ghost tm-x" aria-label="닫기">✕</button></div>
   <p id="evLeft" class="ev-left"></p>
-  <p class="muted small ev-how">곡을 끝까지 칠 때마다 🍬를 받아요 (S 랭크·풀콤보면 더) · <b>친구와 멀티면 2배</b> · 가끔 나오는 <b>호박 노트</b>를 치면 하나에 +1 (한 판 최대 30)</p>
+  <p class="muted small ev-how" id="evHow"></p>
   <h4>📋 이벤트 미션 <small id="evMisSum" class="muted"></small></h4>
   <div id="evMis" class="ev-mis"></div>
   <h4>🛍 교환소 <small class="muted">이번 이벤트에만 얻을 수 있어요 · 눌러서 미리 보기</small></h4>
   <div id="evShop" class="ev-shop"></div>
-  <p class="muted small ev-tip">이벤트가 끝나면 남은 🍬는 1개당 2♪로 바꿔 드려요. 받은 꾸미기는 끝난 뒤에도 계속 쓸 수 있어요.</p>
+  <p class="muted small ev-tip" id="evTip"></p>
 </dialog>
 
 <dialog id="shopDlg" class="shop-dlg">
@@ -735,7 +747,7 @@
           <div class="opt-row" id="noteShape">
             <button data-v="bar">막대</button><button data-v="round">둥근 캡슐</button><button data-v="circle">원형</button><button data-v="hollow">속 빈 원</button><button data-v="diamond">마름모</button><button data-v="line">얇은 선</button>
             <button data-v="pearl">✦ 진주</button><button data-v="orb">✦ 글라스 오브</button><button data-v="brilliant">✦ 보석 컷</button><button data-v="bezel">✦ 메탈 버튼</button><button data-v="dotring">✦ 도트 링</button><button data-v="halo">✦ 헤일로 링</button><button data-v="tube">✦ 네온 튜브 링</button><button data-v="segring">✦ 세그먼트 링</button>
-            <button data-v="neon">네온 테두리</button><button data-v="star">별</button><button data-v="heart">하트</button><button data-v="gem">보석</button><button data-v="pumpkin">🎃 호박</button>
+            <button data-v="neon">네온 테두리</button><button data-v="star">별</button><button data-v="heart">하트</button><button data-v="gem">보석</button><button data-v="pumpkin">🎃 호박</button><button data-v="snowflake">❄️ 눈꽃</button>
           </div>
           <div class="set-row"><span>두께 <b id="noteHVal"></b></span><input id="noteH" type="range" min="8" max="26" step="1"></div>
         </section>
@@ -749,14 +761,14 @@
             <div class="opt-row" id="lineStyleOpt"><button data-v="auto">자동</button><button data-v="bar">막대</button><button data-v="ring">원형 받침</button><button data-v="thin">얇은 선</button></div></div>
           <div class="set-row"><span>판정선 색</span><div class="swatches line-sw" id="lineSw"></div></div>
           <div class="set-row"><span>기어 테두리</span>
-            <div class="opt-row" id="gearOpt"><button data-v="metal">금속</button><button data-v="clear">투명</button><button data-v="wood">나무</button><button data-v="neon">네온</button><button data-v="chrome">크롬</button><button data-v="gold">황금</button><button data-v="halloween">🎃 할로윈</button></div></div>
+            <div class="opt-row" id="gearOpt"><button data-v="metal">금속</button><button data-v="clear">투명</button><button data-v="wood">나무</button><button data-v="neon">네온</button><button data-v="chrome">크롬</button><button data-v="gold">황금</button><button data-v="halloween">🎃 할로윈</button><button data-v="xmas">🎄 크리스마스</button></div></div>
           <div class="set-row"><span>판정선 높이 <b id="judgeYVal"></b></span><input id="judgeYIn" type="range" min="70" max="240" step="5"></div>
         </section>
         <section>
           <h4>효과 · 소리</h4>
           <div class="opt-row" id="effectOpt">
             <button data-v="flash">플래시</button><button data-v="ring">링</button><button data-v="spark">불꽃</button>
-            <button data-v="petal">벚꽃잎</button><button data-v="stardust">별가루</button><button data-v="bolt">번개</button><button data-v="fire">타오르는 불꽃</button><button data-v="snow">눈송이</button><button data-v="bat">🦇 박쥐</button><button data-v="leaf">🍁 단풍잎</button><button data-v="off">끄기</button>
+            <button data-v="petal">벚꽃잎</button><button data-v="stardust">별가루</button><button data-v="bolt">번개</button><button data-v="fire">타오르는 불꽃</button><button data-v="snow">눈송이</button><button data-v="bat">🦇 박쥐</button><button data-v="leaf">🍁 단풍잎</button><button data-v="ornament">🎄 트리 장식볼</button><button data-v="off">끄기</button>
           </div>
           <div class="set-row"><span>타격감 <small class="muted">폭발·파편·반동 세기</small></span>
             <div class="opt-row" id="punchOpt"><button data-v="low">약하게</button><button data-v="mid">보통</button><button data-v="high">강하게</button></div></div>
@@ -776,12 +788,16 @@
           <div class="set-row"><label><input type="checkbox" id="optApplause"> 풀콤보 박수·연출 소리 <small class="muted">ALL PERFECT면 더 크게</small></label>
             <div class="hit-row"><button id="applauseTest" class="small-btn" type="button">▶ 풀콤보</button><button id="applauseTestAp" class="small-btn" type="button">▶ 올퍼펙트</button></div></div>
           <div class="set-row col"><span>풀콤보 연출 <small class="muted">풀콤보 때 화면에 나오는 것 · 고르면 미리보기에서 보여 줘요</small></span>
-            <div class="opt-row" id="fcFxOpt"><button data-v="basic">기본</button><button data-v="fireworks">🎆 불꽃놀이</button><button data-v="stars">🌟 별가루 폭죽</button><button data-v="hero">🙌 내 캐릭터 승리</button><button data-v="bats">🦇 박쥐 떼</button></div></div>
+            <div class="opt-row" id="fcFxOpt"><button data-v="basic">기본</button><button data-v="fireworks">🎆 불꽃놀이</button><button data-v="stars">🌟 별가루 폭죽</button><button data-v="hero">🙌 내 캐릭터 승리</button><button data-v="bats">🦇 박쥐 떼</button><button data-v="aurora">🌌 오로라</button></div></div>
         </section>
         <section>
           <h4>표시</h4>
           <div class="set-row"><span>배경 연출 <small class="muted">곡 썸네일이 박자에 맞춰 숨 쉬듯</small></span>
             <div class="opt-row" id="bgFxOpt"><button data-v="off">끄기</button><button data-v="soft">은은하게</button><button data-v="strong">강하게</button></div></div>
+          <div class="set-row" title="깜빡임이 불편하면 끄기를 고르세요"><span>비트 조명 <small class="muted">센 박자에 기어 양옆이 번쩍</small></span>
+            <div class="opt-row" id="beatFxOpt"><button data-v="off">끄기</button><button data-v="soft">은은하게</button><button data-v="strong">강하게</button></div></div>
+          <div class="set-row" title="노트와 판정선이 같이 움직여서 판정에는 영향이 없어요"><span>비트 울림 <small class="muted">센 박자에 화면이 살짝 울림</small></span>
+            <div class="opt-row" id="beatBumpOpt"><button data-v="off">끄기</button><button data-v="soft">살짝</button><button data-v="strong">크게</button></div></div>
           <div class="set-row"><span>콤보 숫자</span>
             <div class="opt-row" id="comboOpt"><button data-v="normal">기본</button><button data-v="gold">금빛</button><button data-v="neon">네온</button><button data-v="rainbow">무지개</button></div></div>
           <div class="set-row"><span>판정 글자</span>
@@ -926,5 +942,6 @@
 <script src="/static/season.js"></script>
 <script src="/static/call.js"></script>
 <script src="/static/wrap.js"></script>
+<script src="/static/skill.js"></script>
 </body>
 </html>
