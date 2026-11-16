@@ -103,7 +103,7 @@ function renderGrowAll() {
   if (typeof renderSeasonDlg === 'function' && $('#seasonDlg').open) renderSeasonDlg();
   if (typeof renderMyTitle === 'function') renderMyTitle();       // 단어가 열리거나 닫히면 칭호도 다시
   if (typeof renderTitleMaker === 'function' && $('#achDlg').open) renderTitleMaker();
-  for (const id of ['#btnCall', '#btnWrap']) { const b = $(id); if (b) b.classList.toggle('hidden', !myGrow); }
+  for (const id of ['#btnCall', '#btnWrap', '#btnSkill']) { const b = $(id); if (b) b.classList.toggle('hidden', !myGrow); }
   if ($('#shopDlg').open) renderShop();
   if (ntOpen()) renderNotices();
   if (typeof markLocks === 'function' && $('#skinDlg').open) markLocks();

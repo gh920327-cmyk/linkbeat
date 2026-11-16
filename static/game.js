@@ -1982,7 +1982,7 @@ class Game {
     const a = Math.abs(dt);
     const kind = a <= JUDGE.perfect ? 'perfect' : a <= JUDGE.great ? 'great' : a <= JUDGE.good ? 'good' : 'miss';
     n.head = kind;
-    if (kind !== 'miss') { this.offsets.push(dt); (this.errHist || (this.errHist = [])).push({ dt, kind, at: performance.now() }); if (this.errHist.length > 40) this.errHist.shift(); }
+    if (kind !== 'miss') { n.dt = dt; this.offsets.push(dt); (this.errHist || (this.errHist = [])).push({ dt, kind, at: performance.now() }); if (this.errHist.length > 40) this.errHist.shift(); }
     this.judge(kind, lane, dt, false, n.t);
     if (n.pk && kind !== 'miss') { this.pumpkins = (this.pumpkins || 0) + 1; (this.candyPops ||= []).push({ lane, at: performance.now() }); }   // 소리 없이 재화 +1만 (🍬·🎁)
     if (n.a && kind !== 'miss') { fxAccent(this.fx, lane, kind); sfx.accent(); }   // 드럼 강타: 크게 터지고 묵직한 소리
@@ -2583,7 +2583,7 @@ class Game {
     this.phase = 'restarting';
     yt.pause();
     this.clock.stop();
-    for (const n of this.notes) { n.head = null; n.tail = null; }
+    for (const n of this.notes) { n.head = null; n.tail = null; n.dt = undefined; }
     this.laneHead.fill(0);
     this.activeHold.fill(null);
     this.drawFrom = 0;
@@ -2681,6 +2681,7 @@ class Game {
       score: this.score(), acc: +acc.toFixed(2), maxCombo: this.maxCombo, counts: { ...this.counts },
       rank: rankOf(acc), fc: this.counts.miss === 0 && this.totalUnits > 0, incomplete,
     };
+    if (!incomplete && typeof skillAna === 'function') { try { result.ana = skillAna(this); } catch (e) { console.warn('실력 분석 오류', e); } }   // 실력 분석 요약
     if (!incomplete) {               // 고스트용 점수 흐름 (끝까지 채움)
       const g = this.curve.slice(0, 21);
       while (g.length < 21) g.push(result.score);

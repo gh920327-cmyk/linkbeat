@@ -2031,3 +2031,49 @@ html[data-tone="light"] .ev-deco span { opacity: .18; }
   linear-gradient(180deg, #221c55 0%, #5b3a8a 38%, #ff6f91 72%, #ffb36b 100%); }
 .sw-frame_dawn { border-image: linear-gradient(135deg, #3b2a7a, #ff6f91, #ffd36b) 1; box-shadow: 0 0 8px #ff9a6b; }
 .sp-frame.frame_dawn { border-image: linear-gradient(135deg, #3b2a7a, #ff6f91, #ff9a6b, #ffd36b, #fff3c4) 1; box-shadow: 0 0 16px #ff9a6b; }
+
+/* ---- 🎯 실력 분석 ---- */
+.r-skill { margin: 4px auto 0; font-size: 13px; color: var(--text); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 6px; max-width: 760px; }
+.r-skill .rs-h { font-weight: 800; color: var(--cyan); }
+.r-skill b { color: var(--gold); }
+.r-skill .small-btn { font-size: 12px; padding: 3px 9px; }
+.sk-dlg { width: min(720px, calc(100vw - 24px)); max-height: calc(100vh - 24px); padding: 14px 18px; overflow-y: auto; }
+.sk-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sk-head h3 { margin: 0 6px 0 0; }
+.sk-head .tm-x { margin-left: auto; }
+.sk-seg button { padding: 5px 12px; font-size: 12px; }
+.sk-body h4 { margin: 14px 0 6px; font-size: 13px; }
+.sk-body h4 small { font-weight: 500; font-size: 11px; margin-left: 4px; }
+.sk-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+.sk-tiles > div { border: 1px solid var(--line); background: color-mix(in srgb, var(--panel2, #141c34) 70%, transparent); padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.sk-tiles small { color: var(--muted); font-size: 11px; }
+.sk-tiles b { font-size: 20px; font-family: var(--head); letter-spacing: .5px; }
+.sk-tiles em { font-style: normal; font-size: 11px; color: var(--muted); }
+.sk-tiles em.up, .sk-graph + p .up { color: var(--green); }
+.sk-tiles em.down, .sk-graph + p .down { color: var(--red); }
+.sk-tip { margin: 10px 0 0; padding: 8px 10px; border-left: 3px solid var(--cyan); background: color-mix(in srgb, var(--cyan) 10%, transparent); font-size: 13px; }
+.sk-bars { display: flex; flex-direction: column; gap: 5px; }
+.sk-bar { display: grid; grid-template-columns: 92px 1fr 58px 64px; align-items: center; gap: 8px; font-size: 12px; }
+.sk-bar .sk-l { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sk-bar .sk-track { height: 10px; background: color-mix(in srgb, var(--muted) 18%, transparent); position: relative; overflow: hidden; }
+.sk-bar .sk-track i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, var(--blue), var(--cyan)); }
+.sk-bar.weak .sk-track i { background: linear-gradient(90deg, var(--red), var(--gold)); }
+.sk-bar.weak .sk-l, .sk-bar.weak b { color: var(--red); }
+.sk-bar b { text-align: right; font-family: var(--head); }
+.sk-bar small { color: var(--muted); }
+.sk-graph { width: 100%; height: auto; display: block; }
+.sk-graph .skg-n { fill: color-mix(in srgb, var(--muted) 28%, transparent); }
+.sk-graph .skg-l { fill: none; stroke: var(--cyan); stroke-width: 2.5; stroke-linejoin: round; }
+.sk-graph .skg-d { fill: var(--cyan); }
+.sk-graph text { font-size: 10px; text-anchor: middle; fill: var(--muted); }
+.sk-graph .skg-v { fill: var(--text); font-weight: 700; }
+.sk-weak { display: flex; flex-direction: column; gap: 5px; }
+.skw { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid var(--line); }
+.skw-t { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skw-t small { display: block; font-weight: 500; font-size: 11px; color: var(--muted); }
+.sk-foot { margin: 12px 0 0; }
+@media (max-width: 560px) {
+  .sk-tiles { grid-template-columns: 1fr 1fr; }
+  .sk-bar { grid-template-columns: 70px 1fr 52px; }
+  .sk-bar small { display: none; }
+}

@@ -1116,6 +1116,10 @@ def on_play(acct, pr, nick, sid, diff, keys, data):
             _wrap_play(p, info)
         except Exception as e:
             log("시즌·결산 기록 실패:", e)
+        try:
+            _ana_add(p, info, data)
+        except Exception as e:
+            log("실력 분석 기록 실패:", e)
         p["coins"] += coins
         p["earned"] = p.get("earned", 0) + coins
         p["lastPlay"] = time.time()
@@ -1459,6 +1463,92 @@ def season_public(p):
         tiers.append({"tier": t, "kind": kind, "val": val})
     return {"id": sn["id"], "name": sn["name"], "theme": sn["theme"], "endsIn": int(sn["end"] - _evnow()), "xp": int(e.get("xp", 0)),
             "tier": int(e.get("tier", 0)), "step": SEASON_STEP, "tiers": tiers, "max": SEASON_TIERS, "overCoin": SEASON_OVER_COIN}
+
+
+# ---- 실력 분석: 끝까지 한 판마다 화면이 계산한 요약(줄별·타이밍·노트 종류별·약한 구간)을 계정에 모음
+# 자세한 건 최근 150판만, 주마다 합계(성장 그래프용)는 26주까지
+ANA_MAX = 150
+ANA_WEEKS = 26
+ANA_TYPES = ("tap", "stream", "chord", "jack", "hold")
+
+
+def _ana_clean(a, keys):
+    """화면이 보낸 분석 요약 검사 — 이상하면 None"""
+    if not isinstance(a, dict):
+        return None
+
+    def num(v, lo, hi, nd=1):
+        v = float(v)
+        if not math.isfinite(v):
+            raise ValueError
+        return round(max(lo, min(hi, v)), nd)
+    lanes = a.get("lanes")
+    if not isinstance(lanes, list) or len(lanes) != keys:
+        return None
+    out = {"lanes": [[int(num(x[0], 0, 20000, 0)), num(x[1], 0, 20000, 2)] for x in lanes]}
+    for x in out["lanes"]:
+        x[1] = min(x[1], x[0])
+    dt = a.get("dt")
+    if isinstance(dt, list) and len(dt) == 3:
+        out["dt"] = [num(dt[0], -200, 200), num(dt[1], 0, 300), int(num(dt[2], 0, 20000, 0))]
+    ty = a.get("ty") if isinstance(a.get("ty"), dict) else {}
+    out["ty"] = {}
+    for k in ANA_TYPES:
+        v = ty.get(k)
+        if isinstance(v, list) and len(v) == 2:
+            n = int(num(v[0], 0, 20000, 0))
+            out["ty"][k] = [n, min(n, num(v[1], 0, 20000, 2))]
+    weak = a.get("weak") if isinstance(a.get("weak"), list) else []
+    out["weak"] = []
+    for w in weak[:3]:
+        if isinstance(w, list) and len(w) == 4:
+            s0, s1 = num(w[0], 0, 3600), num(w[1], 0, 3600)
+            if s1 > s0:
+                out["weak"].append([s0, s1, int(num(w[2], 0, 5000, 0)), int(num(w[3], 0, 5000, 0))])
+    return out
+
+
+def _ana_add(p, info, data):
+    keys = 6 if info.get("keys") == 6 else 4
+    a = _ana_clean(data.get("ana"), keys)
+    if not a:
+        return
+    song = load_song(info["sid"]) or {}
+    e = {"at": int(time.time()), "sid": info["sid"], "title": str(song.get("title") or info.get("title") or info["sid"])[:80],
+         "diff": info["diff"], "keys": keys, "ai": bool(info.get("ai")), "hl": bool(info.get("hl")), "acc": round(float(info.get("acc") or 0), 2),
+         "fc": bool(info.get("fc")), **a}
+    L = p.setdefault("ana", [])
+    L.append(e)
+    if len(L) > ANA_MAX:
+        del L[: len(L) - ANA_MAX]
+    # 주간 합계 (KST 기준 ISO 주)
+    import datetime
+    d = datetime.datetime.utcfromtimestamp(time.time() + KST).date()
+    y, w, _ = d.isocalendar()
+    wk = f"{y}-W{w:02d}"
+    W = p.setdefault("anaW", {})
+    cur = W.setdefault(wk, {"n": 0, "acc": 0.0, "dtn": 0, "dt": 0.0, "lanes": {}, "ty": {}})
+    cur["n"] += 1
+    cur["acc"] = round(cur["acc"] + e["acc"], 2)
+    if a.get("dt") and a["dt"][2] > 0:
+        cur["dtn"] += 1
+        cur["dt"] = round(cur["dt"] + a["dt"][0], 1)
+    lk = cur["lanes"].setdefault(str(keys), [[0, 0.0] for _ in range(keys)])
+    for i, (n, sc) in enumerate(a["lanes"]):
+        lk[i][0] += n
+        lk[i][1] = round(lk[i][1] + sc, 2)
+    for k, (n, sc) in a["ty"].items():
+        t = cur["ty"].setdefault(k, [0, 0.0])
+        t[0] += n
+        t[1] = round(t[1] + sc, 2)
+    for old in sorted(W)[:-ANA_WEEKS]:
+        del W[old]
+
+
+def ana_public(acct, pr):
+    with FILE_LOCK:
+        p = prog_of(acct, pr)
+        return {"plays": list(p.get("ana", [])), "weeks": dict(p.get("anaW", {})), "now": int(time.time())}
 
 
 # ---- 올해 결산: 끝까지 한 판마다 그해 기록을 모음 (판수·시간·노트·콤보·곡·난이도·시간대·날짜·랭크·같이 한 친구)
@@ -4094,6 +4184,9 @@ async def api(method, path, headers, body):
     if parts == ["me"] and method == "POST":
         acct, pr = acct_need(headers)
         return me_summary(acct, pr, json_body(body) if body else {})
+    if parts == ["skill"] and method == "GET":
+        acct, pr = acct_need(headers)
+        return await loop.run_in_executor(None, ana_public, acct, pr)
     if parts == ["me", "reroll"] and method == "POST":
         acct, pr = acct_need(headers)
         return mis_reroll(acct, pr, json_body(body))
