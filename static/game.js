@@ -3022,10 +3022,10 @@ function drawLineDeco(ctx, L, judgeY, now, style, phase, pressed = null) {
     if (phase === 'pre') {
       const bh = ring ? Math.round(receptorR(L) * 2 + 20) : 34;
       const sp = spriteOf(`mw|${W}|${bh}`, W, bh, paintMilkyway);
-      const off = (now / 70) % W;                      // 천천히 흐름
-      ctx.save(); ctx.beginPath(); ctx.rect(x0, judgeY - bh / 2, fieldW, bh); ctx.clip();
-      ctx.drawImage(sp.c, x0 - off, judgeY - bh / 2, W, bh); ctx.drawImage(sp.c, x0 - off + W, judgeY - bh / 2, W, bh);
-      ctx.restore();
+      const off = (now / 70) % W, k = sp.c.width / W;     // 천천히 흐름 (잘라 그리기: 자르기 영역 없이 두 조각)
+      const y = judgeY - bh / 2, a = W - off;
+      if (a > 0.5) ctx.drawImage(sp.c, off * k, 0, a * k, sp.c.height, x0, y, a, bh);
+      if (off > 0.5) ctx.drawImage(sp.c, 0, 0, off * k, sp.c.height, x0 + a, y, off, bh);
     } else {
       ctx.save(); ctx.globalCompositeOperation = 'lighter';
       for (let i = 0; i < 8; i++) {                    // 반짝이는 별 몇 개
@@ -3131,7 +3131,7 @@ function fxShopParts(fx, lane, e, now) {
       const a = -Math.PI / 2 + (i - 1) * 0.5 + (R() - 0.5) * 0.35, sp = 300 + R() * 160;     // 위쪽으로 부채꼴
       fx.parts.push({ lane, at: now, kind: 'meteor', vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, gr: 120, life: 520 + R() * 180, s: 0.9 + R() * 0.5, dx: (R() - 0.5) * 0.3 });
     }
-    for (let i = 0; i < 4; i++) fx.parts.push({ lane, at: now, kind: 'stardust', vx: (R() - 0.5) * 160, vy: -60 - R() * 160, gr: 120, s: 2 + R() * 2, ph: R() * 6, life: 600, c: R() < 0.5 ? '#ffffff' : '#d4c4ff' });
+    for (let i = 0; i < 2; i++) fx.parts.push({ lane, at: now, kind: 'stardust', vx: (R() - 0.5) * 160, vy: -60 - R() * 160, gr: 120, s: 2 + R() * 2, ph: R() * 6, life: 600, c: R() < 0.5 ? '#ffffff' : '#d4c4ff' });
   } else if (e === 'notes') {
     const G = ['♪', '♫', '♬', '♩'];
     for (let i = 0; i < 3; i++) {

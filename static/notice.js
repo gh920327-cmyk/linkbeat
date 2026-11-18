@@ -12,8 +12,10 @@ const NOTICE_GO = {
   beat: () => noticeSkinTo('#beatFxOpt'),
   note: () => noticeSkinTo('#noteShape'),
   req: () => { const b = $('#btnReq'); if (b) b.click(); },
+  ach: () => { const b = $('#btnAch'); if (b) b.click(); },
+  shop: () => openShop('note_saturn'),
 };
-const NOTICE_NEED = { event: 'openEvent', skill: 'openSkill', season: 'openSeason', beat: 'openSkin', note: 'openSkin' };
+const NOTICE_NEED = { event: 'openEvent', skill: 'openSkill', season: 'openSeason', beat: 'openSkin', note: 'openSkin', shop: 'openShop', ach: 'renderAchDlg' };
 function noticeSkinTo(sel) {
   openSkin();
   setTimeout(() => {
