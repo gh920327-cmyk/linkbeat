@@ -24,6 +24,18 @@ const TITLE_WORDS = [
   { id: 'f_burning', t: '불타는', how: '업적 「불타는 손가락」', ach: 'fever5' },
   { id: 'f_thunder', t: '천둥 같은', how: '전설 업적 「천둥의 손」', ach: 'L_thunder', legend: true },
   { id: 'f_true', t: '진정한', how: '전설 업적 「링크비트 마스터」', ach: 'L_master', legend: true },
+  { id: 'f_doomed', t: '비운의', how: '숨은 업적 (???)', ach: 'lastmiss' },
+  { id: 'f_slowstart', t: '시동 늦은', how: '숨은 업적 (???)', ach: 'firstmiss' },
+  { id: 'f_almost', t: '한 끗 모자란', how: '숨은 업적 (???)', ach: 'c999' },
+  { id: 'f_zen', t: '명상 중인', how: '숨은 업적 (???)', ach: 'zen' },
+  { id: 'f_lucky7', t: '행운의', how: '숨은 업적 (???)', ach: 'lucky7' },
+  { id: 'f_hasty', t: '성질 급한', how: '업적 「성질 급한 손가락」', ach: 'hasty' },
+  { id: 'f_late', t: '한 박자 늦은', how: '업적 「한 박자 늦게」', ach: 'lazy' },
+  { id: 'f_fated', t: '숙명의', how: '업적 「숙명의 라이벌」', ach: 'rival' },
+  { id: 'f_popular', t: '인기 만점', how: '업적 「인기 DJ」', ach: 'popdj' },
+  { id: 'f_hundred', t: '백전백승의', how: '전설 업적 「백전백승」', ach: 'L_duel100', legend: true },
+  { id: 'f_moon', t: '달빛 아래', how: '전설 업적 「달빛 아래의 신」', ach: 'L_moon', legend: true },
+  { id: 'f_flawless', t: '흠잡을 데 없는', how: '전설 업적 「흠잡을 데 없는」', ach: 'L_flawless', legend: true },
   { id: 'f_spooky', t: '으스스한', how: '할로윈 이벤트 때 한 판', srv: true, ev: 'hw26' },
   { id: 'f_autumn', t: '가을의', how: '시즌 1 패스 3단계', srv: true },
   { id: 'f_leafy', t: '낙엽 밟는', how: '시즌 1 패스 13단계', srv: true },
@@ -49,6 +61,16 @@ const TITLE_WORDS = [
   { id: 'b_hunter', t: '유령 사냥꾼', how: '업적 「고스트 버스터」', ach: 'ghostwin' },
   { id: 'b_godhand', t: '신의 손', how: '전설 업적 「신의 손」', ach: 'L_godhand', legend: true },
   { id: 'b_champion', t: '챔피언', how: '전설 업적 「무패의 챔피언」', ach: 'L_champ', legend: true },
+  { id: 'b_cinder', t: '신데렐라', how: '숨은 업적 (???)', ach: 'cinder' },
+  { id: 'b_turtle', t: '거북이', how: '업적 「느긋하게」', ach: 'turtle' },
+  { id: 'b_sight', t: '초견 천재', how: '업적 「초견 천재」', ach: 'sight' },
+  { id: 'b_punch', t: '동네북', how: '업적 「동네북」', ach: 'punch' },
+  { id: 'b_avenger', t: '복수귀', how: '업적 「복수귀」', ach: 'avenger' },
+  { id: 'b_rival', t: '라이벌', how: '업적 「숙명의 라이벌」 · 상대 이름이 붙어요', ach: 'rival', rival: true },
+  { id: 'b_dj', t: 'DJ', how: '업적 「DJ」', ach: 'dj' },
+  { id: 'b_kibitz', t: '훈수꾼', how: '업적 「훈수꾼」', ach: 'kibitz' },
+  { id: 'b_allround', t: '만능 리듬꾼', how: '전설 업적 「만능 리듬꾼」', ach: 'L_allround', legend: true },
+  { id: 'b_legenddj', t: '전설의 DJ', how: '전설 업적 「전설의 DJ」', ach: 'L_dj', legend: true },
   { id: 'b_pumpkin', t: '호박 대왕', how: '할로윈 이벤트 미션 모두', srv: true, ev: 'hw26' },
   { id: 'b_maple', t: '단풍잎', how: '시즌 1 패스 8단계', srv: true },
   { id: 'b_fairy', t: '가을 요정', how: '시즌 1 패스 18단계', srv: true },
@@ -71,7 +93,14 @@ function wordOpen(w) {
 function titleComboText(c = store.get('titleCombo', null)) {
   if (!c || !WORD_BY[c.f] || !WORD_BY[c.b]) return '';
   if (myGrow && (!wordOpen(WORD_BY[c.f]) || !wordOpen(WORD_BY[c.b]))) return '';
-  return `${WORD_BY[c.f].t} ${WORD_BY[c.b].t}`;
+  return `${WORD_BY[c.f].t} ${wordText(WORD_BY[c.b])}`;
+}
+/* 라이벌: 지금 가장 많이 주고받은 사람 이름을 붙임 → '숙명의 라이벌(철수)' */
+function wordText(w) {
+  if (!w.rival) return w.t;
+  const nk = (typeof myGrow !== 'undefined' && myGrow && myGrow.achSrv && myGrow.achSrv.rival) || store.get('rivalNick', '');
+  if (nk) store.set('rivalNick', nk);
+  return nk ? `${w.t}(${nk})` : w.t;
 }
 function titleHasLegendWord(t) {
   return LEGEND_WORDS.some((w) => t.startsWith(w + ' ') || t.endsWith(' ' + w));

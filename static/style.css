@@ -1735,7 +1735,7 @@ html[data-tone="light"] .nm.nc_gold { color: #b07800; text-shadow: none; } html[
 .sw-combo_neon { color: #4de1ff; font-family: var(--head); font-style: italic; text-shadow: 0 0 10px #4de1ff; }
 .sw-combo_rainbow { font-family: var(--head); font-style: italic; background: linear-gradient(90deg, #ff4fd8, #ffcf4d, #4dffc3, #4da6ff) #0a0e1c; -webkit-background-clip: text; background-clip: text; color: transparent; }
 .sw-nc_sky { color: #7fd6ff; } .sw-nc_mint { color: #5ff0c4; } .sw-nc_pink { color: #ff8fc8; } .sw-nc_gold { color: #ffd35c; } .sw-nc_purple { color: #c49bff; } .sw-nc_lime { color: #b6f25a; }
-.sw-nc_rainbow { background: linear-gradient(90deg, #ff4fd8, #ffcf4d, #4dffc3, #4da6ff) #0a0e1c; -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sw-nc_rainbow i { background: linear-gradient(90deg, #ff4fd8, #ffcf4d, #4dffc3, #4da6ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .si-sw[class*="sw-card_"] { border-color: transparent; }
 .sw-card_sunset { background: linear-gradient(160deg, #3b1a46, #7a2e4f 45%, #e0703e); } .sw-card_ocean { background: linear-gradient(170deg, #041a2c, #0b4d6e 55%, #19a3b3); }
 .sw-card_sakura { background: linear-gradient(160deg, #3a1c33, #7c3a63 60%, #f3a6c8); } .sw-card_neon { background: linear-gradient(180deg, #0a0420, #4a0f5e); box-shadow: inset 0 0 0 1px #ff4fd8; }
@@ -1811,7 +1811,7 @@ html[data-tone="light"] .ev-deco span { opacity: .18; }
 .si-sw.sw-line_ghost { background: #0a0e1c linear-gradient(#b8ffe0, #b8ffe0) center / 80% 5px no-repeat; box-shadow: inset 0 0 14px rgba(184, 255, 224, .35); }
 .si-sw.sw-gear_hw { background: #0a0e1c; }
 .si-sw.sw-gear_hw::before, .si-sw.sw-gear_hw::after { content: ''; width: 7px; height: 34px; margin: 0 10px; background: linear-gradient(90deg, #26093a, #ff7a1a, #ffc36b, #26093a); }
-.sw-nc_hw { background: linear-gradient(90deg, #ffb347, #ff7a1a, #c58bff) #0a0e1c; -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sw-nc_hw i { background: linear-gradient(90deg, #ffb347, #ff7a1a, #c58bff); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .nm.nc_hw { background: linear-gradient(90deg, #ffb347, #ff7a1a, #c58bff, #ffb347); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
   animation: ncFlow 6s linear infinite; }
 @keyframes ncFlow { to { background-position: 300% 0; } }
@@ -1963,9 +1963,9 @@ html[data-tone="light"] .ev-deco span { opacity: .18; }
 .wrap-nav .ghost { color: #fff; }
 
 /* 시즌 꾸미기 */
-.sw-nc_autumn { background: linear-gradient(90deg, #ffc93d, #ff8a1e, #e2451b) #0a0e1c; -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sw-nc_autumn i { background: linear-gradient(90deg, #ffc93d, #ff8a1e, #e2451b); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .nm.nc_autumn { background: linear-gradient(90deg, #ffc93d, #ff8a1e, #e2451b, #ffc93d); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: ncFlow 7s linear infinite; }
-.sw-nc_ice { background: linear-gradient(90deg, #e8f8ff, #7fd0ff, #5ab4ff) #0a0e1c; -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sw-nc_ice i { background: linear-gradient(90deg, #e8f8ff, #7fd0ff, #5ab4ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .nm.nc_ice { background: linear-gradient(90deg, #e8f8ff, #7fd0ff, #ffffff, #5ab4ff, #e8f8ff); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: ncFlow 7s linear infinite; }
 .si-sw[class*="sw-card_autumn"], .si-sw[class*="sw-card_snow"] { border-color: transparent; }
 .sw-card_autumn { background: radial-gradient(circle at 25% 30%, #ffc93d 0 4px, transparent 5px), radial-gradient(circle at 70% 60%, #e2451b 0 4px, transparent 5px), linear-gradient(170deg, #3a1d0a, #8a3b12 55%, #e2451b); }
@@ -2010,7 +2010,7 @@ html[data-tone="light"] .ev-deco span { opacity: .18; }
 .si-sw.sw-line_lights { background: #0a0e1c linear-gradient(#fff1c9, #fff1c9) center / 80% 4px no-repeat; box-shadow: inset 0 0 12px rgba(255, 241, 201, .35); }
 .si-sw.sw-line_lights::after { content: '• • •'; color: #ff3b4f; font-size: 14px; letter-spacing: 2px; text-shadow: 6px 0 #ffcf4d, 12px 0 #2fd47a; margin-top: 16px; }
 .si-sw.sw-gear_xmas { background: #0a0e1c; }
-.sw-nc_xmas { background: linear-gradient(90deg, #ff4d5e, #ffffff, #3ddc84) #0a0e1c; -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sw-nc_xmas i { background: linear-gradient(90deg, #ff4d5e, #ffffff, #3ddc84); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .nm.nc_xmas { background: linear-gradient(90deg, #ff4d5e, #ffd36b, #ffffff, #3ddc84, #ff4d5e); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
   animation: ncFlow 6s linear infinite; }
 .si-sw[class*="sw-card_xmas"], .si-sw[class*="sw-card_sunrise"] { border-color: transparent; }
@@ -2022,7 +2022,7 @@ html[data-tone="light"] .ev-deco span { opacity: .18; }
   radial-gradient(2px 2px at 15% 25%, #fff, transparent), radial-gradient(2px 2px at 35% 12%, #fff, transparent), radial-gradient(2px 2px at 50% 40%, #fff, transparent), radial-gradient(2px 2px at 25% 62%, #fff, transparent),
   linear-gradient(180deg, #0b1630 0%, #142a52 65%, #dbe9ff 100%); }
 /* 🌅 시즌 3 · 새해 */
-.sw-nc_dawn { background: linear-gradient(90deg, #8a6bff, #ff6f91, #ffd36b) #0a0e1c; -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sw-nc_dawn i { background: linear-gradient(90deg, #8a6bff, #ff6f91, #ffd36b); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .nm.nc_dawn { background: linear-gradient(90deg, #8a6bff, #ff6f91, #ff9a6b, #ffd36b, #8a6bff); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
   animation: ncFlow 7s linear infinite; }
 .sw-card_sunrise { background: radial-gradient(circle at 50% 78%, #fff3c4 0 6px, #ffd36b88 7px, transparent 14px), linear-gradient(180deg, #2a2366, #ff6f91 62%, #ffb36b); }
@@ -2137,3 +2137,59 @@ html[data-tone="light"] .ev-deco span { opacity: .18; }
   .nw-txt { flex: 1 1 calc(100% - 40px); }
   .nw-go { margin-left: 38px; }
 }
+
+/* ---- 🪐 별밤 · 💿 레코드 · 💧 유리 세트 (상점 꾸미기) ---- */
+.si-name em.set { background: linear-gradient(90deg, #3b3f8f, #6a5acd); }
+/* 상점 견본 */
+.sw-note_saturn, .sw-fc_meteor, .sw-fx_meteor { background: radial-gradient(ellipse at 50% 60%, rgba(140, 120, 255, .35), transparent 70%), #0a0c22; }
+.sw-note_vinyl, .sw-fc_goldrec { background: radial-gradient(circle at 50% 50%, rgba(255, 122, 217, .25), transparent 65%), #0e0a18; }
+.sw-note_crystal { color: #bff6ff; font-size: 30px; font-weight: 300; text-shadow: 0 0 6px #7fe8ff, 0 0 14px #2fe0a8; background: radial-gradient(circle, rgba(127, 232, 255, .18), transparent 60%), #08141a; }
+.sw-fx_notes { color: #ff9fe0; text-shadow: 0 0 8px #ff7ad9; font-size: 26px; }
+.sw-fx_ripple { color: #c9f7ff; text-shadow: 0 0 8px #7fe8ff; font-size: 28px; background: radial-gradient(ellipse 60% 25% at 50% 62%, transparent 55%, rgba(201, 247, 255, .55) 58%, transparent 63%), #08141a; }
+.si-sw.sw-line_milkyway { background: #0a0c22 linear-gradient(90deg, transparent, #b9a6ff 30%, #ffffff 50%, #8fd3ff 70%, transparent) center / 86% 7px no-repeat; box-shadow: inset 0 0 14px rgba(185, 166, 255, .4); }
+.si-sw.sw-line_eq { background: #0e0a18 repeating-linear-gradient(90deg, #5ff0c4 0 4px, transparent 4px 7px) center 62% / 80% 12px no-repeat; }
+.si-sw.sw-line_eq::after { content: ''; width: 80%; height: 2px; background: #ff7ad9; box-shadow: 0 0 8px #ff7ad9; position: relative; top: 9px; }
+.si-sw.sw-line_glass { background: #08141a linear-gradient(rgba(255, 255, 255, .7), rgba(205, 240, 255, .25)) center / 80% 9px no-repeat; box-shadow: inset 0 0 12px rgba(201, 247, 255, .3); }
+.sw-gear_night { --g: linear-gradient(90deg, #060a24, #2b3c94, #060a24); color: #fff; font-size: 14px; } .sw-gear_night::before, .sw-gear_night::after { box-shadow: 0 0 8px rgba(122, 140, 255, .6); }
+.sw-gear_turntable { --g: linear-gradient(90deg, #5a3418 0 15%, #a9b0bc 30%, #eef1f6 50%, #a9b0bc 70%, #33373f); }
+.sw-gear_frost { --g: linear-gradient(90deg, rgba(225, 248, 255, .2), rgba(255, 255, 255, .55), rgba(225, 248, 255, .2)); background: #08141a; } .sw-gear_frost::before, .sw-gear_frost::after { box-shadow: 0 0 10px rgba(201, 247, 255, .5); border: 1px solid rgba(255, 255, 255, .6); }
+.sw-fc_goldrec { text-shadow: 0 0 12px #ffc83d; }
+/* 판정선 색 단추 (꾸미기) */
+.dot-sw.mw { background: radial-gradient(circle at 35% 40%, #fff 0 1.5px, transparent 2px), radial-gradient(circle at 65% 62%, #fff 0 1px, transparent 1.5px), linear-gradient(135deg, #2b2470, #b9a6ff 50%, #3a70c9); }
+.dot-sw.eqs { background: repeating-linear-gradient(90deg, #5ff0c4 0 3px, #ff7ad9 3px 6px); }
+.dot-sw.gls { background: linear-gradient(160deg, rgba(255, 255, 255, .9), rgba(190, 240, 255, .35) 55%, rgba(255, 255, 255, .7)); box-shadow: 0 0 8px #bff6ff, inset 0 0 6px rgba(255, 255, 255, .8); }
+/* 이름 색 */
+.si-sw i { font-style: normal; }
+.nm.nc_galaxy { background: linear-gradient(90deg, #8a7dff, #e3c8ff, #7fd6ff, #b49bff, #8a7dff); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: ptFlow 6s linear infinite; font-weight: 800; text-shadow: none; }
+.nm.nc_citypop { background: linear-gradient(90deg, #ff6fb1, #ffb36b, #ff8fd0, #a77bff, #ff6fb1); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: ptFlow 5s linear infinite; font-weight: 800; }
+.nm.nc_crystal { background: linear-gradient(90deg, #8ff5dc, #ffffff, #7fe8ff, #ffffff, #8ff5dc); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: ptFlow 3.5s linear infinite; font-weight: 800; }
+.sw-nc_galaxy i { background: linear-gradient(90deg, #8a7dff, #e3c8ff, #7fd6ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sw-nc_citypop i { background: linear-gradient(90deg, #ff6fb1, #ffb36b, #a77bff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sw-nc_crystal i { background: linear-gradient(90deg, #8ff5dc, #ffffff, #7fe8ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+@media (prefers-reduced-motion: reduce) { .nm.nc_galaxy, .nm.nc_citypop, .nm.nc_crystal { animation: none; } }
+/* 프로필 카드 배경 */
+.pl-card.card_starry, .sp-card.card_starry { background:
+  radial-gradient(1.5px 1.5px at 12% 22%, #fff, transparent), radial-gradient(1px 1px at 32% 12%, #fff, transparent), radial-gradient(1px 1px at 78% 18%, #e7dcff, transparent),
+  radial-gradient(1.5px 1.5px at 88% 46%, #fff, transparent), radial-gradient(1px 1px at 22% 74%, #cfe3ff, transparent), radial-gradient(1px 1px at 62% 86%, #fff, transparent),
+  radial-gradient(2px 2px at 54% 32%, #fff, transparent),
+  linear-gradient(118deg, transparent 30%, rgba(185, 166, 255, .22) 45%, rgba(255, 255, 255, .16) 50%, rgba(143, 211, 255, .2) 55%, transparent 70%),
+  radial-gradient(ellipse at 80% 10%, rgba(122, 107, 255, .35), transparent 55%), linear-gradient(180deg, #050821, #121a4a 70%, #2a2470); }
+.pl-card.card_citypop, .sp-card.card_citypop { background:
+  linear-gradient(transparent 0 62%, rgba(255, 111, 177, .0) 62%),
+  repeating-linear-gradient(0deg, rgba(255, 122, 217, .38) 0 1px, transparent 1px 14px) bottom / 100% 38% no-repeat,
+  repeating-linear-gradient(90deg, rgba(255, 122, 217, .3) 0 1px, transparent 1px 26px) bottom / 100% 38% no-repeat,
+  radial-gradient(circle at 82% 60%, #ffe28a 0 17px, #ff9a6b 18px 22px, rgba(255, 111, 177, .35) 23px 30px, transparent 31px),
+  linear-gradient(180deg, #2a0f4e 0%, #7a2a8a 40%, #ff6fb1 58%, #2a0f4e 62%, #12061f 100%); }
+.pl-card.card_glass, .sp-card.card_glass { background:
+  radial-gradient(circle at 18% 28%, rgba(255, 255, 255, .35) 0 5px, transparent 6px), radial-gradient(circle at 82% 64%, rgba(255, 255, 255, .25) 0 9px, transparent 10px),
+  radial-gradient(circle at 70% 22%, rgba(255, 255, 255, .22) 0 3px, transparent 4px), radial-gradient(circle at 34% 80%, rgba(255, 255, 255, .2) 0 4px, transparent 5px),
+  linear-gradient(125deg, rgba(255, 255, 255, .18) 0 18%, transparent 19% 60%, rgba(255, 255, 255, .1) 61% 70%, transparent 71%),
+  linear-gradient(160deg, #0a2a33, #10524f 50%, #2a8f8a 80%, #8ff5dc); }
+.sw-card_starry { background: radial-gradient(1px 1px at 30% 30%, #fff, transparent), radial-gradient(1px 1px at 70% 50%, #fff, transparent), linear-gradient(118deg, transparent 30%, rgba(185, 166, 255, .45) 50%, transparent 70%), #0b1036; }
+.sw-card_citypop { background: radial-gradient(circle at 50% 70%, #ffd36b 0 8px, transparent 9px), repeating-linear-gradient(0deg, rgba(255, 122, 217, .5) 0 1px, transparent 1px 5px) bottom / 100% 30% no-repeat, linear-gradient(180deg, #2a0f4e, #ff6fb1 70%, #12061f 72%); }
+.sw-card_glass { background: radial-gradient(circle at 25% 35%, rgba(255, 255, 255, .5) 0 3px, transparent 4px), linear-gradient(125deg, rgba(255, 255, 255, .25) 0 20%, transparent 21%), linear-gradient(160deg, #0a2a33, #2a8f8a 70%, #8ff5dc); }
+/* 결과 카드 테두리 */
+.sw-frame_star { border-image: linear-gradient(135deg, #8a7dff, #ffffff, #7fd6ff, #b49bff) 1; box-shadow: 0 0 8px #8a7dff; }
+.sp-frame.frame_star { border-image: linear-gradient(135deg, #8a7dff, #ffffff, #7fd6ff, #b49bff, #8a7dff) 1; box-shadow: 0 0 16px #8a7dff; }
+.sw-frame_glass { border-color: rgba(255, 255, 255, .7); box-shadow: 0 0 8px rgba(191, 246, 255, .6), inset 0 0 6px rgba(255, 255, 255, .5); }
+.sp-frame.frame_glass { border-color: rgba(255, 255, 255, .7); box-shadow: 0 0 14px rgba(191, 246, 255, .6), inset 0 0 10px rgba(255, 255, 255, .45); }

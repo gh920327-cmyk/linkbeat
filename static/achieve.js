@@ -6,7 +6,7 @@
 'use strict';
 
 /* cat: 업적 창의 묶음 · goal: 횟수 업적이면 목표 (창에 '7/10' 진행도) */
-const ACH_CATS = ['전설', '시작', '등급', '콤보', '난이도', '꾸준함', '곡 탐험', '멀티', '도전', '재미'];
+const ACH_CATS = ['전설', '시작', '등급', '콤보', '난이도', '꾸준함', '곡 탐험', '멀티', '도전', '재미', '웃픈 순간', '습관', '친구'];
 const ACH = [
   // 시작
   { id: 'first', cat: '시작', name: '첫 발걸음', desc: '곡을 처음으로 끝까지 플레이' },
@@ -83,6 +83,25 @@ const ACH = [
   { id: 'onemiss', cat: '재미', name: '아깝다!', desc: 'MISS 딱 하나로 끝냄' },
   { id: 'clutch', cat: '재미', name: '아슬아슬', desc: '정확도 80.00~80.49%로 B 랭크 클리어' },
   { id: 'comeback', cat: '재미', name: '포기하지 않아', desc: 'MISS 30개 넘게 나고도 B 랭크 이상' },
+  // 웃픈 순간: 조건을 숨겨 두고 힌트만 (달성하면 공개) · noMaster: '링크비트 마스터'에 안 셈 (운·친구 업적)
+  { id: 'lastmiss', cat: '웃픈 순간', hide: true, hint: '풀콤보 바로 앞에서…', name: '비운의 마지막 노트', desc: '마지막 노트 하나만 MISS로 끝냄', noMaster: true },
+  { id: 'firstmiss', cat: '웃픈 순간', hide: true, hint: '시작이 반이라는데…', name: '늦은 시동', desc: '첫 노트 하나만 MISS, 나머지는 전부 맞힘', noMaster: true },
+  { id: 'c999', cat: '웃픈 순간', hide: true, hint: '천까지 딱 하나…', name: '한 끗 차이', desc: '999 콤보에서 끊김', noMaster: true },
+  { id: 'zen', cat: '웃픈 순간', hide: true, hint: '아무것도 하지 않으면…', name: '명상 중', desc: '아무것도 안 누르고 끝까지 (노트 50개 이상)', noMaster: true },
+  { id: 'lucky7', cat: '웃픈 순간', hide: true, hint: '7을 좋아하나요?', name: '럭키 세븐', desc: '점수 끝자리 7777, 또는 정확도 딱 77.77%', noMaster: true },
+  { id: 'cinder', cat: '웃픈 순간', hide: true, hint: '종이 열두 번 울리면…', name: '신데렐라', desc: '밤 12시 정각부터 10분 안에 한 판 끝냄', noMaster: true },
+  // 습관 (실력 분석 기록으로)
+  { id: 'hasty', cat: '습관', name: '성질 급한 손가락', desc: '평균 20ms 넘게 빨리 치는데도 S 랭크 이상 (노트 100개 이상)', noMaster: true },
+  { id: 'lazy', cat: '습관', name: '한 박자 늦게', desc: '평균 20ms 넘게 늦게 치는데도 S 랭크 이상 (노트 100개 이상)', noMaster: true },
+  { id: 'turtle', cat: '습관', name: '느긋하게', desc: '노트 속도 2 이하로 S 랭크 이상' },
+  { id: 'sight', cat: '습관', name: '초견 천재', desc: '처음 치는 곡을 첫 판에 풀콤보 (보통 이상)' },
+  // 친구 (서버 기록으로)
+  { id: 'punch', cat: '친구', name: '동네북', desc: '기록 뺏김 알림 10번 받기', goal: 10, stat: 'beatenN', noMaster: true },
+  { id: 'avenger', cat: '친구', name: '복수귀', desc: '복수 성공 10번', goal: 10, stat: 'revN' },
+  { id: 'rival', cat: '친구', name: '숙명의 라이벌', desc: '같은 사람과 기록 주고받기 5번 (서로 2번 이상) · 칭호에 상대 이름이 붙어요', goal: 5, stat: 'rivalN', noMaster: true },
+  { id: 'dj', cat: '친구', name: 'DJ', desc: '내가 신청한 곡이 10곡 들어옴', goal: 10, stat: 'djSongs', noMaster: true },
+  { id: 'popdj', cat: '친구', name: '인기 DJ', desc: '내가 신청한 곡을 다른 사람들이 50판', goal: 50, stat: 'djPlays', noMaster: true },
+  { id: 'kibitz', cat: '친구', name: '훈수꾼', desc: '남의 판 관전 10번', goal: 10, stat: 'watchN', noMaster: true },
   // 전설: 정말 어려운 업적 — 칭호가 무지개빛으로 반짝임
   { id: 'L_godhand', cat: '전설', tier: 'legend', name: '신의 손', desc: '★9.5 이상 곡에서 MAX (전부 PERFECT)' },
   { id: 'L_iron', cat: '전설', tier: 'legend', name: '강철 손가락', desc: '5분이 넘는 곡의 극한 난이도를 MAX' },
@@ -98,7 +117,12 @@ const ACH = [
   { id: 'L_living', cat: '전설', tier: 'legend', name: '살아있는 전설', desc: '1000판 플레이', goal: 1000, stat: 'plays' },
   { id: 'L_thunder', cat: '전설', tier: 'legend', name: '천둥의 손', desc: 'PERFECT 누적 200,000개', goal: 200000, stat: 'perf' },
   { id: 'L_champ', cat: '전설', tier: 'legend', name: '무패의 챔피언', desc: '멀티에서 1위 50번', goal: 50, stat: 'mwin' },
-  { id: 'L_master', cat: '전설', tier: 'legend', name: '링크비트 마스터', desc: '다른 업적을 모두 달성' },
+  { id: 'L_duel100', cat: '전설', tier: 'legend', name: '백전백승', desc: '도전장·복수전·1:1 대결 100승', goal: 100, stat: 'duelW' },
+  { id: 'L_allround', cat: '전설', tier: 'legend', name: '만능 리듬꾼', desc: '최근 50판에서 일반·연타·같은 줄 연타·동시치기·긴 노트 모두 정확도 99% 이상 (종류마다 노트 200개 이상)' },
+  { id: 'L_moon', cat: '전설', tier: 'legend', name: '달빛 아래의 신', desc: '새벽 3~4시에 극한 난이도 MAX', noMaster: true },
+  { id: 'L_flawless', cat: '전설', tier: 'legend', name: '흠잡을 데 없는', desc: '7일 연속으로 매일 MAX 한 번 이상', goal: 7, stat: 'apStreak' },
+  { id: 'L_dj', cat: '전설', tier: 'legend', name: '전설의 DJ', desc: '내가 신청한 곡을 다른 사람들이 500판', goal: 500, stat: 'djPlays', noMaster: true },
+  { id: 'L_master', cat: '전설', tier: 'legend', name: '링크비트 마스터', desc: '다른 업적을 모두 달성 (숨은 업적·운·친구 업적은 빼고)' },
 ];
 const goalOf = (a) => (typeof a.goal === 'function' ? a.goal() : a.goal);
 const LEGEND_TITLES = new Set(ACH.filter((a) => a.tier === 'legend').map((a) => a.name));
@@ -156,7 +180,7 @@ function achUnlock(ids) {
   if (!fresh.length) return [];
   const now = Date.now();
   fresh.forEach((id) => { got[id] = now; });
-  if (!got.L_master && ACH.every((a) => a.id === 'L_master' || got[a.id])) { got.L_master = now; fresh.push('L_master'); }
+  if (!got.L_master && ACH.every((a) => a.id === 'L_master' || a.noMaster || got[a.id])) { got.L_master = now; fresh.push('L_master'); }
   store.set('ach', got);
   if (typeof profileSync === 'function') profileSync();
   achPopup(fresh);
@@ -199,7 +223,39 @@ function achProgress(st = achStats(), rec = achFromRecords()) {
   const songN = new Set([...Object.keys(st.songs), ...rec.played]).size;
   const sameMax = Math.max(0, ...Object.values(st.songs).map((v) => +v || 0));
   const today = st.day === dayKey() ? st.dayN : 0;
-  return { ...st, songN, sameMax, dayN: today, dailyN: Object.keys(st.dailyDays || {}).length, sRec: rec.sRec, ssRec: rec.ssRec, maxRec: rec.maxRec, extSSS: rec.extSSS, conquerN: rec.conquerN, duelW: +store.get('duelW', 0) || 0 };
+  const srv = (typeof myGrow !== 'undefined' && myGrow && myGrow.achSrv) || {};
+  return { ...st, songN, sameMax, dayN: today, dailyN: Object.keys(st.dailyDays || {}).length, sRec: rec.sRec, ssRec: rec.ssRec, maxRec: rec.maxRec, extSSS: rec.extSSS, conquerN: rec.conquerN, duelW: +store.get('duelW', 0) || 0,
+    beatenN: +srv.beatenN || 0, revN: +srv.revN || 0, rivalN: +srv.rivalN || 0, djSongs: +srv.djSongs || 0, djPlays: +srv.djPlays || 0,
+    watchN: +st.watchN || 0, apStreak: achApStreak(st) };
+}
+/* MAX를 한 날이 오늘(없으면 어제)까지 며칠 이어졌는지 */
+function achApStreak(st) {
+  const days = st.apDays || {};
+  const d = new Date();
+  if (!days[dayKey(d)]) d.setDate(d.getDate() - 1);
+  let n = 0;
+  while (days[dayKey(d)] && n < 400) { n++; d.setDate(d.getDate() - 1); }
+  return n;
+}
+/* 남의 판을 관전할 때 (app.js에서 부름) */
+function achOnWatch() {
+  const st = achStats();
+  st.watchN = (+st.watchN || 0) + 1;
+  store.set('achStats', st);
+  achUnlock(achGoalIds(achProgress(st)));
+}
+/* 만능 리듬꾼: 서버의 실력 분석 기록 최근 50판 */
+async function achCheckAllround() {
+  if (achGot().L_allround || typeof profile === 'undefined' || !profile.tok) return;
+  try {
+    const j = await (await fetch('/api/skill', { headers: profile.headers() })).json();
+    const plays = (j.plays || []).slice(-50);
+    if (plays.length < 50) return;
+    const ty = {};
+    for (const p of plays) for (const k in p.ty || {}) { const t = (ty[k] ||= [0, 0]); t[0] += p.ty[k][0]; t[1] += p.ty[k][1]; }
+    const KS = ['tap', 'stream', 'jack', 'chord', 'hold'];
+    if (KS.every((k) => ty[k] && ty[k][0] >= 200 && (ty[k][1] / ty[k][0]) * 100 >= 99)) achUnlock(['L_allround']);
+  } catch { /* 다음 판에 다시 */ }
 }
 function achGoalIds(pr) { return ACH.filter((a) => a.goal && (pr[a.stat] || 0) >= goalOf(a)).map((a) => a.id); }
 /* 기록만 보고 줄 수 있는 업적 (업적 창을 열 때·판이 끝날 때) */
@@ -223,6 +279,7 @@ function achieveOnResult(g, r) {
   const fc = done && r.fc;
   const clear = done && r.acc >= 80;
   const rk = RANKS.indexOf(r.rank);
+  const firstTime = !(st.songs[g.song.id]) && !!g.firstPlay;     // 초견 천재: 이 곡을 처음 친 판
   if (done) {
     st.plays++;
     st.songs[g.song.id] = (st.songs[g.song.id] || 0) + 1;
@@ -237,7 +294,11 @@ function achieveOnResult(g, r) {
     if (g.ai) st.ai++;
   }
   if (fc) st.fc++;
-  if (ap) st.ap++;
+  if (ap) {
+    st.ap++;
+    const ad = Object.assign({}, st.apDays || {}, { [dayKey()]: 1 });     // 흠잡을 데 없는: MAX 한 날
+    st.apDays = Object.fromEntries(Object.keys(ad).slice(-40).map((k) => [k, 1]));
+  }
   if (done && g.hl) st.hl++;
   if (g.multi) st.multi++;
   if (g.ghostWin) st.ghost++;
@@ -289,6 +350,30 @@ function achieveOnResult(g, r) {
   if (done && h >= 2 && h < 5) ids.push('owl');
   if (done && h >= 6 && h < 8) ids.push('early');
   if (done && h === 12) ids.push('lunch');
+  // 웃픈 순간
+  const notes = g.notes || [];
+  if (done && c.miss === 1 && notes.length >= 20) {
+    const missed = notes.find((n) => n.head === 'miss' || n.tail === 'miss');
+    if (missed) {
+      const tMax = Math.max(...notes.map((n) => n.t)), tMin = Math.min(...notes.map((n) => n.t));
+      if (missed.t >= tMax - 1e-6) ids.push('lastmiss');
+      if (missed.t <= tMin + 1e-6) ids.push('firstmiss');
+    }
+  }
+  if (g.broke999) ids.push('c999');
+  if (done && notes.length >= 50 && !(c.perfect || 0) && !(c.great || 0) && !(c.good || 0)) ids.push('zen');
+  if (done && ((r.score || 0) % 10000 === 7777 || Math.round((r.acc || 0) * 100) === 7777)) ids.push('lucky7');
+  if (done && h === 0 && new Date().getMinutes() < 10) ids.push('cinder');
+  // 습관
+  const sA = RANKS.indexOf('S');
+  const dt = r.ana && r.ana.dt;
+  if (done && rk >= sA && dt && dt[2] >= 100 && dt[0] <= -20) ids.push('hasty');
+  if (done && rk >= sA && dt && dt[2] >= 100 && dt[0] >= 20) ids.push('lazy');
+  if (done && rk >= sA && (settings.speed || 5) <= 2) ids.push('turtle');
+  if (fc && firstTime && !g.hl && g.diff !== 'easy') ids.push('sight');
+  // 전설
+  if (ap && g.diff === 'extreme' && h === 3) ids.push('L_moon');
+  setTimeout(achCheckAllround, 4500);
   achUnlock(ids);
   setTimeout(achRetro, 3500);      // 기록이 저장된 뒤 (S 수집가·사계절 등)
 }
@@ -369,7 +454,7 @@ function renderAchDlg() {
     const list = ACH.filter((a) => a.cat === cat);
     const k = list.filter((a) => got[a.id]).length;
     const nNew = list.filter((a) => fresh.has(a.id)).length;
-    const head = cat === '전설' ? '✦ 전설 <em>정말 어려운 업적 · 칭호가 무지개빛으로 반짝여요</em>' : esc(cat);
+    const head = cat === '전설' ? '✦ 전설 <em>정말 어려운 업적 · 칭호가 무지개빛으로 반짝여요</em>' : cat === '웃픈 순간' ? '웃픈 순간 <em>숨은 업적 · 힌트만 보고 찾아보세요</em>' : esc(cat);
     return `<h4 class="ach-cat${cat === '전설' ? ' legend' : ''}">${head} <small>${k}/${list.length}</small>${nNew ? ` <b class="ach-new-n">NEW ${nNew}</b>` : ''}</h4>` + list.map((a) => {
       const at = got[a.id];
       const d = at ? new Date(at) : null;
@@ -378,9 +463,9 @@ function renderAchDlg() {
       const bar = goal && !at ? `<span class="ai-prog"><i style="width:${Math.round((v / goal) * 100)}%"></i></span><span class="ai-num">${v.toLocaleString()} / ${goal.toLocaleString()}</span>` : '';
       const lg = a.tier === 'legend';
       return `<button type="button" class="ach-item${lg ? ' legend' : ''}${at ? ' got' : ''}${cur === a.id && at && !store.get('titleCombo', null) ? ' cur' : ''}${fresh.has(a.id) ? ' new' : ''}" data-id="${a.id}" ${at ? '' : 'disabled'}>
-      ${fresh.has(a.id) ? '<span class="ai-new">NEW</span>' : ''}<span class="ai-ico">${at ? (lg ? '👑' : '🏆') : '🔒'}</span>
-      <span class="ai-name">${esc(a.name)}</span>
-      <span class="ai-desc">${esc(a.desc)}</span>${bar}
+      ${fresh.has(a.id) ? '<span class="ai-new">NEW</span>' : ''}<span class="ai-ico">${at ? (lg ? '👑' : '🏆') : a.hide ? '❔' : '🔒'}</span>
+      <span class="ai-name">${a.hide && !at ? '???' : esc(a.name)}</span>
+      <span class="ai-desc">${a.hide && !at ? `힌트: ${esc(a.hint || '???')}` : esc(a.desc)}</span>${bar}
       ${d ? `<span class="ai-date">${d.getMonth() + 1}/${d.getDate()}</span>` : ''}</button>`;
     }).join('');
   }).join('');

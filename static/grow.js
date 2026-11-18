@@ -85,6 +85,7 @@ function setMe(j) {
   store.set('ownedCache', j.owned || []);
   store.set('xp', j.xp);
   store.set('duelW', (j.chal || {}).w || 0);
+  if (typeof achRetro === 'function') setTimeout(() => { try { achRetro(); } catch { /* 무시 */ } }, 300);   // 동네북·복수귀·DJ 같은 서버 기록 업적
   if (typeof renderMyLevel === 'function') renderMyLevel();
   if (typeof myLevel === 'function' && myLevel() !== lv0) net.send(helloMsg());
   const ids = [];
@@ -455,13 +456,14 @@ class ShopPreview extends SkinPreview {
 }
 const SW_GLYPH = { note_neon: '▭', note_star: '★', note_heart: '♥', note_gem: '◆', note_pumpkin: '🎃', fx_petal: '🌸', fx_bolt: '⚡', fx_star: '✨', fx_fire: '🔥', fx_snow: '❄️', fx_bat: '🦇',
   combo_gold: '123', combo_neon: '123', combo_rainbow: '123', fc_fireworks: '🎆', fc_stars: '🌟', fc_hero: '🙌', fc_bats: '🦇', gear_hw: '🎃',
-  note_snowflake: '❄️', fx_ornament: '🔴', fc_aurora: '🌌', gear_xmas: '🎄' };
+  note_snowflake: '❄️', fx_ornament: '🔴', fc_aurora: '🌌', gear_xmas: '🎄',
+  note_saturn: '🪐', note_vinyl: '💿', note_crystal: '◯', fx_meteor: '☄️', fx_notes: '♫', fx_ripple: '≋', fc_meteor: '🌠', fc_goldrec: '📀', gear_night: '✦', gear_turntable: '', gear_frost: '' };
 const evNow = (it) => !!(it && it.event && myGrow && myGrow.event && myGrow.event.id === it.event);   // 지금 교환소에서 바꿀 수 있는 물건
 const ssNow = (it) => !!(it && it.season && myGrow && myGrow.season && myGrow.season.id === it.season);   // 지금 시즌 패스로 얻을 수 있는 물건
 const evGone = (it) => !!(it && ((it.event && !evNow(it)) || (it.season && !ssNow(it))));
 function swInner(it) {
   if (it.cat === 'icon') return it.emoji || '';
-  if (it.cat === 'nc') return '가';
+  if (it.cat === 'nc') return '<i>가</i>';
   return SW_GLYPH[it.id] || '';
 }
 function shopItemHtml(id) {
@@ -475,7 +477,7 @@ function shopItemHtml(id) {
     : it.earn ? `<span class="si-lock">🔒 ${esc(it.how || '')}</span>`
       : price < base ? `<s>♪${fmtN(base)}</s> <b class="si-sale">♪${fmtN(price)}</b>` : `<b>♪${fmtN(price)}</b>`;
   return `<button type="button" class="shop-item${own ? ' own' : ''}${on ? ' on' : ''}${shopSel === id ? ' sel' : ''}${it.earn && !own ? ' earn' : ''}" data-id="${esc(id)}">`
-    + `<span class="si-sw sw-${esc(id)}">${swInner(it)}</span><span class="si-name">${esc(it.name)}${it.limited ? ' <em>한정</em>' : ''}${it.event ? ` <em class="ev ev-${esc(it.event)}">${evIconOf(it)} 이벤트</em>` : ''}${it.season ? ' <em class="ss">🎫 시즌</em>' : ''}</span><span class="si-st">${st}</span></button>`;
+    + `<span class="si-sw sw-${esc(id)}">${swInner(it)}</span><span class="si-name">${esc(it.name)}${it.limited ? ' <em>한정</em>' : ''}${it.event ? ` <em class="ev ev-${esc(it.event)}">${evIconOf(it)} 이벤트</em>` : ''}${it.season ? ' <em class="ss">🎫 시즌</em>' : ''}${it.set ? ` <em class="set">${esc(it.set)}</em>` : ''}</span><span class="si-st">${st}</span></button>`;
 }
 function renderShop() {
   if (!myGrow || !SHOP) return;

@@ -830,6 +830,12 @@ function ghostFor(id, diff, nl, hl, ai) {
 }
 
 let soloSeq = 0;
+/* 이 곡에 내 기록이 하나라도 있는지 (4·6키 · 모든 난이도 · AI) */
+function hasAnyRecord(s) {
+  if (!s || typeof myRecord !== 'function') return true;
+  for (const nl of [4, 6]) for (const d of DIFFS) if (myRecord(s, nl, d, false, false) || myRecord(s, nl, d, false, true)) return true;
+  return false;
+}
 async function startSolo(id, diff, nl = 4, customNotes = null, practice = null, opts = {}) {
   const token = ++soloSeq;
   stopPreview();
@@ -851,6 +857,7 @@ async function startSolo(id, diff, nl = 4, customNotes = null, practice = null, 
   if (opts.duel) g.duel = opts.duel;
   g.customNotes = customNotes;
   g.ai = useAi;
+  g.firstPlay = !customNotes && !practice && !hasAnyRecord(songById(id));      // 초견 천재 업적
   setupGameScreen(g, false);
   if (practice && !g.notes.length) { g.destroy(); toast('그 구간에는 노트가 없어요.'); backFromGame(); return; }
   try {
@@ -1681,6 +1688,7 @@ function stopWatch() {
   if (watch.spec) { watch.spec.destroy(); watch.spec = null; }
 }
 net.on('watch', async (m) => {
+  if (m.game !== watch.game && typeof achOnWatch === 'function') { try { achOnWatch(); } catch { /* 무시 */ } }   // 훈수꾼 업적
   stopWatch();
   watch.peers = {};
   watch.game = m.game;

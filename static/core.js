@@ -56,15 +56,15 @@ const THEMES = {
   mono:    { name: '모노',   a: '#ffffff', b: '#8a93ad', c: '#d6dcef' },
   custom:  { name: '커스텀' },
 };
-const LINE_COLORS = { red: '#ff3b55', cyan: '#4de1ff', gold: '#ffc83d', white: '#ffffff', pink: '#ff5fa2', purple: '#b06bff', green: '#3ddc84', rainbow: '#ff5fa2', ghost: '#b8ffe0', lights: '#fff1c9' };
+const LINE_COLORS = { red: '#ff3b55', cyan: '#4de1ff', gold: '#ffc83d', white: '#ffffff', pink: '#ff5fa2', purple: '#b06bff', green: '#3ddc84', rainbow: '#ff5fa2', ghost: '#b8ffe0', lights: '#fff1c9', milkyway: '#cdb8ff', eq: '#ff7ad9', glass: '#e6fbff' };
 /* 상점에서 사야 쓸 수 있는 꾸미기 값 → 아이템 (없는 값은 처음부터 무료) */
 const SKIN_ITEMS = {
-  note: { neon: 'note_neon', star: 'note_star', heart: 'note_heart', gem: 'note_gem', pumpkin: 'note_pumpkin', snowflake: 'note_snowflake' },
-  effect: { petal: 'fx_petal', bolt: 'fx_bolt', stardust: 'fx_star', fire: 'fx_fire', snow: 'fx_snow', bat: 'fx_bat', leaf: 'fx_leaf', ornament: 'fx_ornament' },
-  line: { purple: 'line_purple', green: 'line_green', rainbow: 'line_rainbow', ghost: 'line_ghost', lights: 'line_lights' },
-  gear: { clear: 'gear_clear', wood: 'gear_wood', neon: 'gear_neon', chrome: 'gear_chrome', gold: 'gear_gold', halloween: 'gear_hw', xmas: 'gear_xmas' },
+  note: { neon: 'note_neon', star: 'note_star', heart: 'note_heart', gem: 'note_gem', pumpkin: 'note_pumpkin', snowflake: 'note_snowflake', saturn: 'note_saturn', vinyl: 'note_vinyl', crystal: 'note_crystal' },
+  effect: { petal: 'fx_petal', bolt: 'fx_bolt', stardust: 'fx_star', fire: 'fx_fire', snow: 'fx_snow', bat: 'fx_bat', leaf: 'fx_leaf', ornament: 'fx_ornament', meteor: 'fx_meteor', notes: 'fx_notes', ripple: 'fx_ripple' },
+  line: { purple: 'line_purple', green: 'line_green', rainbow: 'line_rainbow', ghost: 'line_ghost', lights: 'line_lights', milkyway: 'line_milkyway', eq: 'line_eq', glass: 'line_glass' },
+  gear: { clear: 'gear_clear', wood: 'gear_wood', neon: 'gear_neon', chrome: 'gear_chrome', gold: 'gear_gold', halloween: 'gear_hw', xmas: 'gear_xmas', night: 'gear_night', turntable: 'gear_turntable', frost: 'gear_frost' },
   comboStyle: { gold: 'combo_gold', neon: 'combo_neon', rainbow: 'combo_rainbow' },
-  fcFx: { fireworks: 'fc_fireworks', stars: 'fc_stars', hero: 'fc_hero', bats: 'fc_bats', aurora: 'fc_aurora' },
+  fcFx: { fireworks: 'fc_fireworks', stars: 'fc_stars', hero: 'fc_hero', bats: 'fc_bats', aurora: 'fc_aurora', meteor: 'fc_meteor', goldrec: 'fc_goldrec' },
 };
 const DEFAULT_SKIN = {
   theme: 'classic', colors: { a: '#eef3ff', b: '#3f8cff', c: '#ffc83d' },
@@ -450,6 +450,20 @@ function fcSound(style) {
       tone(f, t0 + d, 1.4, 'sine', 0.2); tone(f * 2.76, t0 + d, 0.5, 'sine', 0.04);
     });
     burst(t0 + 0.2, 1.8, 'highpass', 8000, 0.06);
+  } else if (style === 'meteor') {
+    for (let i = 0; i < 7; i++) {                     // 슈웅~ 하고 떨어지는 별 + 맑은 종
+      const at = t0 + i * 0.16 + (i % 2) * 0.05;
+      burst(at, 0.45, 'bandpass', 5200 - i * 300, 0.16, 3, 900);
+      tone(1760 - i * 90, at + 0.05, 0.5, 'sine', 0.07, 1300 - i * 60);
+    }
+    [[1318.5, 0.2], [1568, 0.4], [1975.5, 0.6], [2637, 0.85]].forEach(([f, d]) => { tone(f, t0 + d, 1.3, 'sine', 0.16); tone(f * 2.01, t0 + d, 0.6, 'sine', 0.03); });
+  } else if (style === 'goldrec') {
+    burst(t0, 0.12, 'bandpass', 900, 0.5, 2, 2600);   // 위키 (레코드 스크래치)
+    burst(t0 + 0.14, 0.14, 'bandpass', 2600, 0.45, 2, 700);
+    burst(t0 + 0.3, 0.1, 'bandpass', 1100, 0.4, 2, 3000);
+    for (const [f, d] of [[523.3, 0.5], [659.3, 0.5], [784, 0.5], [1046.5, 0.5], [784, 0.82], [1046.5, 0.82], [1318.5, 0.82]]) tone(f, t0 + d, d < 0.6 ? 0.28 : 1.1, 'sawtooth', 0.045);
+    for (const f of [523.3, 659.3, 784, 1046.5]) tone(f, t0 + 0.82, 1.2, 'triangle', 0.14);
+    burst(t0 + 0.82, 1.4, 'highpass', 7500, 0.08);
   } else if (style === 'bats') {
     burst(t0, 1.1, 'bandpass', 380, 0.55, 1.4, 2600);                         // 휘이익
     for (let i = 0; i < 10; i++) burst(t0 + 0.15 + i * 0.07, 0.05, 'bandpass', 900 + i * 90, 0.25, 3);   // 푸드득
@@ -778,7 +792,7 @@ function helloMsg() {
   return m;
 }
 /* 남에게 보이는 이름 꾸미기: 지난주 리그 메달 · 이름 아이콘 · 이름 색 (서버가 가진 것만 보내 줌) */
-const ICON_EMOJI = { icon_note: '🎵', icon_headphone: '🎧', icon_bolt: '⚡', icon_gem: '💎', icon_star: '⭐', icon_fire: '🔥', icon_pumpkin: '🎃', icon_cat: '🐱', icon_ghost: '👻', icon_maple: '🍁', icon_snowman: '⛄', icon_tree: '🎄', icon_sheep: '🐑' };
+const ICON_EMOJI = { icon_note: '🎵', icon_headphone: '🎧', icon_bolt: '⚡', icon_gem: '💎', icon_star: '⭐', icon_fire: '🔥', icon_pumpkin: '🎃', icon_cat: '🐱', icon_ghost: '👻', icon_maple: '🍁', icon_snowman: '⛄', icon_tree: '🎄', icon_sheep: '🐑', icon_planet: '🪐', icon_disc: '💿', icon_drop: '💧' };
 const MEDALS = ['', '🥇', '🥈', '🥉'];
 function nameDeco(p, name = p && p.name) {
   const d = (p && p.deco) || {};

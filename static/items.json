@@ -11,7 +11,6 @@
     {"id": "note_heart", "cat": "note", "name": "하트", "price": 800},
     {"id": "note_gem", "cat": "note", "name": "보석", "price": 2000},
     {"id": "note_pumpkin", "cat": "note", "name": "호박", "candy": 120, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
-
     {"id": "fx_petal", "cat": "fx", "name": "벚꽃잎", "price": 800},
     {"id": "fx_bolt", "cat": "fx", "name": "번개", "price": 2000},
     {"id": "fx_star", "cat": "fx", "name": "별가루", "earn": "mis10", "how": "미션을 다 한 날 10일"},
@@ -19,28 +18,23 @@
     {"id": "fx_snow", "cat": "fx", "name": "눈송이", "price": 800, "limited": true},
     {"id": "fx_bat", "cat": "fx", "name": "박쥐", "candy": 150, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
     {"id": "fx_leaf", "cat": "fx", "name": "단풍잎", "season": "s1", "how": "시즌 1 패스 10단계"},
-
     {"id": "line_purple", "cat": "line", "name": "보라", "price": 300},
     {"id": "line_green", "cat": "line", "name": "초록", "price": 300},
     {"id": "line_rainbow", "cat": "line", "name": "흐르는 무지개", "price": 2000},
     {"id": "line_ghost", "cat": "line", "name": "유령", "candy": 80, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
-
     {"id": "gear_clear", "cat": "gear", "name": "투명", "price": 300},
     {"id": "gear_wood", "cat": "gear", "name": "나무", "price": 800},
     {"id": "gear_neon", "cat": "gear", "name": "네온", "price": 800},
     {"id": "gear_chrome", "cat": "gear", "name": "크롬", "earn": "lv20", "how": "레벨 20"},
     {"id": "gear_gold", "cat": "gear", "name": "황금", "earn": "champ", "how": "주간 리그 1위"},
     {"id": "gear_hw", "cat": "gear", "name": "할로윈", "candy": 150, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
-
     {"id": "combo_gold", "cat": "combo", "name": "금빛", "price": 300},
     {"id": "combo_neon", "cat": "combo", "name": "네온", "price": 800},
     {"id": "combo_rainbow", "cat": "combo", "name": "무지개", "price": 2000},
-
     {"id": "fc_fireworks", "cat": "fcfx", "name": "불꽃놀이", "price": 800},
     {"id": "fc_stars", "cat": "fcfx", "name": "별가루 폭죽", "price": 800},
     {"id": "fc_hero", "cat": "fcfx", "name": "내 캐릭터 승리", "price": 2000},
     {"id": "fc_bats", "cat": "fcfx", "name": "박쥐 떼", "candy": 200, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
-
     {"id": "nc_sky", "cat": "nc", "name": "하늘", "price": 300},
     {"id": "nc_mint", "cat": "nc", "name": "민트", "price": 300},
     {"id": "nc_pink", "cat": "nc", "name": "분홍", "price": 300},
@@ -51,7 +45,6 @@
     {"id": "nc_hw", "cat": "nc", "name": "할로윈", "candy": 100, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
     {"id": "nc_autumn", "cat": "nc", "name": "단풍", "season": "s1", "how": "시즌 1 패스 5단계"},
     {"id": "nc_ice", "cat": "nc", "name": "얼음", "season": "s2", "how": "시즌 2 패스 5단계"},
-
     {"id": "icon_note", "cat": "icon", "name": "음표", "emoji": "🎵", "price": 300},
     {"id": "icon_headphone", "cat": "icon", "name": "헤드폰", "emoji": "🎧", "price": 300},
     {"id": "icon_bolt", "cat": "icon", "name": "번개", "emoji": "⚡", "price": 800},
@@ -63,7 +56,6 @@
     {"id": "icon_ghost", "cat": "icon", "name": "유령", "emoji": "👻", "candy": 60, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
     {"id": "icon_maple", "cat": "icon", "name": "단풍", "emoji": "🍁", "season": "s1", "how": "시즌 1 패스 20단계"},
     {"id": "icon_snowman", "cat": "icon", "name": "눈사람", "emoji": "⛄", "season": "s2", "how": "시즌 2 패스 20단계"},
-
     {"id": "card_sunset", "cat": "card", "name": "노을", "price": 300},
     {"id": "card_ocean", "cat": "card", "name": "바다", "price": 300},
     {"id": "card_sakura", "cat": "card", "name": "벚꽃", "price": 800},
@@ -74,7 +66,6 @@
     {"id": "card_moon", "cat": "card", "name": "보름달 밤", "candy": 120, "event": "hw26", "how": "할로윈 이벤트 교환소 (기간 한정)"},
     {"id": "card_autumn", "cat": "card", "name": "가을 숲", "season": "s1", "how": "시즌 1 패스 15단계"},
     {"id": "card_snow", "cat": "card", "name": "눈 내리는 밤", "season": "s2", "how": "시즌 2 패스 15단계"},
-
     {"id": "frame_silver", "cat": "frame", "name": "은", "price": 300},
     {"id": "frame_gold", "cat": "frame", "name": "금", "price": 800},
     {"id": "frame_neon", "cat": "frame", "name": "네온", "price": 800},
@@ -92,6 +83,31 @@
     {"id": "nc_dawn", "cat": "nc", "name": "새벽노을", "season": "s3", "how": "시즌 3 패스 5단계"},
     {"id": "frame_dawn", "cat": "frame", "name": "해돋이", "season": "s3", "how": "시즌 3 패스 10단계"},
     {"id": "card_sunrise", "cat": "card", "name": "새해 해돋이", "season": "s3", "how": "시즌 3 패스 15단계"},
-    {"id": "icon_sheep", "cat": "icon", "name": "새해 양", "emoji": "🐑", "season": "s3", "how": "시즌 3 패스 20단계"}
+    {"id": "icon_sheep", "cat": "icon", "name": "새해 양", "emoji": "🐑", "season": "s3", "how": "시즌 3 패스 20단계"},
+    {"id": "note_saturn", "cat": "note", "name": "토성 링", "price": 800, "set": "🪐 별밤"},
+    {"id": "fx_meteor", "cat": "fx", "name": "별똥별", "price": 800, "set": "🪐 별밤"},
+    {"id": "line_milkyway", "cat": "line", "name": "은하수", "price": 800, "set": "🪐 별밤"},
+    {"id": "gear_night", "cat": "gear", "name": "밤하늘", "price": 800, "set": "🪐 별밤"},
+    {"id": "fc_meteor", "cat": "fcfx", "name": "유성우", "price": 800, "set": "🪐 별밤"},
+    {"id": "frame_star", "cat": "frame", "name": "별자리", "price": 800, "set": "🪐 별밤"},
+    {"id": "nc_galaxy", "cat": "nc", "name": "은하", "price": 800, "set": "🪐 별밤"},
+    {"id": "icon_planet", "cat": "icon", "name": "토성", "price": 300, "set": "🪐 별밤", "emoji": "🪐"},
+    {"id": "card_starry", "cat": "card", "name": "별밤", "price": 800, "set": "🪐 별밤"},
+    {"id": "note_vinyl", "cat": "note", "name": "LP판", "price": 800, "set": "💿 레코드"},
+    {"id": "fx_notes", "cat": "fx", "name": "음표 팡", "price": 800, "set": "💿 레코드"},
+    {"id": "line_eq", "cat": "line", "name": "이퀄라이저", "price": 800, "set": "💿 레코드"},
+    {"id": "gear_turntable", "cat": "gear", "name": "턴테이블", "price": 800, "set": "💿 레코드"},
+    {"id": "fc_goldrec", "cat": "fcfx", "name": "골드 레코드", "price": 2000, "set": "💿 레코드"},
+    {"id": "nc_citypop", "cat": "nc", "name": "시티팝", "price": 800, "set": "💿 레코드"},
+    {"id": "icon_disc", "cat": "icon", "name": "LP", "price": 300, "set": "💿 레코드", "emoji": "💿"},
+    {"id": "card_citypop", "cat": "card", "name": "시티팝 노을", "price": 800, "set": "💿 레코드"},
+    {"id": "note_crystal", "cat": "note", "name": "크리스털 링", "price": 800, "set": "💧 유리"},
+    {"id": "fx_ripple", "cat": "fx", "name": "물결 파문", "price": 800, "set": "💧 유리"},
+    {"id": "line_glass", "cat": "line", "name": "유리 판정선", "price": 300, "set": "💧 유리"},
+    {"id": "gear_frost", "cat": "gear", "name": "프로스트 유리", "price": 800, "set": "💧 유리"},
+    {"id": "frame_glass", "cat": "frame", "name": "유리", "price": 300, "set": "💧 유리"},
+    {"id": "nc_crystal", "cat": "nc", "name": "크리스털", "price": 300, "set": "💧 유리"},
+    {"id": "icon_drop", "cat": "icon", "name": "물방울", "price": 300, "set": "💧 유리", "emoji": "💧"},
+    {"id": "card_glass", "cat": "card", "name": "유리 물결", "price": 800, "set": "💧 유리"}
   ]
 }
