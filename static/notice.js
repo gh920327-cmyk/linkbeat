@@ -1,4 +1,4 @@
-/* 📢 업데이트 공지: 새 공지가 올라오면 로비에서 한 번 자동으로 보여 주고, 닫으면 다시 안 띄움 (이 브라우저 기억)
+/* 📢 업데이트 공지 (🔔 알림과는 따로 — 아이디·클래스는 news/nw- 로 시작): 새 공지가 올라오면 로비에서 한 번 자동으로 보여 주고, 닫으면 다시 안 띄움 (이 브라우저 기억)
    공지 내용은 /static/notices.json — 업데이트를 올릴 때마다 맨 위에 하나씩 추가
    열어 둔 채로 업데이트가 올라오면 '새로고침하면 적용돼요' 안내도 같이 */
 'use strict';
@@ -21,8 +21,8 @@ function noticeSkinTo(sel) {
     if (!el) return;
     el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     const row = el.closest('.set-row') || el;
-    row.classList.add('nt-flash');
-    setTimeout(() => row.classList.remove('nt-flash'), 2000);
+    row.classList.add('nw-flash');
+    setTimeout(() => row.classList.remove('nw-flash'), 2000);
   }, 150);
 }
 
@@ -38,15 +38,15 @@ async function loadNotices() {
 }
 const noticeStale = () => !!(NOTICES.length && noticeLoadedId !== null && NOTICES[0].id !== noticeLoadedId);
 function renderNoticeDot() {
-  const b = $('#btnNotice');
+  const b = $('#btnNews');
   if (b) b.classList.toggle('new', !!(NOTICES.length && NOTICES[0].id !== noticeSeen()));
 }
 
 function noticeItemHtml(it, live) {
   const fn = it.go && NOTICE_GO[it.go], need = it.go && NOTICE_NEED[it.go];
   const can = live && fn && (!need || typeof window[need] === 'function');
-  return `<div class="nt-item"><span class="nt-ico">${esc(it.icon || '✨')}</span><div class="nt-txt"><b>${esc(it.title || '')}</b><p>${esc(it.text || '')}</p></div>`
-    + (can ? `<button type="button" class="small-btn nt-go" data-go="${esc(it.go)}">${esc(it.goLabel || '바로 가기')}</button>` : '') + '</div>';
+  return `<div class="nw-item"><span class="nw-ico">${esc(it.icon || '✨')}</span><div class="nw-txt"><b>${esc(it.title || '')}</b><p>${esc(it.text || '')}</p></div>`
+    + (can ? `<button type="button" class="small-btn nw-go" data-go="${esc(it.go)}">${esc(it.goLabel || '바로 가기')}</button>` : '') + '</div>';
 }
 function fmtNoticeDate(d) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || '');
@@ -56,37 +56,38 @@ function openNotice() {
   if (!NOTICES.length) { toast('아직 공지가 없어요.'); return; }
   const seen = noticeSeen(), stale = noticeStale();
   const [top, ...old] = NOTICES;
-  $('#ntStale').classList.toggle('hidden', !stale);
-  $('#ntBody').innerHTML = `
-    <section class="nt-card">
-      <div class="nt-h"><h4>${esc(top.title || '업데이트')}</h4>${top.id !== seen ? '<em class="nt-new">NEW</em>' : ''}<small>${fmtNoticeDate(top.date)}</small></div>
-      ${top.lead ? `<p class="nt-lead">${esc(top.lead)}</p>` : ''}
-      <div class="nt-items">${(top.items || []).map((it) => noticeItemHtml(it, !stale)).join('')}</div>
+  $('#nwStale').classList.toggle('hidden', !stale);
+  $('#nwBody').innerHTML = `
+    <section class="nw-card">
+      <div class="nw-h"><h4>${esc(top.title || '업데이트')}</h4>${top.id !== seen ? '<em class="nw-new">NEW</em>' : ''}<small>${fmtNoticeDate(top.date)}</small></div>
+      ${top.lead ? `<p class="nw-lead">${esc(top.lead)}</p>` : ''}
+      <div class="nw-items">${(top.items || []).map((it) => noticeItemHtml(it, !stale)).join('')}</div>
     </section>
-    ${old.length ? `<h5 class="nt-oldh">지난 소식</h5>${old.map((n) => `<details class="nt-old"><summary><b>${esc(n.title || '')}</b><small>${fmtNoticeDate(n.date)}</small></summary>`
-      + `${n.lead ? `<p class="nt-lead">${esc(n.lead)}</p>` : ''}<div class="nt-items">${(n.items || []).map((it) => noticeItemHtml(it, !stale)).join('')}</div></details>`).join('')}` : ''}`;
-  if (!$('#noticeDlg').open) $('#noticeDlg').showModal();
-  $('#ntBody').scrollTop = 0;
+    ${old.length ? `<h5 class="nw-oldh">지난 소식</h5>${old.map((n) => `<details class="nw-old"><summary><b>${esc(n.title || '')}</b><small>${fmtNoticeDate(n.date)}</small></summary>`
+      + `${n.lead ? `<p class="nw-lead">${esc(n.lead)}</p>` : ''}<div class="nw-items">${(n.items || []).map((it) => noticeItemHtml(it, !stale)).join('')}</div></details>`).join('')}` : ''}`;
+  if (!$('#newsDlg').open) $('#newsDlg').showModal();
+  $('#nwBody').scrollTop = 0;
 }
-function closeNotice() { const d = $('#noticeDlg'); if (d.open) d.close(); }
-$('#noticeDlg').addEventListener('close', () => {
+function closeNotice() { const d = $('#newsDlg'); if (d.open) d.close(); }
+$('#newsDlg').addEventListener('close', () => {
   if (NOTICES.length) store.set('noticeSeen', NOTICES[0].id);    // 한 번 보면 끝 (닫기·확인·바로 가기 모두)
   renderNoticeDot();
 });
-$('#ntOk').addEventListener('click', closeNotice);
-$('#ntClose').addEventListener('click', closeNotice);
-$('#ntReload').addEventListener('click', () => location.reload());
-$('#ntBody').addEventListener('click', (e) => {
+$('#nwOk').addEventListener('click', closeNotice);
+$('#nwClose').addEventListener('click', closeNotice);
+$('#nwReload').addEventListener('click', () => location.reload());
+$('#nwBody').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-go]');
   if (!b) return;
   closeNotice();
   try { NOTICE_GO[b.dataset.go](); } catch (err) { console.warn('공지 바로 가기 오류', err); }
 });
-$('#btnNotice').addEventListener('click', openNotice);
+$('#btnNews').addEventListener('click', openNotice);
 
-/* 로비에서 다른 창이 없을 때만 자동으로 */
+/* 로비에서 다른 창(알림 창 포함)이 없을 때만 자동으로 */
 const noticeCanShow = () => !window.gateOpen && typeof currentScreen !== 'undefined' && currentScreen === 'lobby'
-  && !document.hidden && !document.querySelector('dialog[open]') && !document.body.classList.contains('busy');
+  && !document.hidden && !document.querySelector('dialog[open]') && !document.body.classList.contains('busy')
+  && !document.querySelector('.on-menu:not(.hidden), #duelBox:not(.hidden)');   // 🔔 알림·리그·도전장 창이 떠 있으면 기다림
 function noticeAuto() {
   clearInterval(noticeWait);
   if (!NOTICES.length || NOTICES[0].id === noticeSeen()) return;
