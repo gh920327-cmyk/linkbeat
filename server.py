@@ -1090,13 +1090,27 @@ def on_play(acct, pr, nick, sid, diff, keys, data):
                 _grant(p, "fx_star", "미션을 다 한 날 10일", out["items"])
         # 도전 (고스트로 한 도전장 · 복수)
         duel = data.get("duel") if isinstance(data.get("duel"), dict) else None
+        prepaid = 0     # 도전 결과 함수가 이미 계정에 넣은 ♪ (마지막 합산에서 또 넣지 않게)
         if duel:
             r = _duel_ghost_result(acct, p, duel, info)
             if r:
                 out["duel"] = r
                 if r.get("coins"):
                     coins += r["coins"]
+                    prepaid += r["coins"]
                     out["coinParts"].append([r["label"], r["coins"]])
+        # 복수하기 버튼 없이 그냥 쳐서 다시 넘어도 복수 성공
+        try:
+            rv = _revenge_auto(p, info, {out["duel"]["vs"]} if out.get("duel") and out["duel"].get("win") and "복수" in out["duel"].get("label", "") else set())
+        except Exception as e:
+            rv = []
+            log("복수 확인 실패:", e)
+        if rv:
+            out["revenge"] = rv
+            got = sum(x["coins"] for x in rv)
+            if got:
+                coins += got
+                out["coinParts"].append(["복수 성공", got])
         # 경험치 · 레벨
         before = p["xp"]
         p["xp"] = before + xp
@@ -1120,8 +1134,8 @@ def on_play(acct, pr, nick, sid, diff, keys, data):
             _ana_add(p, info, data)
         except Exception as e:
             log("실력 분석 기록 실패:", e)
-        p["coins"] += coins
-        p["earned"] = p.get("earned", 0) + coins
+        p["coins"] += coins - prepaid
+        p["earned"] = p.get("earned", 0) + coins - prepaid
         p["lastPlay"] = time.time()
         out.update({"xp": {"gain": xp, "before": before, "after": p["xp"]}, "coins": {"gain": coins, "total": p["coins"]},
                     "streakN": p["streak"]["n"], "shields": p["streak"].get("shields", 0)})
@@ -1789,6 +1803,36 @@ def _duel_reward(p, win):
     return c
 
 
+REVENGE_COIN = 40
+
+
+def _revenge_auto(p, info, paid=()):
+    """[복수하기]를 안 눌러도: 내 기록을 넘었던 사람의 '지금' 기록보다 높게 치면 그 알림이 바로 복수 성공 (FILE_LOCK 안에서)
+    같은 사람에게 여러 번 넘겼던 알림은 모두 성공 처리하되 보상은 사람마다 한 번 · 한 판에 최대 3명"""
+    score = int(info.get("score", 0) or 0)
+    if score <= 0:
+        return []
+    keys, ai, hl = int(info["keys"]), bool(info["ai"]), bool(info["hl"])
+    best = {}
+    out = []
+    for n in reversed(p.get("notices", [])):
+        if (n.get("type") != "beaten" or n.get("done") or n.get("sid") != info["sid"] or n.get("diff") != info["diff"]
+                or int(n.get("keys", 4) or 4) != keys or bool(n.get("ai")) != ai or bool(n.get("hl")) != hl):
+            continue
+        by = n.get("by") or ""
+        if by not in best:
+            e = _board_entry(info["sid"], by, info["diff"], keys, ai, hl)
+            best[by] = int((e or {}).get("score", 0) or 0)
+        need = max(int(n.get("theirs", 0) or 0), best[by])
+        if score <= need:
+            continue
+        n["done"] = "won"
+        if by in paid or any(x["vs"] == by for x in out):     # 복수하기 버튼으로 이미 보상 받은 사람
+            continue
+        out.append({"vs": by, "mine": score, "theirs": need, "coins": REVENGE_COIN if len(out) < 3 else 0})
+    return out
+
+
 def _duel_ghost_result(acct, p, duel, info):
     """고스트로 한 도전장·복수: 상대 기록과 비교해서 결과 · 보상 (FILE_LOCK 안에서)"""
     kind = duel.get("kind")
@@ -1863,9 +1907,13 @@ def notify_beaten(winner_nick, sid, diff, keys, hl, ai, new_score, passed):
             if not a or a == wa:
                 continue
             p = prog_of(a)
+            wp = _prog_all().get(wa) if wa else None
+            rev = any(x.get("type") == "beaten" and not x.get("done") and x.get("by") == e.get("name") and x.get("sid") == sid
+                      and x.get("diff") == diff and int(x.get("keys", 4) or 4) == keys and bool(x.get("hl")) == bool(hl)
+                      and bool(x.get("ai")) == bool(ai) for x in (wp or {}).get("notices", []))
             n = _notice(p, {"type": "beaten", "by": winner_nick, "byAcct": wa, "sid": sid, "title": song.get("title", sid), "diff": diff,
-                            "keys": keys, "hl": hl, "ai": ai, "mine": e.get("score", 0), "theirs": new_score,
-                            "text": f"{winner_nick} 님이 내 기록을 넘었어요!"})
+                            "keys": keys, "hl": hl, "ai": ai, "mine": e.get("score", 0), "theirs": new_score, "rev": rev,
+                            "text": f"{winner_nick} 님이 복수에 성공했어요! 내 기록을 다시 넘었어요" if rev else f"{winner_nick} 님이 내 기록을 넘었어요!"})
             pushes.append((a, n))
         if pushes:
             _prog_save()

@@ -188,7 +188,7 @@ function noticeHtml(n) {
   const here = n.sid && songById(n.sid);
   let body = esc(n.text || ''), acts = '';
   if (n.type === 'beaten') {
-    body = `<span class="nt-line"><b>${esc(n.by)}</b> 님이 내 기록을 넘었어요</span>${what}<small class="nt-sc">내 ${fmtN(n.mine)} → ${esc(n.by)} ${fmtN(n.theirs)}</small>`;
+    body = `<span class="nt-line"><b>${esc(n.by)}</b> 님이 ${n.rev ? '복수에 성공했어요! 내 기록을 다시 넘었어요' : '내 기록을 넘었어요'}</span>${what}<small class="nt-sc">내 ${fmtN(n.mine)} → ${esc(n.by)} ${fmtN(n.theirs)}</small>`;
     acts = n.done ? (n.done === 'won' ? '<span class="nt-done win">복수 성공!</span>' : '')
       : here && !n.hl ? `<button type="button" class="small-btn primary nt-rev" data-id="${esc(n.id)}" title="접속 중이면 실시간 대결, 아니면 고스트와 대결">⚔️ 복수하기</button>` : '';
   } else if (n.type === 'chal') {
@@ -284,6 +284,10 @@ function growOnResult(g, r, res) {
   if (rw.duel) {
     const d = rw.duel;
     L.push(`<div class="rw-line rw-duel ${d.win ? 'win' : 'lose'}">⚔️ ${esc(d.vs)} 님과 ${d.label.includes('복수') ? '복수전' : '도전장'}: ${d.win ? '<b>승리!</b>' : d.tie ? '<b>무승부</b>' : '아쉽게 패배'} <small>${fmtN(d.mine)} vs ${fmtN(d.theirs)}</small></div>`);
+  }
+  if (rw.revenge && rw.revenge.length) {
+    L.push(`<div class="rw-line rw-duel win">⚔️ ${rw.revenge.map((d) => `<b>${esc(d.vs)}</b>`).join(', ')} 님에게 <b>복수 성공!</b> 기록을 다시 넘었어요 <small>${fmtN(rw.revenge[0].mine)} vs ${fmtN(rw.revenge[0].theirs)}</small></div>`);
+    setTimeout(() => { sfx.ding(); toast(`⚔️ 복수 성공! ${rw.revenge.map((d) => d.vs).join(', ')} 님의 기록을 다시 넘었어요`, 3200); }, 1200);
   }
   if (rw.levelUp) L.push(`<div class="rw-line rw-lv">⬆ 레벨 업! Lv ${rw.levelUp.from} → ${rw.levelUp.to} · +${100 * (rw.levelUp.to - rw.levelUp.from)}♪</div>`);
   if (rw.items.length) L.push(`<div class="rw-line rw-items">🎁 새 꾸미기: ${rw.items.map((id) => `<b>${esc((itemOf(id) || {}).name || id)}</b>`).join(', ')} <button type="button" class="small-btn" id="rwShop">상점에서 보기</button></div>`);
