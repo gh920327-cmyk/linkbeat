@@ -185,6 +185,8 @@ function markLocks() {
 }
 $('#hitSound').innerHTML = hitSoundOptions();
 
+const LINE_SW_CLS = { milkyway: 'mw', eq: 'eqs', glass: 'gls' };
+const LINE_TITLE = { lights: '눈 쌓인 전구 줄', milkyway: '🪐 은하수', eq: '💿 이퀄라이저', glass: '💧 유리 판정선', rainbow: '무지개', ghost: '유령' };
 function renderSkin() {
   const sk = settings.skin;
   $('#themeSw').innerHTML = Object.entries(THEMES).map(([id, th]) => {
@@ -199,7 +201,7 @@ function renderSkin() {
   $('#laneScale').value = String(sk.laneScale);
   $('#gearPos').value = sk.gearPos;
   $('#lineSw').innerHTML = Object.entries(LINE_COLORS).map(([id, c]) =>
-    `<button class="dot-sw${sk.line === id ? ' on' : ''}${id === 'rainbow' ? ' rb' : ''}${id === 'lights' ? ' lt' : ''}" data-line="${id}" style="--c:${c}" title="${id === 'lights' ? '눈 쌓인 전구 줄' : id}"></button>`).join('');
+    `<button class="dot-sw${sk.line === id ? ' on' : ''}${id === 'rainbow' ? ' rb' : ''}${id === 'lights' ? ' lt' : ''}${LINE_SW_CLS[id] ? ' ' + LINE_SW_CLS[id] : ''}" data-line="${id}" style="--c:${c}" title="${LINE_TITLE[id] || id}"></button>`).join('');
   $$('#gearOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.gear || 'metal')));
   $$('#comboOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.comboStyle || 'normal')));
   $$('#fcFxOpt button').forEach((b) => b.classList.toggle('on', b.dataset.v === (sk.fcFx || 'basic')));

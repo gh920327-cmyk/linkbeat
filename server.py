@@ -281,6 +281,7 @@ def song_summary(song):
         "ai": ai_summary(song),
         "plays": sc["plays"],
         "board": sc["entries"],
+        "reqBy": song.get("reqBy", ""),
     }
 
 
@@ -1830,6 +1831,7 @@ def _revenge_auto(p, info, paid=()):
         if by in paid or any(x["vs"] == by for x in out):     # 복수하기 버튼으로 이미 보상 받은 사람
             continue
         out.append({"vs": by, "mine": score, "theirs": need, "coins": REVENGE_COIN if len(out) < 3 else 0})
+    p["revN"] = p.get("revN", 0) + len(out)          # 복수귀 업적
     return out
 
 
@@ -1877,6 +1879,7 @@ def _duel_ghost_result(acct, p, duel, info):
         if not win:
             return {"win": False, "vs": n.get("by"), "mine": info["score"], "theirs": n.get("theirs"), "coins": 0, "label": "복수"}
         n["done"] = "won"
+        p["revN"] = p.get("revN", 0) + 1
         c = 40
         p["coins"] = p.get("coins", 0) + c
         p["earned"] = p.get("earned", 0) + c
@@ -1892,6 +1895,48 @@ def notices_read(acct):
                 n["read"] = True
             _prog_save()
     return {"ok": True}
+
+
+def _beaten_n(p):
+    """기록 뺏긴 횟수 (예전 알림으로 처음 한 번 채움)"""
+    if "beatenN" not in p:
+        p["beatenN"] = sum(1 for n in p.get("notices", []) if n.get("type") == "beaten")
+    return p["beatenN"]
+
+
+def _trim_rivals(p):
+    r = p.get("rivals") or {}
+    if len(r) > 60:                     # 너무 많으면 주고받은 횟수가 적은 사람부터 정리
+        p["rivals"] = dict(sorted(r.items(), key=lambda kv: -(kv[1][0] + kv[1][1]))[:60])
+
+
+def _rival_best(p):
+    """숙명의 라이벌: 서로 2번 넘게 주고받은 사람 중 가장 많이 주고받은 사람 → (이름, 횟수)"""
+    best, bn = "", 0
+    for nk, (a, b) in (p.get("rivals") or {}).items():
+        n = a + b if min(a, b) >= 2 else min(a + b, 4)     # 한쪽만 많으면 4에서 멈춤 (서로 주고받아야 5)
+        if n > bn:
+            best, bn = nk, n
+    return best, bn
+
+
+def _dj_stats(nick):
+    """DJ 업적: 내가 신청해서 들어온 곡 수, 그 곡들을 다른 사람들이 끝까지 친 판 수"""
+    if not nick:
+        return {"songs": 0, "plays": 0}
+    mine = {s["id"] for s in list_songs() if s.get("reqBy") == nick}
+    if not mine:
+        return {"songs": 0, "plays": 0}
+    d = read_json(PLAYS_FILE, {})
+    n = 0
+    for name, u in (d.items() if isinstance(d, dict) else []):
+        if name == nick or not isinstance(u, dict):
+            continue
+        for sid in mine:
+            c = u.get(sid)
+            if isinstance(c, list) and c:
+                n += int(c[0])
+    return {"songs": len(mine), "plays": n}
 
 
 def notify_beaten(winner_nick, sid, diff, keys, hl, ai, new_score, passed):
@@ -1911,6 +1956,14 @@ def notify_beaten(winner_nick, sid, diff, keys, hl, ai, new_score, passed):
             rev = any(x.get("type") == "beaten" and not x.get("done") and x.get("by") == e.get("name") and x.get("sid") == sid
                       and x.get("diff") == diff and int(x.get("keys", 4) or 4) == keys and bool(x.get("hl")) == bool(hl)
                       and bool(x.get("ai")) == bool(ai) for x in (wp or {}).get("notices", []))
+            p["beatenN"] = _beaten_n(p) + 1                     # 동네북 업적
+            rv_l = p.setdefault("rivals", {}).setdefault(winner_nick, [0, 0])    # [내가 넘음, 그 사람이 넘음]
+            rv_l[1] += 1
+            if wp is not None:
+                rv_w = wp.setdefault("rivals", {}).setdefault(e.get("name") or "", [0, 0])
+                rv_w[0] += 1
+                _trim_rivals(wp)
+            _trim_rivals(p)
             n = _notice(p, {"type": "beaten", "by": winner_nick, "byAcct": wa, "sid": sid, "title": song.get("title", sid), "diff": diff,
                             "keys": keys, "hl": hl, "ai": ai, "mine": e.get("score", 0), "theirs": new_score, "rev": rev,
                             "text": f"{winner_nick} 님이 복수에 성공했어요! 내 기록을 다시 넘었어요" if rev else f"{winner_nick} 님이 내 기록을 넘었어요!"})
@@ -1945,6 +1998,12 @@ def me_summary(acct, pr, data):
             if evp:
                 _ev_words(p, ev, evp)
         res["words"] = list(p.get("words", []))
+        rnick, rn = _rival_best(p)
+        res["achSrv"] = {"beatenN": _beaten_n(p), "revN": p.get("revN", 0), "rival": rnick, "rivalN": rn}
+    try:
+        res["achSrv"].update({("dj" + k.title()): v for k, v in _dj_stats(res["nick"]).items()})
+    except Exception as e:
+        log("DJ 통계 실패:", e)
     res["league"] = league_public(acct)
     res["shop"] = dict(shop_today(), prices={i: price_of(i) for i in ITEMS if ITEMS[i].get("price")})
     res["medal"] = medal_of(acct)
@@ -2198,6 +2257,8 @@ def finish_song(vid, meta, res, keep_edited=False, keep_title=False):
         song["ai"] = old["ai"]
     if old and isinstance(old.get("onsets"), list):
         song["onsets"] = old["onsets"]
+    if old and old.get("reqBy"):            # 곡 신청한 사람 (DJ 업적)
+        song["reqBy"] = old["reqBy"]
     if old and song_quiet(old):                   # 소리 없는 구간 (호스트 PC가 음원에서 찾음) — 새 채보에도 적용
         song["quiet"] = old["quiet"]
     if old and keep_edited and old.get("edited"):
@@ -2686,6 +2747,10 @@ def finish_pc_job(job, meta, res):
     """엔진이 보낸 결과로 곡 저장 (가수 찾기 검색이 있어 작업 스레드에서)"""
     try:
         song = finish_song(job["vid"], meta, res, job.get("keepEdited"), job.get("keepTitle"))
+        by = str(job.get("by") or "").strip()
+        if by and by != "호스트" and not song.get("reqBy"):      # 곡 신청으로 들어온 곡: 신청한 사람 (DJ 업적)
+            song["reqBy"] = by
+            save_song(song)
         job.update(stage="done", msg="완료!", songId=job["vid"], finished=time.time())
         # 호스트 PC에 AI 채보 도구가 있으면 이어서 AI 채보도 (기존 채보는 이미 플레이 가능)
         if WORKER["ai"] and not job.get("noAi") and not song.get("ai"):
@@ -5067,8 +5132,9 @@ def duel_finish(room, results):
                         n["done"] = ch["status"]
         elif pq:
             for n in pq.get("notices", []):
-                if n.get("id") == d["id"] and not tie and req_win:
+                if n.get("id") == d["id"] and not tie and req_win and not n.get("done"):
                     n["done"] = "won"
+                    pq["revN"] = pq.get("revN", 0) + 1
         _prog_save()
     win_id = None if tie else (d["req"] if req_win else d["opp"])
     return {"kind": d["kind"], "tie": tie, "winner": win_id, "coins": coins,

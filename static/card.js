@@ -221,6 +221,10 @@ async function drawResultCard(g, r, withThumb = true) {
   return cv;
 }
 /* 결과 카드 테두리 (상점): 은 · 금 · 네온 · 무지개 · 전설 */
+function cardStar(ctx, x, y, ro, ri) {
+  for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4 - Math.PI / 2, r = i % 2 ? ri : ro; if (i) ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); else ctx.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r); }
+  ctx.closePath();
+}
 function cardFrame(ctx, id) {
   if (!id || (typeof itemOwned === 'function' && !itemOwned(id))) return;
   const W = CARD_W, H = CARD_H, m = 14;
@@ -237,6 +241,13 @@ function cardFrame(ctx, id) {
     st = ctx.createLinearGradient(0, H, W, 0);
     ['#3b2a7a', '#ff6f91', '#ff9a6b', '#ffd36b', '#fff3c4'].forEach((x, i) => st.addColorStop(i / 4, x));
     ctx.shadowColor = '#ff9a6b'; ctx.shadowBlur = 22;
+  } else if (id === 'frame_star') {       // 별자리 (별밤 세트): 보랏빛 → 하양 → 하늘빛
+    st = ctx.createLinearGradient(0, 0, W, H);
+    ['#8a7dff', '#ffffff', '#7fd6ff', '#b49bff', '#8a7dff'].forEach((x, i) => st.addColorStop(i / 4, x));
+    ctx.shadowColor = '#8a7dff'; ctx.shadowBlur = 24;
+  } else if (id === 'frame_glass') {      // 유리 (유리 세트): 반투명 하양 + 민트빛
+    st = 'rgba(255,255,255,0.75)';
+    ctx.shadowColor = '#bff6ff'; ctx.shadowBlur = 20;
   } else if (id === 'frame_ice') {        // 얼음 (시즌 2): 하늘빛 + 서리
     st = ctx.createLinearGradient(0, 0, W, H);
     ['#bfeaff', '#ffffff', '#7fd0ff', '#e8f8ff', '#5ab4ff'].forEach((x, i) => st.addColorStop(i / 4, x));
@@ -256,6 +267,19 @@ function cardFrame(ctx, id) {
     for (const [x, y] of [[m + 8, m + 8], [W - m - 8, m + 8], [m + 8, H - m - 8], [W - m - 8, H - m - 8]]) {
       ctx.beginPath(); ctx.moveTo(x, y - 22); ctx.lineTo(x + 9, y); ctx.lineTo(x, y + 22); ctx.lineTo(x - 9, y); ctx.closePath(); ctx.fill();
     }
+  }
+  if (id === 'frame_star') {               // 테두리를 따라 이어진 별자리
+    const pts = [[m + 70, m], [m + 190, m], [W - m - 120, m], [W - m, m + 160], [W - m, H * 0.55], [W - m - 150, H - m], [m + 120, H - m], [m, H * 0.62], [m, m + 220]];
+    ctx.fillStyle = '#ffffff'; ctx.shadowColor = '#b49bff'; ctx.shadowBlur = 14;
+    pts.forEach(([x, y], i) => { ctx.beginPath(); cardStar(ctx, x, y, i % 3 ? 9 : 14, i % 3 ? 2.6 : 3.6); ctx.fill(); });
+    ctx.shadowBlur = 0;
+  } else if (id === 'frame_glass') {       // 안쪽 민트 줄 + 왼쪽 위 반사
+    ctx.strokeStyle = 'rgba(143,245,220,0.7)'; ctx.lineWidth = 2;
+    cardRound(ctx, m + 10, m + 10, W - m * 2 - 20, H - m * 2 - 20, 20); ctx.stroke();
+    const gl = ctx.createLinearGradient(m, m, m + 260, m + 260);
+    gl.addColorStop(0, 'rgba(255,255,255,0.75)'); gl.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.strokeStyle = gl; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(m + 4, m + 260); ctx.lineTo(m + 4, m + 30); ctx.quadraticCurveTo(m + 4, m + 4, m + 30, m + 4); ctx.lineTo(m + 260, m + 4); ctx.stroke();
   }
   ctx.restore();
 }
