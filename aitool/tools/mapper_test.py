@@ -41,7 +41,14 @@ def ready():
     return MPY.exists() and (REPO / "inference.py").exists()
 
 
-def mapper_args(audio, out_dir, sr, ref=None, super_timing=True):
+def mapper_mode():
+    """settings.json 의 mapperMode: 'seq'(지금 방식, 기본) / 'server'(동시에 도는 난이도를 AI 하나가 묶어서) / 'parallel'(조각을 32개씩 한꺼번에)
+    — 19_AI방식바꾸기.bat 으로 바꿈. 18_AI속도시험.bat 으로 세 방식 시간을 같은 곡으로 재 볼 수 있음"""
+    v = L.load_settings().get("mapperMode")
+    return v if v in ("seq", "server", "parallel") else "seq"
+
+
+def mapper_args(audio, out_dir, sr, ref=None, super_timing=True, server=False, parallel=False, timing_only=False):
     q = lambda p: "'" + str(p).replace("\\", "/") + "'"      # Hydra 값 (경로는 / 로)
     args = [f"audio_path={q(audio)}", f"output_path={q(out_dir)}",
             "gamemode=3", "keycount=4", f"difficulty={sr}", "year=2023",
@@ -49,7 +56,11 @@ def mapper_args(audio, out_dir, sr, ref=None, super_timing=True):
     if ref:
         args += [f"beatmap_path={q(ref)}", "in_context=[TIMING]", "output_type=[MAP]"]
     else:
-        args += ["output_type=[TIMING,MAP]", f"super_timing={'true' if super_timing else 'false'}"]
+        args += ["output_type=[TIMING]" if timing_only else "output_type=[TIMING,MAP]", f"super_timing={'true' if super_timing else 'false'}"]
+    if server:
+        args += ["use_server=true"]          # 동시에 도는 여러 난이도의 요청을 AI 하나가 묶어서 계산
+    if parallel:
+        args += ["parallel=true"]            # 곡 조각들을 차례로 말고 32개씩 한꺼번에 (앞 조각을 안 보고 씀)
     env = dict(os.environ, PYTHONIOENCODING="utf-8", HF_HOME=str(M / "hf"),
                PATH=os.pathsep.join([str(ROOT / "bin"), os.environ.get("PATH", "")]))
     return [str(MPY), str(REPO / "inference.py")] + args, env
@@ -60,10 +71,10 @@ def newest_osu(out_dir, before=()):
     return max(new, key=lambda p: p.stat().st_mtime) if new else None
 
 
-def run_one(audio, out_dir, sr, ref=None, super_timing=True):
+def run_one(audio, out_dir, sr, ref=None, super_timing=True, parallel=False):
     """새 AI 한 번 돌리기 → 만든 .osu 경로 (실패하면 None). ref 가 있으면 그 박자(타이밍)를 그대로 씀"""
     out_dir.mkdir(parents=True, exist_ok=True)
-    cmd, env = mapper_args(audio, out_dir, sr, ref, super_timing)
+    cmd, env = mapper_args(audio, out_dir, sr, ref, super_timing, parallel=parallel)
     before = set(out_dir.glob("*.osu"))
     t0 = time.time()
     r = subprocess.run(cmd, cwd=str(REPO), env=env)   # 콘솔·출력은 부모 것 그대로 (실행기 안에서는 창 없이)
@@ -182,7 +193,7 @@ def parallel_jobs():
     return (2 if free is None else max(1, min(4, (free - 1500) // 2000))), False
 
 
-def run_many(audio, odir, srs, ref, jobs, auto=True):
+def run_many(audio, odir, srs, ref, jobs, auto=True, server=False):
     """박자(ref)가 정해진 뒤 나머지 난이도를 jobs 개씩 동시에 — 그래픽카드가 한 번에 한 글자씩 쓰느라 놀고 있는 시간을 채움.
     auto: 새로 시작하기 전마다 게임 중인지 다시 봄 → 게임 중이면 하나씩 (이미 돌던 건 마저 끝냄), 끝나면 다시 동시에
     실패한 건(메모리 부족 등) 끝나고 하나씩 다시 → {별점: .osu 경로}"""
@@ -204,7 +215,7 @@ def run_many(audio, odir, srs, ref, jobs, auto=True):
             sr = pending.pop(0)
             d = odir / f"sr{sr:.1f}"
             d.mkdir(parents=True, exist_ok=True)
-            cmd, env = mapper_args(audio, d, sr, ref)
+            cmd, env = mapper_args(audio, d, sr, ref, server=server)
             log = open(d / "run.log", "wb")
             proc = subprocess.Popen(cmd, cwd=str(REPO), env=env, stdout=log, stderr=subprocess.STDOUT, creationflags=flags)
             running[sr] = (proc, log, d, time.time())
@@ -231,14 +242,46 @@ def run_many(audio, odir, srs, ref, jobs, auto=True):
     return got
 
 
-def generate(wav, odir):
+def timing_ref(wav, odir):
+    """박자(타이밍)만 먼저 찾기 → 박자만 든 .osu (실패하면 None) — 'parallel' 방식에서 모든 난이도가 이걸 씀"""
+    d = odir / "timing"
+    d.mkdir(parents=True, exist_ok=True)
+    cmd, env = mapper_args(wav, d, SRS[0], timing_only=True)
+    before = set(d.glob("*.osu"))
+    t0 = time.time()
+    r = subprocess.run(cmd, cwd=str(REPO), env=env)
+    p = newest_osu(d, before)
+    if r.returncode != 0 or p is None:
+        SAY(f"  ⚠ 박자만 찾기 실패 (코드 {r.returncode}) — 지금 방식으로 할게요")
+        return None
+    SAY(f"  박자 찾기 {time.time() - t0:.0f}초")
+    return p
+
+
+def generate(wav, odir, mode=None):
     """별점 단계마다 새 AI로 채보 → [.osu 경로]. 첫 채보의 박자를 나머지 난이도에도 그대로 씀 (난이도끼리 박자가 같게)
-    첫 채보(박자 찾기 포함)는 혼자, 나머지는 그래픽카드 메모리에 맞춰 동시에"""
+    mode (없으면 settings 의 mapperMode):
+      seq      첫 채보(박자 찾기 포함)는 혼자, 나머지는 그래픽카드 메모리에 맞춰 동시에 (지금 방식)
+      server   위와 같지만 동시에 도는 난이도들의 계산을 AI 하나가 묶어서
+      parallel 박자만 먼저 찾고, 난이도마다 곡 조각들을 32개씩 한꺼번에 (조각이 앞 조각을 안 보고 씀)"""
+    mode = mode or mapper_mode()
     if odir.exists():
         shutil.rmtree(odir, ignore_errors=True)
     odir.mkdir(parents=True, exist_ok=True)
+    t_start = time.time()
     made, ref = {}, None
     rest = list(SRS)
+    if mode == "parallel":
+        SAY(f"AI가 채보 쓰는 중... 박자 찾는 중 (빠른 방식)")
+        tref = timing_ref(wav, odir)
+        if tref is not None:
+            for k, sr in enumerate(SRS):
+                SAY(f"AI가 채보 쓰는 중... 새 AI {k + 1}/{len(SRS)} (osu 별점 {sr} · 한꺼번에)")
+                p = run_one(wav, odir / f"sr{sr:.1f}", sr, ref=tref, parallel=True)
+                if p is not None:
+                    made[sr] = p
+            rest = []
+            ref = tref
     while rest and ref is None:                        # 박자를 찾을 때까지 (보통 첫 번째에서 끝남)
         sr = rest.pop(0)
         SAY(f"AI가 채보 쓰는 중... 새 AI {len(made) + 1}/{len(SRS)} (osu 별점 {sr} · 박자 찾는 중)")
@@ -249,6 +292,10 @@ def generate(wav, odir):
         if p is not None:
             ref = p
             made[sr] = p
+    if rest and ref is not None and mode == "server":
+        SAY(f"AI가 채보 쓰는 중... 나머지 {len(rest)}개 난이도 (AI 하나가 묶어서 동시에)")
+        made.update(run_many(wav, odir, rest, ref, len(rest), auto=True, server=True))
+        rest = []
     if rest and ref is not None:
         jobs, fixed = parallel_jobs()
         if jobs > 1:
@@ -266,6 +313,7 @@ def generate(wav, odir):
             dst = odir / f"sr{sr:.1f}_m.osu"
             shutil.copy2(made[sr], dst)
             out.append(dst)
+    (odir / "mode.json").write_text(json.dumps({"mode": mode, "secs": round(time.time() - t_start)}), encoding="utf-8")
     return out
 
 
@@ -477,6 +525,140 @@ def cmd_resend(link):
     SAY(f"새 AI 채보를 다시 올렸어요: {r.get('counts')}")
 
 
+SPEED = OUTM / "_speed"
+SPEED_BACKUP = ROOT / "backup_speed"
+MODES = [("seq", "지금 방식"), ("server", "2번 (난이도 묶어서)"), ("parallel", "1번 (조각 한꺼번에)")]
+WORKING = ("claimed", "info", "download", "analyze", "ai", "upload")
+
+
+def wait_idle(srv):
+    """엔진이 채보를 만드는 중이거나 게임 중이면 끝날 때까지 기다림 (같이 돌면 시간이 섞여서 비교가 안 됨)"""
+    said = ""
+    while True:
+        try:
+            busy = [j for j in srv.call("GET", "jobs", timeout=15).get("jobs", []) if j.get("stage") in WORKING]
+        except Exception:
+            busy = []
+        why = f"엔진이 '{(busy[0].get('title') or '')[:30]}' 채보를 만드는 중" if busy else busy_reason(before_start=True)
+        if not why:
+            return
+        if why != said:
+            SAY(f"  {why}이라 끝날 때까지 기다려요... (30초마다 다시 봐요)")
+            said = why
+        time.sleep(30)
+
+
+def chart_stats(chosen):
+    return {d: {"stars": round(c[0], 1), "notes": len(c[1])} for d, c in chosen.items()}
+
+
+def cmd_speed(ids):
+    """속도 시험: 같은 곡을 세 방식(지금 / 2번 / 1번)으로 만들어 걸린 시간·별점·노트 수 비교 → 1번 방식 채보는 게임에 잠깐 올림"""
+    import chartgen
+    need_installed()
+    srv = L.get_server(need_key=True)
+    ids = [L.parse_vid(x) or x.strip() for x in ids if x.strip()]
+    if not ids:                                        # 비우면 최근에 AI 채보를 만든 곡 2개
+        sums = sorted((p for p in OUTM.glob("*/summary.json") if not p.parent.name.startswith("_")),
+                      key=lambda p: -p.stat().st_mtime)
+        ids = [p.parent.name for p in sums][:2]
+    SAY(f"속도 시험: {len(ids)}곡 × 3가지 방식 (곡마다 15~20분쯤)")
+    rows = []
+    for vid in ids:
+        song = srv.call("GET", f"songs/{vid}")
+        title = song.get("title", vid)
+        basic = song.get("charts") or {}
+        targets = {d: chartgen.star_rating(basic[d], 4) for d in L.DIFF_ORDER if basic.get(d)}
+        duration = float(song.get("duration") or 900)
+        wdir = L.WORK / ("speed_" + vid)
+        res = {}
+        try:
+            SAY(f"\n========== {title} ==========")
+            SAY("오디오 받는 중")
+            wav, _ = L.download_audio(vid, wdir)
+            for mode, name in MODES:
+                wait_idle(srv)
+                SAY(f"\n--- {name} ---")
+                odir = SPEED / vid / mode
+                t0 = time.time()
+                try:
+                    made = generate(wav, odir, mode)
+                except Exception as e:
+                    traceback.print_exc()
+                    made = []
+                    SAY(f"  ⚠ {name} 실패: {e}")
+                secs = time.time() - t0
+                if not made:
+                    res[mode] = {"secs": round(secs), "fail": True}
+                    continue
+                quiet = find_quiet(wav, made, duration)
+                body, chosen, cands = choose(made, targets, duration, quiet)
+                save(odir, vid, title, targets, body, chosen, cands, secs)
+                res[mode] = {"secs": round(secs), "charts": chart_stats(chosen)}
+                SAY(f"  {name}: {secs / 60:.1f}분")
+        finally:
+            shutil.rmtree(wdir, ignore_errors=True)
+        rows.append({"vid": vid, "title": title, "targets": {d: round(v, 1) for d, v in targets.items()}, "res": res})
+        pb = SPEED / vid / "parallel" / "upload.json"
+        bk, cur = SPEED_BACKUP / vid, OUTM / vid
+        if pb.exists() and (cur / "upload.json").exists():   # 1번 방식 채보를 게임에 잠깐 올려서 직접 쳐 보게 (지금 AI 채보는 보관)
+            if not bk.exists():
+                shutil.copytree(cur, bk)
+            L.upload(srv, vid, json.loads(pb.read_text(encoding="utf-8")))
+            SAY("  1번 방식 채보를 게임에 올렸어요 (지금 AI 채보는 보관해 뒀어요)")
+    SPEED.mkdir(parents=True, exist_ok=True)
+    (SPEED / "report.json").write_text(json.dumps({"at": time.time(), "rows": rows}, ensure_ascii=False, indent=1), encoding="utf-8")
+    lines = ["", "=" * 60, "속도 시험 결과 (분)", f"{'곡':<28} " + " ".join(f"{n:>14}" for _, n in MODES)]
+    for r in rows:
+        cells = [("실패" if r["res"].get(m, {}).get("fail") else f"{r['res'][m]['secs'] / 60:.1f}") if m in r["res"] else "-" for m, _ in MODES]
+        lines.append(f"{r['title'][:28]:<28} " + " ".join(f"{c:>14}" for c in cells))
+        for m, name in MODES:                          # 난이도별 ★·노트 수 (기존 채보 ★ 대비)
+            ch = r["res"].get(m, {}).get("charts")
+            if ch:
+                lines.append(f"    {name:<16} " + " · ".join(f"{L.DIFF_KO.get(d, d)} ★{c['stars']}/{c['notes']}" for d, c in ch.items()))
+    lines += ["", "1번 방식 채보를 그 곡들에 올려 뒀어요. 게임을 새로고침하고 AI 채보로 쳐 보세요.",
+              "마음에 안 들면 19_AI속도시험되돌리기.bat 으로 원래 AI 채보로 돌아가요.",
+              "결과 파일: out_mapper\\_speed\\report.json"]
+    (SPEED / "report.txt").write_text("\n".join(lines), encoding="utf-8")
+    for x in lines:
+        SAY(x)
+
+
+def cmd_speed_undo():
+    bks = [bk for bk in sorted(SPEED_BACKUP.glob("*")) if (bk / "upload.json").exists()] if SPEED_BACKUP.exists() else []
+    if not bks:
+        SAY("되돌릴 곡이 없어요.")
+        return
+    srv = L.get_server(need_key=True)
+    n = 0
+    for bk in bks:
+        up = bk / "upload.json"
+        L.upload(srv, bk.name, json.loads(up.read_text(encoding="utf-8")))
+        cur = OUTM / bk.name
+        if cur.exists():
+            shutil.rmtree(cur)
+        shutil.copytree(bk, cur)
+        shutil.rmtree(bk)
+        n += 1
+        SAY(f"  되돌렸어요: {bk.name}")
+    SAY(f"\n{n}곡을 원래 AI 채보로 되돌렸어요. 게임을 새로고침하면 반영돼요." if n else "되돌릴 곡이 없어요.")
+
+
+def cmd_mode(mode):
+    names = dict(MODES)
+    if mode not in names:
+        SAY(f"지금 방식: {names[mapper_mode()]}")
+        SAY("  1 = 지금 방식 · 2 = 난이도 묶어서 · 3 = 조각 한꺼번에")
+        mode = {"1": "seq", "2": "server", "3": "parallel"}.get(input("번호: ").strip(), "")
+        if mode not in names:
+            SAY("바꾸지 않았어요.")
+            return
+    st = L.load_settings()
+    st["mapperMode"] = mode
+    L.save_settings(st)
+    SAY(f"앞으로 새 곡 AI 채보는 '{names[mode]}'으로 만들어요. (실행기를 다시 켤 필요 없어요)")
+
+
 def main():
     ap = argparse.ArgumentParser(description="새 AI(Mapperatorinator) 채보")
     ap.add_argument("--try", dest="try_", default="")
@@ -484,19 +666,36 @@ def main():
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--all-undo", action="store_true")
     ap.add_argument("--skip", nargs="*", default=[])
+    ap.add_argument("--speed", nargs="*", default=None, help="속도 시험 (곡 링크/ID, 비우면 최근 2곡)")
+    ap.add_argument("--speed-undo", action="store_true")
+    ap.add_argument("--mode", nargs="?", const="", default=None, help="AI 채보 방식 바꾸기 (seq/server/parallel)")
     argv = sys.argv[1:]
     for i, x in enumerate(argv[:-1]):                 # '-'로 시작하는 곡 ID
         if x in ("--try", "--resend") and argv[i + 1].startswith("-"):
             argv[i:i + 2] = [f"{x}={argv[i + 1]}"]
             break
-    tail = []
+    tail, speed = [], None
+    if "--speed" in argv:                              # 그 뒤는 전부 곡 링크/ID (띄어쓰기·쉼표로 여러 개, '-'로 시작해도 됨)
+        k = argv.index("--speed")
+        argv, speed = argv[:k + 1], [y for x in argv[k + 1:] for y in x.replace(",", " ").split()]
     if "--skip" in argv:                               # 그 뒤는 전부 곡 ID ('-'로 시작하는 ID도 그대로)
         k = argv.index("--skip")
         argv, tail = argv[:k + 1], argv[k + 1:]
     a = ap.parse_args(argv)
     if tail:
         a.skip = tail
+    if speed is not None:
+        a.speed = speed
     try:
+        if a.speed is not None:
+            cmd_speed(a.speed)
+            return
+        if a.speed_undo:
+            cmd_speed_undo()
+            return
+        if a.mode is not None:
+            cmd_mode(a.mode)
+            return
         if a.all_undo:
             cmd_all_undo()
             return

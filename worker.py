@@ -14,13 +14,14 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1.2.15"
+VERSION = "1.3.0"
 
 # 가상환경의 실행 파일 폴더(deno 등)를 PATH 앞에 → yt-dlp가 JS 런타임을 찾을 수 있게
 os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
@@ -116,8 +117,28 @@ def comfy_dir():
     return COMFY
 
 
+# 두 줄로 일하기: 'cpu' 줄(음원 받기·기본 채보)과 'gpu' 줄(AI 채보·AI 캐릭터)이 동시에 돎
+# 실행기 화면에는 한 줄만 보이니까 두 줄의 상태를 합쳐서 보여 줌
+_LANE = threading.local()
+_LANES = {}
+_LANE_LOCK = threading.Lock()
+LANE_NAME = {"cpu": "기본 채보", "gpu": "AI"}
+
+
 def status(state, msg="", **extra):
-    print(json.dumps(dict(state=state, msg=msg, **extra), ensure_ascii=False), flush=True)
+    lane = getattr(_LANE, "name", None)
+    if not lane:
+        print(json.dumps(dict(state=state, msg=msg, **extra), ensure_ascii=False), flush=True)
+        return
+    with _LANE_LOCK:
+        _LANES[lane] = (state, msg)
+        states = [st for st, _ in _LANES.values()]
+        top = next((x for x in ("working", "offline", "error") if x in states), "ready")
+        if top == "ready":                # 둘 다 쉬는 중이면 기본 채보 줄 말만 (AI 줄은 'AI 대기 중')
+            text = _LANES.get("cpu", ("", msg))[1] or msg
+        else:
+            text = " · ".join(f"[{LANE_NAME.get(k, k)}] {m}" for k, (st, m) in sorted(_LANES.items()) if st != "ready")
+        print(json.dumps(dict(state=top, msg=text, **extra), ensure_ascii=False), flush=True)
 
 
 class Cancelled(Exception):
@@ -368,12 +389,20 @@ def loop(api):
     if c:
         status("ready", f"AI 캐릭터용 ComfyUI 찾음: {c}")
     fails = 0
+    fresh = True            # 막 켜졌다고 알림 → 서버가 예전에 하다 만 작업을 바로 다시 대기열로
+    lanes = False
     while True:
         try:
-            r = api.call("worker/poll", {"version": VERSION, "ai": bool(ai_tool()), "avatar": bool(comfy_dir())}, timeout=20)
+            r = api.call("worker/poll", {"version": VERSION, "ai": bool(ai_tool()), "avatar": bool(comfy_dir()),
+                                         "lane": "cpu", "fresh": fresh}, timeout=20)
+            fresh = False
             if fails:
                 status("ready", "서버에 다시 연결됐어요")
             fails = 0
+            if r.get("lanes") and not lanes:      # 서버가 두 줄로 일하기를 알면 그래픽카드 줄을 따로 켬
+                lanes = True
+                _LANE.name = "cpu"
+                threading.Thread(target=gpu_lane, args=(api,), daemon=True).start()
         except PermissionError as e:
             status("error", str(e))
             time.sleep(30)
@@ -389,6 +418,37 @@ def loop(api):
         else:
             if fails == 0:
                 status("ready", "대기 중" + (" · AI 채보 켜짐" if ai_tool() else ""))
+            time.sleep(3)
+
+
+def gpu_lane(api):
+    """그래픽카드 줄: AI 채보·AI 캐릭터만 가져와서 함 (그동안 다른 줄은 다음 곡 음원 받기·기본 채보)"""
+    _LANE.name = "gpu"
+    fails = 0
+    while True:
+        try:
+            r = api.call("worker/poll", {"version": VERSION, "ai": bool(ai_tool()), "avatar": bool(comfy_dir()),
+                                         "lane": "gpu"}, timeout=20)
+            fails = 0
+        except PermissionError:
+            time.sleep(30)
+            continue
+        except Exception:
+            fails += 1
+            time.sleep(min(30, 3 * fails))
+            continue
+        job = r.get("job")
+        if not job:
+            status("ready", "AI 대기 중")
+            time.sleep(3)
+            continue
+        try:
+            run_job(api, job)
+        except PermissionError:
+            time.sleep(30)
+        except Exception:
+            traceback.print_exc(file=sys.stderr)
+            status("ready", "AI 작업 중 문제가 생겨서 다음 작업으로 넘어가요")
             time.sleep(3)
 
 

@@ -2344,14 +2344,40 @@ def enqueue_pc(vid, keep_edited=False, keep_title=False, title="", by="", batch=
     return j
 
 
-def claim_job():
+def release_claimed():
+    """엔진이 새로 켜짐(실행기 재시작·업데이트·PC 재부팅): 하던 작업은 끝까지 못 했으니 바로 다시 대기열로
+    (예전엔 20분 동안 '진행 중'으로 남아서 새 곡이 시작을 안 하는 것처럼 보였음)"""
+    n = 0
+    for j in JOBS.values():
+        if j.get("pc") and j["stage"] in PENDING and j["stage"] != "waitpc":
+            j.update(stage="waitpc", msg="PC 채보 엔진이 다시 켜져서 다시 시작해요...")
+            n += 1
+    for a in AVJOBS.values():
+        if a["stage"] in ("claimed", "working"):
+            a.update(stage="waitpc", msg="호스트 PC가 다시 켜져서 다시 시작해요...")
+            n += 1
+    if n:
+        jobs_changed()
+        save_avqueue()
+        notify_all({"type": "avjobs"})
+        log("엔진 다시 켜짐 → 하던 작업 다시 대기:", n)
+
+
+def claim_job(lane=None):
+    """lane: 엔진이 두 줄로 일할 때 'cpu'(음원 받기·기본 채보) / 'gpu'(AI 채보) — 없으면 예전처럼 무엇이든 하나씩"""
     now = time.time()
     for j in JOBS.values():          # 엔진이 가져가고 오래 소식이 없으면 다시 대기
         if j.get("pc") and j["stage"] in PENDING and j["stage"] != "waitpc" and now - j.get("claimedAt", 0) > CLAIM_TIMEOUT:
             j.update(stage="waitpc", msg="PC 채보 엔진을 기다리는 중... (다시 시도)")
-    # AI 채보 작업은 AI 채보 도구가 있는 엔진만 가져감. 새 곡(기존 채보)이 AI 작업보다 먼저
-    waiting = sorted((j for j in JOBS.values() if j.get("pc") and j["stage"] == "waitpc" and (WORKER["ai"] or not j.get("aiOnly"))),
-                     key=lambda j: (bool(j.get("aiOnly")), j["created"]))
+
+    def fits(j):
+        if not (j.get("pc") and j["stage"] == "waitpc"):
+            return False
+        if j.get("aiOnly"):              # AI 채보 작업은 AI 채보 도구가 있는 엔진의 그래픽카드 줄만
+            return WORKER["ai"] and lane != "cpu"
+        return lane != "gpu"
+    # 새 곡(기존 채보)이 AI 작업보다 먼저
+    waiting = sorted((j for j in JOBS.values() if fits(j)), key=lambda j: (bool(j.get("aiOnly")), j["created"]))
     if not waiting:
         return None
     j = waiting[0]
@@ -4035,8 +4061,11 @@ async def api(method, path, headers, body):
         if "avatar" in data:
             WORKER["avatar"] = bool(data.get("avatar"))
         if parts == ["worker", "poll"] and method == "POST":
-            j = claim_job()
-            if not j and data.get("avatar"):         # 곡 작업이 없을 때만 캐릭터 그림 (그림 도구가 있는 엔진만)
+            lane = data.get("lane") if data.get("lane") in ("cpu", "gpu") else None
+            if data.get("fresh"):                    # 엔진이 막 켜짐 → 하다 만 작업은 바로 다시 대기
+                release_claimed()
+            j = claim_job(lane)
+            if not j and data.get("avatar") and lane != "cpu":   # 곡 작업이 없을 때만 캐릭터 그림 (그래픽카드 줄)
                 a = av_claim()
                 if a:
                     return {"job": {"id": a["id"], "kind": "avatar", "avatar": a["avatar"], "title": f"캐릭터: {a['name']}",
@@ -4045,7 +4074,8 @@ async def api(method, path, headers, body):
                                     "refExt": (a.get("ref") or ".jpg").rsplit(".", 1)[-1], "mode": a.get("mode", "all"),
                                     "illust": av_cur_illust(a) if a.get("mode") == "pixel" else None}}
             return {"job": {"id": j["id"], "vid": j["vid"], "title": j["title"], "keepEdited": j["keepEdited"],
-                            "keepTitle": j["keepTitle"], "aiOnly": bool(j.get("aiOnly"))} if j else None}
+                            "keepTitle": j["keepTitle"], "aiOnly": bool(j.get("aiOnly"))} if j else None,
+                    "lanes": True}       # 두 줄로 일하기를 아는 서버 (새 엔진은 이걸 보고 그래픽카드 줄을 따로 켬)
         aj = AVJOBS.get(str(data.get("jobId", "")))
         if aj:
             if parts == ["worker", "progress"] and method == "POST":
